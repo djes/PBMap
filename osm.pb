@@ -706,8 +706,8 @@ Module OSM
                     ;Moved to a new tile ?
                     If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                       Debug "--- New tile"
-                      *TargetTile\x = TileX
-                      *TargetTile\y = TileY
+                      *Drawing\x = TileX
+                      *Drawing\y = TileY
                       Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
                       XY2LatLon(*Drawing, @OSM\TargetLocation)
                       Debug "OSM\TargetTile\x " + StrD(*Drawing\x) + " ; OSM\TargetTile\y "  + StrD(*Drawing\y) 
