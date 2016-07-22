@@ -1,4 +1,4 @@
-﻿;************************************************************** 
+;************************************************************** 
 ; Program:           OSM (OpenStreetMap Module) 
 ; Author:            Thyphoon And Djes
 ; Date:              Mai 17, 2016
@@ -49,6 +49,17 @@ Module OSM
     GetImageThread.i
   EndStructure
   
+  Structure DrawingParameters
+    x.d
+    y.d
+    OSMTileX.i
+    OSMTileY.i
+    OSMZoom.i
+    DeltaX.i
+    DeltaY.i
+    PassNb.i
+  EndStructure  
+  
   Structure TileThread
     GetImageThread.i
     *Tile.Tile
@@ -78,11 +89,9 @@ Module OSM
     Gadget.i                                ; Canvas Gadget Id 
     
     TargetLocation.Location                 ; Latitude and Longitude from focus point
-    TargetTile.Tile                         ; Focus Tile coord
+    *Drawing.DrawingParameters                         ; Focus Tile coord
     
     Position.Pixel                          ; Actual focus Point coords in pixels
-    DeltaX.i
-    DeltaY.i
     MoveStartingPoint.Pixel                       ; Start mouse position coords when dragging the map
     
     ServerURL.s                             ; Web URL ex: http://tile.openstreetmap.org/
@@ -582,7 +591,7 @@ Module OSM
     
   EndProcedure  
   
-  Procedure DrawingThread(Null)
+  Procedure DrawingThread(*Drawing.DrawingParameters)
     
     Debug "--------- Main drawing thread ------------"
     OSM\Dirty = #False
@@ -608,7 +617,14 @@ Module OSM
     If OSM\Dirty
       Debug "Something was dirty ! We try again to redraw"
       ;Delay(250)
-      CreateThread(@DrawingThread(), Null)
+      
+      *Drawing\PassNb + 1
+      CreateThread(@DrawingThread(), *Drawing)
+    EndIf
+    
+    *Drawing\PassNb - 1
+    If *Drawing\PassNb = 0
+      FreeMemory(*TargetTile)
     EndIf
     
   EndProcedure
@@ -655,6 +671,7 @@ Module OSM
     Protected MouseX.i, MouseY.i
     Protected OldX.i, OldY.i
     Protected TileX.d, TileY.d
+    Protected *Drawing.DrawingParameters
     
     If IsGadget(OSM\Gadget) And GadgetType(OSM\Gadget) = #PB_GadgetType_Canvas 
       Select Event
@@ -682,20 +699,22 @@ Module OSM
                     ;OSM tile position in tile.decimal
                     TileX = OSM\Position\x / OSM\TileSize
                     TileY = OSM\Position\y / OSM\TileSize
+                    *Drawing = AllocateMemory(SizeOf(*DrawingParameters))
                     ;Pixel shift
-                    OSM\DeltaX = OSM\Position\x - Int(TileX) * OSM\TileSize
-                    OSM\DeltaY = OSM\Position\y - Int(TileY) * OSM\TileSize
+                    *Drawing\DeltaX = OSM\Position\x - Int(TileX) * OSM\TileSize
+                    *Drawing\DeltaY = OSM\Position\y - Int(TileY) * OSM\TileSize
                     ;Moved to a new tile ?
                     If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                       Debug "--- New tile"
-                      OSM\TargetTile\x = TileX
-                      OSM\TargetTile\y = TileY
+                      *TargetTile\x = TileX
+                      *TargetTile\y = TileY
                       Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
-                      XY2LatLon(@OSM\TargetTile, @OSM\TargetLocation)
-                      Debug "OSM\TargetTile\x " + StrD(OSM\TargetTile\x) + " ; OSM\TargetTile\y "  + StrD(OSM\TargetTile\y) 
+                      XY2LatLon(*Drawing, @OSM\TargetLocation)
+                      Debug "OSM\TargetTile\x " + StrD(*Drawing\x) + " ; OSM\TargetTile\y "  + StrD(*Drawing\y) 
                     EndIf
                     OSM\EmergencyQuit = #False
-                    CreateThread(@DrawingThread(), Null)
+                    *Drawing\PassNb = 1
+                    CreateThread(@DrawingThread(), *Drawing)
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
                   EndIf
@@ -783,11 +802,3 @@ If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_System
     EndSelect
   Until Quit = #True
 EndIf
-
-; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 250
-; FirstLine = 231
-; Folding = -----
-; EnableUnicode
-; EnableThread
-; EnableXP
