@@ -28,6 +28,7 @@ DeclareModule OSM
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
+  Declare AddMarker(Latitude.d,Longitude.d,color.l=-1)
 EndDeclareModule
 
 Module OSM 
@@ -74,6 +75,11 @@ Module OSM
     Semaphore.i
   EndStructure
   
+  Structure Marker
+    Location.Location
+    color.l
+  EndStructure
+  
   ;-OSM Structure
   Structure OSM
     Gadget.i                                ; Canvas Gadget Id 
@@ -109,6 +115,8 @@ Module OSM
     MapImageMutex.i                         ; Mutex to lock
     
     List track.Location()                   ;to display a GPX track
+    
+    List Marker.Marker()                    ;to diplay marker
     
   EndStructure
   
@@ -588,8 +596,8 @@ Module OSM
     EndIf 
   EndProcedure
   
-  Procedure Pointer(x.l,y.l,color.l=#Red)
-    color=RGBA(255, 0, 0, 255)
+  Procedure Pointer(x.l,y.l,color=-1)
+    If color=-1:color=RGBA(255, 0, 0, 255):EndIf
     VectorSourceColor(color)
     MovePathCursor(x, y)
     AddPathLine(-8,-16,#PB_Path_Relative)
@@ -602,6 +610,25 @@ Module OSM
     FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
   EndProcedure
   
+  Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1)
+    AddElement(OSM\Marker())
+    OSM\Marker()\Location\Latitude=Latitude
+    OSM\Marker()\Location\Longitude=Longitude
+    OSM\Marker()\color=color
+  EndProcedure
+  
+  Procedure  DrawMarker()
+    Protected Pixel.Pixel
+    ForEach OSM\Marker()
+      If OSM\Marker()\Location\Latitude<>0 And  OSM\Marker()\Location\Longitude<>0
+        getPixelCoorfromLocation(OSM\Marker()\Location,@Pixel)
+        If Pixel\X>0 And Pixel\Y>0 And Pixel\X<GadgetWidth(OSM\Gadget) And Pixel\Y<GadgetHeight(OSM\Gadget)
+          Pointer(Pixel\X,Pixel\Y,OSM\Marker()\color)
+        EndIf 
+      EndIf 
+    Next
+  EndProcedure
+
   Procedure DrawingThread(Null)
     
     Debug "--------- Main drawing thread ------------"
@@ -617,7 +644,9 @@ Module OSM
     LockMutex(OSM\DrawingMutex)
     StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
     DrawTrack()
+    
     Pointer(CenterX, CenterY, #Red)
+    DrawMarker()
     StopVectorDrawing()
     UnlockMutex(OSM\DrawingMutex)
     
@@ -769,6 +798,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #String_0
     #String_1
     #Gdt_LoadGpx
+    #Gdt_AddMarker
   EndEnumeration
   
   Structure Location
@@ -796,6 +826,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#String_0,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#String_1,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
   EndProcedure
   
@@ -820,7 +851,8 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#String_0, 600, 230, 90, 20, "")
     TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
     StringGadget(#String_1, 600, 250, 90, 20, "")
-    ButtonGadget(#Gdt_LoadGpx, 530, 280, 150, 30, "Load GPX")
+    ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
+    ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -842,6 +874,8 @@ CompilerIf #PB_Compiler_IsMainFile
               OSM::SetZoom( - 1)
             Case #Gdt_LoadGpx
               OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
+            Case #Gdt_AddMarker
+            OSM:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -850,9 +884,9 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
 CompilerEndIf
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 749
-; FirstLine = 713
-; Folding = -----
+; CursorPosition = 598
+; FirstLine = 591
+; Folding = ------
 ; EnableUnicode
 ; EnableThread
 ; EnableXP
