@@ -114,7 +114,7 @@ Module OSM
   
   Global OSM.OSM, Null.i
   
-    ;- *** CURL specific ***
+  ;- *** CURL specific ***
   
   Global *ReceiveHTTPToMemoryBuffer, ReceiveHTTPToMemoryBufferPtr.i, ReceivedData.s
   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
@@ -213,7 +213,7 @@ Module OSM
     
   EndProcedure
   ;- ***
-
+  
   Procedure InitOSM()
     
     Protected Result.i
@@ -236,17 +236,17 @@ Module OSM
     
     Global Proxy = #True
     
-;- => Use this to customise your preferences    
-;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
-;     If Proxy
-;       PreferenceGroup("PROXY")
-;       WritePreferenceString("ProxyURL", "myproxy.fr")
-;       WritePreferenceString("ProxyPort", "myproxyport")
-;       WritePreferenceString("ProxyUser", "myproxyname")     
-;     EndIf
-;     If Result 
-;       ClosePreferences()    
-;     EndIf
+    ;- => Use this to customise your preferences    
+    ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
+    ;     If Proxy
+    ;       PreferenceGroup("PROXY")
+    ;       WritePreferenceString("ProxyURL", "myproxy.fr")
+    ;       WritePreferenceString("ProxyPort", "myproxyport")
+    ;       WritePreferenceString("ProxyUser", "myproxyname")     
+    ;     EndIf
+    ;     If Result 
+    ;       ClosePreferences()    
+    ;     EndIf
     
     Result = OpenPreferences(GetHomeDirectory() + "OSM.prefs")
     If Proxy
@@ -489,10 +489,10 @@ Module OSM
     If OSM\EmergencyQuit = 0 ;Quit before drawing
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
       If IsImage(*Tile\nImage)    
-         MovePathCursor(x,y)
-         DrawVectorImage(ImageID(*Tile\nImage))
-         MovePathCursor(x,y)
-         DrawVectorText(Str(x) + ", " + Str(y))
+        MovePathCursor(x,y)
+        DrawVectorImage(ImageID(*Tile\nImage))
+        MovePathCursor(x,y)
+        DrawVectorText(Str(x) + ", " + Str(y))
       Else
         Debug "Image missing"
         OSM\Dirty = #True ;Signal that this image is missing so we should have to redraw
@@ -541,7 +541,7 @@ Module OSM
             \nImage = GetTileFromMem(\OSMZoom, \OSMTileX, \OSMTileY)
             If \nImage = -1 
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-
+              
               OSM\TilesThreads()\GetImageThread = \GetImageThread
             EndIf
             Debug " Creating get image thread nb " + Str(\GetImageThread)
@@ -565,10 +565,10 @@ Module OSM
     
   EndProcedure
   
-    Procedure  DrawTrack()
-      Protected Pixel.Pixel
-      Protected Location.Location
-      If ListSize(OSM\track())>0
+  Procedure  DrawTrack()
+    Protected Pixel.Pixel
+    Protected Location.Location
+    If ListSize(OSM\track())>0
       
       ForEach OSM\track()
         If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
@@ -578,14 +578,14 @@ Module OSM
           Else
             AddPathLine(Pixel\X,Pixel\Y)
           EndIf 
-      
+          
         EndIf 
         
       Next
-       VectorSourceColor(RGBA(0, 255, 0, 150))
-       StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
-       
-      EndIf 
+      VectorSourceColor(RGBA(0, 255, 0, 150))
+      StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
+      
+    EndIf 
   EndProcedure
   
   Procedure Pointer(x.l,y.l,color.l=#Red)
@@ -749,89 +749,109 @@ Module OSM
 EndModule
 
 
-;Demonstration
+;-Exemple
 CompilerIf #PB_Compiler_IsMainFile 
-Enumeration
-  #Window_0
-  #Map
-  #Button_0
-  #Button_1
-  #Button_2
-  #Button_3
-  #Button_4
-  #Button_5
-  #Combo_0
-  #Text_0
-  #Text_1
-  #Text_2
-  #Text_3
-  #Text_4
-  #String_0
-  #String_1
-  #Gdt_LoadGpx
-EndEnumeration
-
+  Enumeration
+    #Window_0
+    #Map
+    #Button_0
+    #Button_1
+    #Button_2
+    #Button_3
+    #Button_4
+    #Button_5
+    #Combo_0
+    #Text_0
+    #Text_1
+    #Text_2
+    #Text_3
+    #Text_4
+    #String_0
+    #String_1
+    #Gdt_LoadGpx
+  EndEnumeration
+  
   Structure Location
     Longitude.d
     Latitude.d
   EndStructure
-
-Procedure UpdateLocation(*Location.Location)
-  SetGadgetText(#String_0,StrD(*Location\Latitude))
-  SetGadgetText(#String_1,StrD(*Location\Longitude))
-  ProcedureReturn 0
-EndProcedure
-;- Main
-If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered )
   
-  OSM::InitOSM()
-  LoadFont(0, "Wingdings", 12)
-  LoadFont(1, "Arial", 12, #PB_Font_Bold)
+  Procedure UpdateLocation(*Location.Location)
+    SetGadgetText(#String_0,StrD(*Location\Latitude))
+    SetGadgetText(#String_1,StrD(*Location\Longitude))
+    ProcedureReturn 0
+  EndProcedure
   
-  OSM::OSMGadget(#Map, 10, 10, 512, 512)
+  Procedure ResizeAll()
+    ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
+    ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_0,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_1,WindowWidth(#Window_0)-90,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_2,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_3,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_2,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_4,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_5,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_3,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#String_0,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#String_1,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+  EndProcedure
   
-  TextGadget(#Text_1, 530, 50, 60, 15, "Movements : ")
-  ButtonGadget(#Button_0, 550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Button_0, FontID(0)) 
-  ButtonGadget(#Button_1, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Button_1, FontID(0)) 
-  ButtonGadget(#Button_2, 580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Button_2, FontID(0)) 
-  ButtonGadget(#Button_3, 580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Button_3, FontID(0)) 
-  TextGadget(#Text_2, 530, 160, 60, 15, "Zoom : ")
-  ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
-  ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
-  TextGadget(#Text_3, 530, 230, 60, 15, "Latitude : ")
-  StringGadget(#String_0, 600, 230, 90, 20, "")
-  TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
-  StringGadget(#String_1, 600, 250, 90, 20, "")
-  ButtonGadget(#Gdt_LoadGpx, 530, 280, 150, 30, "Load GPX")
-  
-  Define Event.i, Gadget.i, Quit.b = #False
-  Define pfValue.d
-  OSM::SetLocation(49.04599, 2.03347, 17)
-  OSM::SetCallBackLocation(@UpdateLocation())
-  
-  Repeat
-    Event = WaitWindowEvent()
+  ;- Main
+  If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget )
     
-    OSM::Event(Event)
-    Select Event
-      Case #PB_Event_CloseWindow : Quit = 1
-      Case #PB_Event_Gadget ;{
-        Gadget = EventGadget()
-        Select Gadget
-          Case #Button_4
-            OSM::SetZoom(1)
-          Case #Button_5
-            OSM::SetZoom( - 1)
-          Case #Gdt_LoadGpx
-            OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
-        EndSelect
-    EndSelect
-  Until Quit = #True
-EndIf
+    OSM::InitOSM()
+    LoadFont(0, "Wingdings", 12)
+    LoadFont(1, "Arial", 12, #PB_Font_Bold)
+    
+    OSM::OSMGadget(#Map, 10, 10, 512, 512)
+    
+    TextGadget(#Text_1, 530, 50, 60, 15, "Movements : ")
+    ButtonGadget(#Button_0, 550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Button_0, FontID(0)) 
+    ButtonGadget(#Button_1, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Button_1, FontID(0)) 
+    ButtonGadget(#Button_2, 580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Button_2, FontID(0)) 
+    ButtonGadget(#Button_3, 580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Button_3, FontID(0)) 
+    TextGadget(#Text_2, 530, 160, 60, 15, "Zoom : ")
+    ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
+    ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
+    TextGadget(#Text_3, 530, 230, 60, 15, "Latitude : ")
+    StringGadget(#String_0, 600, 230, 90, 20, "")
+    TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
+    StringGadget(#String_1, 600, 250, 90, 20, "")
+    ButtonGadget(#Gdt_LoadGpx, 530, 280, 150, 30, "Load GPX")
+    
+    Define Event.i, Gadget.i, Quit.b = #False
+    Define pfValue.d
+    OSM::SetLocation(49.04599, 2.03347, 17)
+    OSM::SetCallBackLocation(@UpdateLocation())
+    
+    Repeat
+      Event = WaitWindowEvent()
+      
+      OSM::Event(Event)
+      Select Event
+        Case #PB_Event_CloseWindow : Quit = 1
+        Case #PB_Event_Gadget ;{
+          Gadget = EventGadget()
+          Select Gadget
+            Case #Button_4
+              OSM::SetZoom(1)
+            Case #Button_5
+              OSM::SetZoom( - 1)
+            Case #Gdt_LoadGpx
+              OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
+          EndSelect
+        Case #PB_Event_SizeWindow
+          ResizeAll()
+      EndSelect
+    Until Quit = #True
+  EndIf
 CompilerEndIf
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 726
-; FirstLine = 683
+; CursorPosition = 749
+; FirstLine = 713
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
