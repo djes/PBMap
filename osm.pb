@@ -26,6 +26,7 @@ DeclareModule OSM
   Declare SetLocation(latitude.d, longitude.d, zoom = 15)
   Declare DrawingThread(Null)
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
+  Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
 EndDeclareModule
 
@@ -79,6 +80,8 @@ Module OSM
     
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     TargetTile.Tile                         ; Focus Tile coord
+    
+    CallBackLocation.i                     ; @Procedure(latitude.d,lontitude.d)
     
     Position.Pixel                          ; Actual focus Point coords in pixels
     DeltaX.i
@@ -666,6 +669,10 @@ Module OSM
     
   EndProcedure
   
+  
+  Procedure SetCallBackLocation(CallBackLocation.i)
+    OSM\CallBackLocation=CallBackLocation
+  EndProcedure
   Procedure Event(Event.l)
     
     Protected Gadget.i
@@ -715,6 +722,10 @@ Module OSM
                     CreateThread(@DrawingThread(), Null)
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
+                    ;If CallBackLocation send Location to function
+                    If OSM\CallBackLocation>0
+                      CallFunctionFast(OSM\CallBackLocation,@OSM\TargetLocation)
+                    EndIf 
                   EndIf
                 Case #PB_EventType_LeftButtonUp
                   OSM\MoveStartingPoint\x = - 1
@@ -760,6 +771,16 @@ Enumeration
   #Gdt_LoadGpx
 EndEnumeration
 
+  Structure Location
+    Longitude.d
+    Latitude.d
+  EndStructure
+
+Procedure UpdateLocation(*Location.Location)
+  SetGadgetText(#String_0,StrD(*Location\Latitude))
+  SetGadgetText(#String_1,StrD(*Location\Longitude))
+  ProcedureReturn 0
+EndProcedure
 ;- Main
 If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered )
   
@@ -786,7 +807,7 @@ If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_System
   Define Event.i, Gadget.i, Quit.b = #False
   Define pfValue.d
   OSM::SetLocation(49.04599, 2.03347, 17)
-
+  OSM::SetCallBackLocation(@UpdateLocation())
   
   Repeat
     Event = WaitWindowEvent()
@@ -809,8 +830,8 @@ If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_System
 EndIf
 CompilerEndIf
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 783
-; FirstLine = 759
+; CursorPosition = 726
+; FirstLine = 683
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
