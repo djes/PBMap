@@ -458,7 +458,7 @@ Module OSM
     
     LockMutex(OSM\LoadingMutex)
     
-    If OSM\EmergencyQuit = 0
+    If OSM\EmergencyQuit = #False
       LockMutex(OSM\MemCache\Mutex) 
       *CacheImagePtr = AddElement(OSM\MemCache\Image())
       Debug " CacheImagePtr : " + Str(*CacheImagePtr)
@@ -468,11 +468,11 @@ Module OSM
       OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
       UnlockMutex(OSM\MemCache\Mutex)
       nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
-      If nImage = -1 And OSM\EmergencyQuit = 0
+      If nImage = -1 And OSM\EmergencyQuit = #False
         nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
       EndIf
       LockMutex(OSM\MemCache\Mutex)
-      If nImage <> -1 And OSM\EmergencyQuit = 0
+      If nImage <> -1 And OSM\EmergencyQuit = #False
         Debug "Adding tile " + Str(nImage) + " to mem cache"
         ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
         OSM\MemCache\Image()\nImage = nImage
@@ -494,10 +494,12 @@ Module OSM
     Protected x = *Tile\x ; - OSM\DeltaX
     Protected y = *Tile\y ; - OSM\DeltaY
     
-    Debug "  Drawing tile nb " + " X : " + Str(x) + " Y : " + Str(y)
+    Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
+    Debug "  at coords " + Str(x) + "," + Str(y)
+
     
     LockMutex(OSM\DrawingMutex)
-    If OSM\EmergencyQuit = 0 ;Quit before drawing
+    If OSM\EmergencyQuit = #False ;Quit before drawing
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
       If IsImage(*Tile\nImage)    
         MovePathCursor(x, y)
@@ -668,11 +670,11 @@ Module OSM
     ;*** Creates a drawing thread and fill parameters
     *Drawing = AllocateMemory(SizeOf(DrawingParameters))
     ;Convert X, Y in tile.decimal into real pixels
-    *Drawing\x = OSM\TargetTile\x ;* OSM\TileSize
-    *Drawing\y = OSM\TargetTile\y ;* OSM\TileSize
+    *Drawing\x = OSM\TargetTile\x 
+    *Drawing\y = OSM\TargetTile\y
     ;Position in the tile
-    *Drawing\DeltaX = *Drawing\x - Int(*Drawing\x) * OSM\TileSize
-    *Drawing\DeltaY = *Drawing\y - Int(*Drawing\y) * OSM\TileSize
+    *Drawing\DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
+    *Drawing\DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
     OSM\EmergencyQuit = #False
     *Drawing\PassNb = 1
     CreateThread(@DrawingThread(), *Drawing)                    
@@ -697,11 +699,11 @@ Module OSM
     ;*** Creates a drawing thread and fill parameters
     *Drawing = AllocateMemory(SizeOf(DrawingParameters))
     ;Convert X, Y in tile.decimal into real pixels
-    *Drawing\x = OSM\TargetTile\x ;* OSM\TileSize
-    *Drawing\y = OSM\TargetTile\y ;* OSM\TileSize
+    *Drawing\x = OSM\TargetTile\x
+    *Drawing\y = OSM\TargetTile\y
     ;Position in the tile
-    *Drawing\DeltaX = *Drawing\x - Int(*Drawing\x) * OSM\TileSize
-    *Drawing\DeltaY = *Drawing\y - Int(*Drawing\y) * OSM\TileSize
+    *Drawing\DeltaX = *Drawing\x * OSM\TileSize - Int(*Drawing\x) * OSM\TileSize
+    *Drawing\DeltaY = *Drawing\y * OSM\TileSize - Int(*Drawing\y) * OSM\TileSize
     OSM\EmergencyQuit = #False
     *Drawing\PassNb = 1
     CreateThread(@DrawingThread(), *Drawing)                    
@@ -734,7 +736,7 @@ Module OSM
                 Case #PB_EventType_MouseMove
                   If OSM\MoveStartingPoint\x <> - 1
                     ;Need a refresh
-                    ;OSM\EmergencyQuit = #True
+                    OSM\EmergencyQuit = #True
                     MouseX = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - OSM\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - OSM\MoveStartingPoint\y
                     ;Old move values 
@@ -875,8 +877,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 750
-; FirstLine = 724
+; CursorPosition = 754
+; FirstLine = 726
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
