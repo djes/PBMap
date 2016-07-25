@@ -26,6 +26,7 @@ DeclareModule OSM
   Declare SetLocation(latitude.d, longitude.d, zoom = 15)
   Declare DrawingThread(Null)
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
+  Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
 EndDeclareModule
 
@@ -90,6 +91,8 @@ Module OSM
     
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     *Drawing.DrawingParameters                         ; Focus Tile coord
+    
+    CallBackLocation.i                     ; @Procedure(latitude.d,lontitude.d)
     
     Position.Pixel                          ; Actual focus Point coords in pixels
     MoveStartingPoint.Pixel                       ; Start mouse position coords when dragging the map
@@ -493,15 +496,17 @@ Module OSM
     
     LockMutex(OSM\DrawingMutex)
     If OSM\EmergencyQuit = 0 ;Quit before drawing
-      StartDrawing(CanvasOutput(OSM\Gadget))  
-      If IsImage(*Tile\nImage)          
-        DrawImage(ImageID(*Tile\nImage), x, y)
-        DrawText( x, y, Str(x) + ", " + Str(y))
+      StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
+      If IsImage(*Tile\nImage)    
+         MovePathCursor(x,y)
+         DrawVectorImage(ImageID(*Tile\nImage))
+         MovePathCursor(x,y)
+         DrawVectorText(Str(x) + ", " + Str(y))
       Else
         Debug "Image missing"
         OSM\Dirty = #True ;Signal that this image is missing so we should have to redraw
       EndIf
-      StopDrawing()
+      StopVectorDrawing()
     EndIf
     UnlockMutex(OSM\DrawingMutex)
     
@@ -569,27 +574,42 @@ Module OSM
     
   EndProcedure
   
-  Procedure DrawTrack()
-    
-    Protected Pixel.Pixel
-    Protected Location.Location
-    Protected n.i = 0, x.i, y.i
-    
-    StartDrawing(CanvasOutput(OSM\Gadget))
-    ForEach OSM\track()
-      n=n+1
-      If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
-        getPixelCoorfromLocation(@OSM\track(),@Pixel)
-        x=Pixel\x
-        y=Pixel\y
-        If x>0 And y>0 And x<GadgetWidth(OSM\Gadget) And y<GadgetHeight(OSM\Gadget)
-          Circle(x,y,2,#Green)
-        EndIf
+    Procedure  DrawTrack()
+      Protected Pixel.Pixel
+      Protected Location.Location
+      If ListSize(OSM\track())>0
+      
+      ForEach OSM\track()
+        If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
+          getPixelCoorfromLocation(@OSM\track(),@Pixel)
+          If ListIndex(OSM\track())=0
+            MovePathCursor(Pixel\X,Pixel\Y)
+          Else
+            AddPathLine(Pixel\X,Pixel\Y)
+          EndIf 
+      
+        EndIf 
+        
+      Next
+       VectorSourceColor(RGBA(0, 255, 0, 150))
+       StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
+       
       EndIf 
-    Next
-    StopDrawing()
-    
-  EndProcedure  
+  EndProcedure
+  
+  Procedure Pointer(x.l,y.l,color.l=#Red)
+    color=RGBA(255, 0, 0, 255)
+    VectorSourceColor(color)
+    MovePathCursor(x, y)
+    AddPathLine(-8,-16,#PB_Path_Relative)
+    AddPathCircle(8,0,8,180,0,#PB_Path_Relative)
+    AddPathLine(-8,16,#PB_Path_Relative)
+    ;FillPath(#PB_Path_Preserve) 
+    ;ClipPath(#PB_Path_Preserve)
+    AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
+    VectorSourceColor(color)
+    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
+  EndProcedure
   
   Procedure DrawingThread(*Drawing.DrawingParameters)
     
@@ -604,10 +624,10 @@ Module OSM
     DrawTiles()
     
     LockMutex(OSM\DrawingMutex)
-    StartDrawing(CanvasOutput(OSM\Gadget))
-    ;DrawTrack()
-    Circle(CenterX, CenterY, 5, #Red)
-    StopDrawing()
+    StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
+    DrawTrack()
+    Pointer(CenterX, CenterY, #Red)
+    StopVectorDrawing()
     UnlockMutex(OSM\DrawingMutex)
     
     UnlockMutex(OSM\DrawingThreadMutex)
@@ -665,6 +685,10 @@ Module OSM
     
   EndProcedure
   
+  
+  Procedure SetCallBackLocation(CallBackLocation.i)
+    OSM\CallBackLocation=CallBackLocation
+  EndProcedure
   Procedure Event(Event.l)
     
     Protected Gadget.i
@@ -717,6 +741,10 @@ Module OSM
                     CreateThread(@DrawingThread(), *Drawing)
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
+                    ;If CallBackLocation send Location to function
+                    If OSM\CallBackLocation>0
+                      CallFunctionFast(OSM\CallBackLocation,@OSM\TargetLocation)
+                    EndIf 
                   EndIf
                 Case #PB_EventType_LeftButtonUp
                   OSM\MoveStartingPoint\x = - 1
@@ -739,6 +767,9 @@ Module OSM
   EndProcedure
 EndModule
 
+
+;Demonstration
+CompilerIf #PB_Compiler_IsMainFile 
 Enumeration
   #Window_0
   #Map
@@ -756,8 +787,19 @@ Enumeration
   #Text_4
   #String_0
   #String_1
+  #Gdt_LoadGpx
 EndEnumeration
 
+  Structure Location
+    Longitude.d
+    Latitude.d
+  EndStructure
+
+Procedure UpdateLocation(*Location.Location)
+  SetGadgetText(#String_0,StrD(*Location\Latitude))
+  SetGadgetText(#String_1,StrD(*Location\Longitude))
+  ProcedureReturn 0
+EndProcedure
 ;- Main
 If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered )
   
@@ -779,11 +821,12 @@ If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_System
   StringGadget(#String_0, 600, 230, 90, 20, "")
   TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
   StringGadget(#String_1, 600, 250, 90, 20, "")
+  ButtonGadget(#Gdt_LoadGpx, 530, 280, 150, 30, "Load GPX")
   
   Define Event.i, Gadget.i, Quit.b = #False
   Define pfValue.d
   OSM::SetLocation(49.04599, 2.03347, 17)
-  ;OSM::SetLocation(49.0361165, 2.0456982)
+  OSM::SetCallBackLocation(@UpdateLocation())
   
   Repeat
     Event = WaitWindowEvent()
@@ -798,7 +841,20 @@ If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_System
             OSM::SetZoom(1)
           Case #Button_5
             OSM::SetZoom( - 1)
+          Case #Gdt_LoadGpx
+            OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
         EndSelect
     EndSelect
   Until Quit = #True
 EndIf
+<<<<<<< HEAD
+=======
+CompilerEndIf
+; IDE Options = PureBasic 5.42 LTS (Windows - x86)
+; CursorPosition = 726
+; FirstLine = 683
+; Folding = -----
+; EnableUnicode
+; EnableThread
+; EnableXP
+>>>>>>> refs/remotes/origin/master
