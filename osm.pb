@@ -309,8 +309,8 @@ Module OSM
     Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
     Protected x1.l,y1.l
     
-    ;Protected deltaX = OSM\Position\x - Int(OSM\Drawing\x) * OSM\TileSize  ;Get the position into the tile
-    ;Protected deltaY = OSM\Position\y - Int(OSM\Drawing\y) * OSM\TileSize
+    Protected deltaX = OSM\Position\x - Int(OSM\Drawing\x) * OSM\TileSize  ;Get the position into the tile
+    Protected deltaY = OSM\Position\y - Int(OSM\Drawing\y) * OSM\TileSize
     
     ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
@@ -329,8 +329,8 @@ Module OSM
     mercN = Log(Tan((#PI/4)+(latRad/2)))        ;
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));
     
-    *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1); + deltaX
-    *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1);+ deltaY
+    *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1) - deltaX
+    *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1) - deltaY
   EndProcedure
   
   Procedure LoadGpxFile(file.s)
@@ -595,7 +595,7 @@ Module OSM
       
       ForEach OSM\track()
         If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
-          getPixelCoorfromLocation(@OSM\track(),@Pixel)
+          getPixelCoorfromLocation(@OSM\track(), @Pixel)
           If ListIndex(OSM\track())=0
             MovePathCursor(Pixel\X + DeltaX, Pixel\Y + DeltaY)
           Else
@@ -768,7 +768,7 @@ Module OSM
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
                     ;If CallBackLocation send Location to function
                     If OSM\CallBackLocation>0
-                      CallFunctionFast(OSM\CallBackLocation,@OSM\TargetLocation)
+                      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
                     EndIf 
                   EndIf
                 Case #PB_EventType_LeftButtonUp
@@ -822,10 +822,11 @@ CompilerIf #PB_Compiler_IsMainFile
   EndStructure
   
   Procedure UpdateLocation(*Location.Location)
-    SetGadgetText(#String_0,StrD(*Location\Latitude))
-    SetGadgetText(#String_1,StrD(*Location\Longitude))
+    SetGadgetText(#String_0, StrD(*Location\Latitude))
+    SetGadgetText(#String_1, StrD(*Location\Longitude))
     ProcedureReturn 0
   EndProcedure
+  
   ;- Main
   If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered )
     
@@ -876,8 +877,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 331
-; FirstLine = 328
+; CursorPosition = 332
+; FirstLine = 531
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
