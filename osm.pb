@@ -58,7 +58,11 @@ Module OSM
     OSMZoom.i
     DeltaX.i
     DeltaY.i
-    PassNb.i
+    Mutex.i
+    Semaphore.i
+    Dirty.i
+    PassNB.i
+    End.i
   EndStructure  
   
   Structure TileThread
@@ -91,7 +95,7 @@ Module OSM
     
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     TargetTile.Tile                         ; Focus tile coords
-    *Drawing.DrawingParameters              ; Drawing parameters based on focus point
+    Drawing.DrawingParameters               ; Drawing parameters based on focus point
     
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     
@@ -108,8 +112,7 @@ Module OSM
     MemCache.TileMemCach                    ; Image in memory cache
     List MapImageIndex.ImgMemCach()         ; Index from MemCache\Image() to construct map
     
-    DrawingThreadMutex.i                    ;Only one main drawing thread
-    EmergencyQuit.i
+    Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
     LoadingMutex.i
     DrawingMutex.i
@@ -238,9 +241,10 @@ Module OSM
     OSM\LoadingMutex = CreateMutex()
     OSM\DrawingMutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
-    OSM\DrawingThreadMutex = CreateMutex()
-    OSM\EmergencyQuit = #False
+    OSM\Moving = #False
     OSM\Dirty = #False
+    OSM\Drawing\Semaphore = CreateSemaphore()
+    OSM\Drawing\Mutex = CreateMutex()
     
     ;-*** PROXY
     
@@ -271,6 +275,7 @@ Module OSM
     EndIf
     
     curl_global_init(#CURL_GLOBAL_ALL);
+    CreateThread(@DrawingThread(), @OSM\Drawing)
     
   EndProcedure
   ;- ***
@@ -458,7 +463,7 @@ Module OSM
     
     LockMutex(OSM\LoadingMutex)
     
-    If OSM\EmergencyQuit = #False
+    If OSM\Moving = #False
       LockMutex(OSM\MemCache\Mutex) 
       *CacheImagePtr = AddElement(OSM\MemCache\Image())
       Debug " CacheImagePtr : " + Str(*CacheImagePtr)
@@ -468,11 +473,11 @@ Module OSM
       OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
       UnlockMutex(OSM\MemCache\Mutex)
       nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
-      If nImage = -1 And OSM\EmergencyQuit = #False
+      If nImage = -1 And OSM\Moving = #False
         nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
       EndIf
       LockMutex(OSM\MemCache\Mutex)
-      If nImage <> -1 And OSM\EmergencyQuit = #False
+      If nImage <> -1 And OSM\Moving = #False
         Debug "Adding tile " + Str(nImage) + " to mem cache"
         ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
         OSM\MemCache\Image()\nImage = nImage
@@ -496,10 +501,9 @@ Module OSM
     
     Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
     Debug "  at coords " + Str(x) + "," + Str(y)
-
     
     LockMutex(OSM\DrawingMutex)
-    If OSM\EmergencyQuit = #False ;Quit before drawing
+    If OSM\Moving = #False ;Quit before drawing
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
       If IsImage(*Tile\nImage)    
         MovePathCursor(x, y)
@@ -508,7 +512,7 @@ Module OSM
         DrawVectorText(Str(x) + ", " + Str(y))
       Else
         Debug "Image missing"
-        OSM\Dirty = #True ;Signal that this image is missing so we should have to redraw
+        OSM\Drawing\Dirty = #True ;Signal that this image is missing so we should have to redraw
       EndIf
       StopVectorDrawing()
     EndIf
@@ -534,7 +538,7 @@ Module OSM
     For y = - ny To ny
       For x = - nx To nx
         
-        If OSM\EmergencyQuit
+        If OSM\Moving
           Break 2
         EndIf
         
@@ -622,70 +626,69 @@ Module OSM
   
   Procedure DrawingThread(*Drawing.DrawingParameters)
     
-    Debug "--------- Main drawing thread ------------"
-    OSM\Dirty = #False
-    
-    LockMutex(OSM\DrawingThreadMutex) ; Only one main drawing thread at once
-    
-    Protected CenterX = GadgetWidth(OSM\Gadget) / 2
-    Protected CenterY = GadgetHeight(OSM\Gadget) / 2
-    
-    DrawTiles(*Drawing)
-    
-    LockMutex(OSM\DrawingMutex)
-    StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
-    DrawTrack(*Drawing)
-    Pointer(CenterX, CenterY, #Red)
-    StopVectorDrawing()
-    UnlockMutex(OSM\DrawingMutex)
-    
-    UnlockMutex(OSM\DrawingThreadMutex)
-    
-    ;- Redraw
-    ;If something was not correctly drawn, redraw after a while
-    If OSM\Dirty And OSM\EmergencyQuit = #False
-      Debug "Something was dirty ! We try again to redraw"
-      ;Delay(250)
-      *Drawing\PassNb + 1
-      CreateThread(@DrawingThread(), *Drawing)
-    EndIf
-    
-    *Drawing\PassNb - 1
-    If *Drawing\PassNb = 0
-      FreeMemory(*Drawing)
-    EndIf
+    Repeat
+      
+      WaitSemaphore(OSM\Drawing\Semaphore)
+      
+      Debug "--------- Main drawing thread ------------"
+      
+      LockMutex(OSM\Drawing\Mutex) ; Only one main drawing thread at once
+      
+      OSM\Drawing\Dirty = #False
+      
+      Protected CenterX = GadgetWidth(OSM\Gadget) / 2
+      Protected CenterY = GadgetHeight(OSM\Gadget) / 2
+      
+      DrawTiles(*Drawing)
+      
+      LockMutex(OSM\DrawingMutex)
+      StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
+      DrawTrack(*Drawing)
+      Pointer(CenterX, CenterY, #Red)
+      StopVectorDrawing()
+      UnlockMutex(OSM\DrawingMutex)
+           
+      ;- Redraw
+      ;If something was not correctly drawn, redraw after a while
+      If OSM\Drawing\Dirty And OSM\Moving = #False
+        Debug "Something was dirty ! We try again to redraw"
+        ;Delay(250)
+        OSM\Drawing\PassNb + 1
+        SignalSemaphore(OSM\Drawing\Semaphore)
+      EndIf
+      
+      UnlockMutex(OSM\Drawing\Mutex)
+      
+    Until OSM\Drawing\End
     
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15)
-    
-    Protected *Drawing.DrawingParameters
-    
+       
     If zoom > OSM\ZoomMax : zoom = OSM\ZoomMax : EndIf
     If zoom < OSM\ZoomMin : zoom = OSM\ZoomMin : EndIf
     OSM\Zoom = zoom
     OSM\TargetLocation\Latitude = latitude
     OSM\TargetLocation\Longitude = longitude
     LatLon2XY(@OSM\TargetLocation, @OSM\TargetTile)
-    ;*** Creates a drawing thread and fill parameters
-    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
     ;Convert X, Y in tile.decimal into real pixels
-    *Drawing\x = OSM\TargetTile\x 
-    *Drawing\y = OSM\TargetTile\y
+    OSM\Position\X = OSM\TargetTile\X * OSM\TileSize
+    OSM\Position\Y = OSM\TargetTile\Y * OSM\TileSize 
+    ;*** Creates a drawing thread and fill parameters
+    LockMutex(OSM\Drawing\Mutex)
+    OSM\Drawing\x = OSM\TargetTile\x
+    OSM\Drawing\y = OSM\TargetTile\y
     ;Position in the tile
-    *Drawing\DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
-    *Drawing\DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
-    OSM\EmergencyQuit = #False
-    *Drawing\PassNb = 1
-    CreateThread(@DrawingThread(), *Drawing)                    
+    OSM\Drawing\DeltaX = OSM\Drawing\x * OSM\TileSize - (Int(OSM\Drawing\x) * OSM\TileSize)
+    OSM\Drawing\DeltaY = OSM\Drawing\y * OSM\TileSize - (Int(OSM\Drawing\y) * OSM\TileSize)
+    UnlockMutex(OSM\Drawing\Mutex)
+    SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
     
   EndProcedure
   
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
-    
-    Protected *Drawing.DrawingParameters
-    
+     
     Select mode
       Case #PB_Relative
         OSM\Zoom = OSM\Zoom + zoom
@@ -696,17 +699,17 @@ Module OSM
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     LatLon2XY(@OSM\TargetLocation, @OSM\TargetTile)
+    OSM\Position\X = OSM\TargetTile\X * OSM\TileSize
+    OSM\Position\Y = OSM\TargetTile\Y * OSM\TileSize 
     ;*** Creates a drawing thread and fill parameters
-    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
-    ;Convert X, Y in tile.decimal into real pixels
-    *Drawing\x = OSM\TargetTile\x
-    *Drawing\y = OSM\TargetTile\y
+    LockMutex(OSM\Drawing\Mutex)
+    OSM\Drawing\x = OSM\TargetTile\x
+    OSM\Drawing\y = OSM\TargetTile\y
     ;Position in the tile
-    *Drawing\DeltaX = *Drawing\x * OSM\TileSize - Int(*Drawing\x) * OSM\TileSize
-    *Drawing\DeltaY = *Drawing\y * OSM\TileSize - Int(*Drawing\y) * OSM\TileSize
-    OSM\EmergencyQuit = #False
-    *Drawing\PassNb = 1
-    CreateThread(@DrawingThread(), *Drawing)                    
+    OSM\Drawing\DeltaX = OSM\Drawing\x * OSM\TileSize - (Int(OSM\Drawing\x) * OSM\TileSize)
+    OSM\Drawing\DeltaY = OSM\Drawing\y * OSM\TileSize - (Int(OSM\Drawing\y) * OSM\TileSize)
+    UnlockMutex(OSM\Drawing\Mutex)
+    SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
     
   EndProcedure
@@ -736,7 +739,7 @@ Module OSM
                 Case #PB_EventType_MouseMove
                   If OSM\MoveStartingPoint\x <> - 1
                     ;Need a refresh
-                    OSM\EmergencyQuit = #True
+                    OSM\Moving = #True
                     MouseX = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - OSM\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - OSM\MoveStartingPoint\y
                     ;Old move values 
@@ -745,26 +748,26 @@ Module OSM
                     ;New move values
                     OSM\Position\x - MouseX
                     OSM\Position\y - MouseY
-                    ;-*** Creates a drawing thread and fill parameters
-                    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
+                    ;-*** Sill parameters and signal the drawing thread
+                    LockMutex(OSM\Drawing\Mutex)
                     ;OSM tile position in tile.decimal
-                    *Drawing\x = OSM\Position\x / OSM\TileSize
-                    *Drawing\y = OSM\Position\y / OSM\TileSize
+                    OSM\Drawing\x = OSM\Position\x / OSM\TileSize
+                    OSM\Drawing\y = OSM\Position\y / OSM\TileSize
                     ;Pixel shift
-                    *Drawing\DeltaX = OSM\Position\x - Int(*Drawing\x) * OSM\TileSize
-                    *Drawing\DeltaY = OSM\Position\y - Int(*Drawing\y) * OSM\TileSize
+                    OSM\Drawing\DeltaX = OSM\Position\x - Int(OSM\Drawing\x) * OSM\TileSize
+                    OSM\Drawing\DeltaY = OSM\Position\y - Int(OSM\Drawing\y) * OSM\TileSize
                     ;Moved to a new tile ?
                     ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                     ;Debug "--- New tile"
                     ;*Drawing\x = TileX
                     ;*Drawing\y = TileY
                     Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
-                    XY2LatLon(*Drawing, @OSM\TargetLocation)
-                    Debug "OSM\TargetTile\x " + StrD(*Drawing\x) + " ; OSM\TargetTile\y "  + StrD(*Drawing\y) 
+                    XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
+                    Debug "OSM\TargetTile\x " + StrD(OSM\Drawing\x) + " ; OSM\TargetTile\y "  + StrD(OSM\Drawing\y) 
                     ;EndIf
-                    OSM\EmergencyQuit = #False
-                    *Drawing\PassNb = 1
-                    CreateThread(@DrawingThread(), *Drawing)
+                    OSM\Drawing\PassNb = 1
+                    UnlockMutex(OSM\Drawing\Mutex)
+                    SignalSemaphore(OSM\Drawing\Semaphore)
                     ;- ***
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
@@ -774,6 +777,7 @@ Module OSM
                     EndIf 
                   EndIf
                 Case #PB_EventType_LeftButtonUp
+                  OSM\Moving = #False
                   OSM\MoveStartingPoint\x = - 1
                   OSM\TargetTile\x = OSM\Position\x / OSM\TileSize
                   OSM\TargetTile\y = OSM\Position\y / OSM\TileSize
@@ -877,8 +881,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 754
-; FirstLine = 726
+; CursorPosition = 659
+; FirstLine = 626
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
