@@ -241,7 +241,6 @@ Module OSM
     OSM\LoadingMutex = CreateMutex()
     OSM\DrawingMutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
-    OSM\Moving = #False
     OSM\Dirty = #False
     OSM\Drawing\Semaphore = CreateSemaphore()
     OSM\Drawing\Mutex = CreateMutex()
@@ -463,32 +462,30 @@ Module OSM
     
     LockMutex(OSM\LoadingMutex)
     
-    If OSM\Moving = #False
-      LockMutex(OSM\MemCache\Mutex) 
-      *CacheImagePtr = AddElement(OSM\MemCache\Image())
-      Debug " CacheImagePtr : " + Str(*CacheImagePtr)
-      OSM\MemCache\Image()\xTile = *Tile\OSMTileX
-      OSM\MemCache\Image()\yTile = *Tile\OSMTileY
-      OSM\MemCache\Image()\Zoom = *Tile\OSMZoom
-      OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
-      UnlockMutex(OSM\MemCache\Mutex)
-      nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
-      If nImage = -1 And OSM\Moving = #False
-        nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
-      EndIf
-      LockMutex(OSM\MemCache\Mutex)
-      If nImage <> -1 And OSM\Moving = #False
-        Debug "Adding tile " + Str(nImage) + " to mem cache"
-        ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
-        OSM\MemCache\Image()\nImage = nImage
-        Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
-      Else
-        Debug "Error GetImageThread procedure, tile not loaded - Zoom:" + Str(*Tile\OSMZoom) + " X:" + Str(*Tile\OSMTileX) + " Y:" + Str(*Tile\OSMTileY)
-        DeleteElement(OSM\MemCache\Image())
-        nImage = -1
-      EndIf
-      UnlockMutex(OSM\MemCache\Mutex)
+    LockMutex(OSM\MemCache\Mutex) 
+    *CacheImagePtr = AddElement(OSM\MemCache\Image())
+    Debug " CacheImagePtr : " + Str(*CacheImagePtr)
+    OSM\MemCache\Image()\xTile = *Tile\OSMTileX
+    OSM\MemCache\Image()\yTile = *Tile\OSMTileY
+    OSM\MemCache\Image()\Zoom = *Tile\OSMZoom
+    OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
+    UnlockMutex(OSM\MemCache\Mutex)
+    nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
+    If nImage = -1
+      nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
     EndIf
+    LockMutex(OSM\MemCache\Mutex)
+    If nImage <> -1
+      Debug "Adding tile " + Str(nImage) + " to mem cache"
+      ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
+      OSM\MemCache\Image()\nImage = nImage
+      Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
+    Else
+      Debug "Error GetImageThread procedure, tile not loaded - Zoom:" + Str(*Tile\OSMZoom) + " X:" + Str(*Tile\OSMTileX) + " Y:" + Str(*Tile\OSMTileY)
+      DeleteElement(OSM\MemCache\Image())
+      nImage = -1
+    EndIf
+    UnlockMutex(OSM\MemCache\Mutex)
     *Tile\nImage = nImage
     UnlockMutex(OSM\LoadingMutex)
     
@@ -503,19 +500,17 @@ Module OSM
     Debug "  at coords " + Str(x) + "," + Str(y)
     
     LockMutex(OSM\DrawingMutex)
-    If OSM\Moving = #False ;Quit before drawing
-      StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
-      If IsImage(*Tile\nImage)    
-        MovePathCursor(x, y)
-        DrawVectorImage(ImageID(*Tile\nImage))
-        MovePathCursor(x, y)
-        DrawVectorText(Str(x) + ", " + Str(y))
-      Else
-        Debug "Image missing"
-        OSM\Drawing\Dirty = #True ;Signal that this image is missing so we should have to redraw
-      EndIf
-      StopVectorDrawing()
+    StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
+    If IsImage(*Tile\nImage)    
+      MovePathCursor(x, y)
+      DrawVectorImage(ImageID(*Tile\nImage))
+      MovePathCursor(x, y)
+      DrawVectorText(Str(x) + ", " + Str(y))
+    Else
+      Debug "Image missing"
+      OSM\Drawing\Dirty = #True ;Signal that this image is missing so we should have to redraw
     EndIf
+    StopVectorDrawing()
     UnlockMutex(OSM\DrawingMutex)
     
   EndProcedure
@@ -538,9 +533,10 @@ Module OSM
     For y = - ny To ny
       For x = - nx To nx
         
-        If OSM\Moving
-          Break 2
-        EndIf
+        ;Was quiting the loop if a move occured, giving maybe smoother movement
+        ;If OSM\Moving
+        ;  Break 2
+        ;EndIf
         
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
@@ -633,24 +629,21 @@ Module OSM
       Debug "--------- Main drawing thread ------------"
       
       LockMutex(OSM\Drawing\Mutex) ; Only one main drawing thread at once
-      
       OSM\Drawing\Dirty = #False
-      
       Protected CenterX = GadgetWidth(OSM\Gadget) / 2
       Protected CenterY = GadgetHeight(OSM\Gadget) / 2
       
       DrawTiles(*Drawing)
-      
       LockMutex(OSM\DrawingMutex)
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
       DrawTrack(*Drawing)
       Pointer(CenterX, CenterY, #Red)
       StopVectorDrawing()
       UnlockMutex(OSM\DrawingMutex)
-           
+      
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
-      If OSM\Drawing\Dirty And OSM\Moving = #False
+      If OSM\Drawing\Dirty
         Debug "Something was dirty ! We try again to redraw"
         ;Delay(250)
         OSM\Drawing\PassNb + 1
@@ -659,12 +652,13 @@ Module OSM
       
       UnlockMutex(OSM\Drawing\Mutex)
       
+      
     Until OSM\Drawing\End
     
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15)
-       
+    
     If zoom > OSM\ZoomMax : zoom = OSM\ZoomMax : EndIf
     If zoom < OSM\ZoomMin : zoom = OSM\ZoomMin : EndIf
     OSM\Zoom = zoom
@@ -688,7 +682,7 @@ Module OSM
   EndProcedure
   
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
-     
+    
     Select mode
       Case #PB_Relative
         OSM\Zoom = OSM\Zoom + zoom
@@ -738,10 +732,9 @@ Module OSM
                   OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) 
                 Case #PB_EventType_MouseMove
                   If OSM\MoveStartingPoint\x <> - 1
-                    ;Need a refresh
-                    OSM\Moving = #True
                     MouseX = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - OSM\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - OSM\MoveStartingPoint\y
+                    OSM\Moving = #True
                     ;Old move values 
                     OldX = OSM\Position\x 
                     OldY = OSM\Position\y
@@ -759,8 +752,6 @@ Module OSM
                     ;Moved to a new tile ?
                     ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                     ;Debug "--- New tile"
-                    ;*Drawing\x = TileX
-                    ;*Drawing\y = TileY
                     Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
                     Debug "OSM\TargetTile\x " + StrD(OSM\Drawing\x) + " ; OSM\TargetTile\y "  + StrD(OSM\Drawing\y) 
@@ -881,8 +872,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 659
-; FirstLine = 626
+; CursorPosition = 635
+; FirstLine = 614
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
