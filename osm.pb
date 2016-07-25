@@ -90,9 +90,10 @@ Module OSM
     Gadget.i                                ; Canvas Gadget Id 
     
     TargetLocation.Location                 ; Latitude and Longitude from focus point
+    TargetTile.Tile                         ; Focus tile coords
     *Drawing.DrawingParameters              ; Drawing parameters based on focus point
     
-    CallBackLocation.i                     ; @Procedure(latitude.d,lontitude.d)
+    CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     
     Position.Pixel                          ; Actual focus Point coords in pixels
     MoveStartingPoint.Pixel                 ; Start mouse position coords when dragging the map
@@ -112,7 +113,7 @@ Module OSM
     Dirty.i                                 ;To signal that drawing need a refresh
     LoadingMutex.i
     DrawingMutex.i
-    ;CurlMutex.i                             ;seems that I can't thread curl ! :(((((
+    ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     List TilesThreads.TileThread()
     
     MapImageMutex.i                         ; Mutex to lock
@@ -243,7 +244,7 @@ Module OSM
     
     ;-*** PROXY
     
-    Global Proxy = #True
+    Global Proxy = #False
     
     ;- => Use this to customise your preferences    
     ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
@@ -272,7 +273,7 @@ Module OSM
     curl_global_init(#CURL_GLOBAL_ALL);
     
   EndProcedure
-  ;- **
+  ;- ***
   
   Procedure OSMGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
@@ -283,7 +284,7 @@ Module OSM
     EndIf 
   EndProcedure
   
-  
+  ;*** Converts coords to tile.decimal
   Procedure LatLon2XY(*Location.Location, *Tile.Tile)
     Protected n.d = Pow(2.0, OSM\Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
@@ -293,6 +294,7 @@ Module OSM
     Debug "Tile X : " + Str(*Tile\x) + " ; Tile Y : " + Str(*Tile\y)
   EndProcedure
   
+  ;*** Converts tile.decimal to coords
   Procedure XY2LatLon(*Tile.Tile, *Location.Location)
     Protected n.d = Pow(2.0, OSM\Zoom)
     Protected LatitudeRad.d
@@ -306,8 +308,8 @@ Module OSM
     Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
     Protected x1.l,y1.l
     
-    Protected deltaX = OSM\Position\x - Int(OSM\TargetTile\x) * OSM\TileSize  ;Get the position into the tile
-    Protected deltaY = OSM\Position\y - Int(OSM\TargetTile\y) * OSM\TileSize
+    ;Protected deltaX = OSM\Position\x - Int(OSM\TargetTile\x) * OSM\TileSize  ;Get the position into the tile
+    ;Protected deltaY = OSM\Position\y - Int(OSM\TargetTile\y) * OSM\TileSize
     
     ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
@@ -326,8 +328,8 @@ Module OSM
     mercN = Log(Tan((#PI/4)+(latRad/2)))        ;
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));
     
-    *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1) + deltaX
-    *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1) + deltaY
+    *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1); + deltaX
+    *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1);+ deltaY
   EndProcedure
   
   Procedure LoadGpxFile(file.s)
@@ -489,8 +491,8 @@ Module OSM
   
   Procedure DrawTile(*Tile.Tile)
     
-    Protected x = *Tile\x - OSM\DeltaX
-    Protected y = *Tile\y - OSM\DeltaY
+    Protected x = *Tile\x ; - OSM\DeltaX
+    Protected y = *Tile\y ; - OSM\DeltaY
     
     Debug "  Drawing tile nb " + " X : " + Str(x) + " Y : " + Str(y)
     
@@ -498,9 +500,9 @@ Module OSM
     If OSM\EmergencyQuit = 0 ;Quit before drawing
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
       If IsImage(*Tile\nImage)    
-        MovePathCursor(x,y)
+        MovePathCursor(x, y)
         DrawVectorImage(ImageID(*Tile\nImage))
-        MovePathCursor(x,y)
+        MovePathCursor(x, y)
         DrawVectorText(Str(x) + ", " + Str(y))
       Else
         Debug "Image missing"
@@ -516,8 +518,8 @@ Module OSM
     
     Protected x.i, y.i
     
-    Protected tx = Int(OSM\TargetTile\x)  ;Don't forget the Int() !
-    Protected ty = Int(OSM\TargetTile\y)
+    Protected tx = Int(*Drawing\x)  ;Don't forget the Int() !
+    Protected ty = Int(*Drawing\y)
     
     Protected CenterX = GadgetWidth(OSM\Gadget) / 2
     Protected CenterY = GadgetHeight(OSM\Gadget) / 2
@@ -543,8 +545,8 @@ Module OSM
             OSM\TilesThreads()\Tile = *NewTile
             
             ;New tile parameters
-            \x = CenterX + x * OSM\TileSize
-            \y = CenterY + y * OSM\TileSize
+            \x = CenterX + x * OSM\TileSize - *Drawing\DeltaX
+            \y = CenterY + y * OSM\TileSize - *Drawing\DeltaY
             \OSMTileX = tx + x
             \OSMTileY = ty + y
             \OSMZoom  = OSM\Zoom
@@ -579,7 +581,7 @@ Module OSM
     
   EndProcedure
   
-  Procedure  DrawTrack()
+  Procedure  DrawTrack(*Drawing.DrawingParameters)
     Protected Pixel.Pixel
     Protected Location.Location
     If ListSize(OSM\track())>0
@@ -588,9 +590,9 @@ Module OSM
         If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
           getPixelCoorfromLocation(@OSM\track(),@Pixel)
           If ListIndex(OSM\track())=0
-            MovePathCursor(Pixel\X,Pixel\Y)
+            MovePathCursor(Pixel\X + *Drawing\DeltaX, Pixel\Y + *Drawing\DeltaY)
           Else
-            AddPathLine(Pixel\X,Pixel\Y)
+            AddPathLine(Pixel\X + *Drawing\DeltaX, Pixel\Y + *Drawing\DeltaY)
           EndIf 
           
         EndIf 
@@ -630,7 +632,7 @@ Module OSM
     
     LockMutex(OSM\DrawingMutex)
     StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
-    DrawTrack()
+    DrawTrack(*Drawing)
     Pointer(CenterX, CenterY, #Red)
     StopVectorDrawing()
     UnlockMutex(OSM\DrawingMutex)
@@ -642,19 +644,20 @@ Module OSM
     If OSM\Dirty And OSM\EmergencyQuit = #False
       Debug "Something was dirty ! We try again to redraw"
       ;Delay(250)
-      
       *Drawing\PassNb + 1
       CreateThread(@DrawingThread(), *Drawing)
     EndIf
     
     *Drawing\PassNb - 1
     If *Drawing\PassNb = 0
-      FreeMemory(*TargetTile)
+      FreeMemory(*Drawing)
     EndIf
     
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15)
+    
+    Protected *Drawing.DrawingParameters
     
     If zoom > OSM\ZoomMax : zoom = OSM\ZoomMax : EndIf
     If zoom < OSM\ZoomMin : zoom = OSM\ZoomMin : EndIf
@@ -662,15 +665,24 @@ Module OSM
     OSM\TargetLocation\Latitude = latitude
     OSM\TargetLocation\Longitude = longitude
     LatLon2XY(@OSM\TargetLocation, @OSM\TargetTile)
-    OSM\Position\x = OSM\TargetTile\x * OSM\TileSize ;Convert X, Y in tile.decimal into real pixels
-    OSM\Position\y = OSM\TargetTile\y * OSM\TileSize
-    OSM\DeltaX = OSM\Position\x - Int(OSM\Position\x / OSM\TileSize) * OSM\TileSize
-    OSM\DeltaY = OSM\Position\y - Int(OSM\Position\y / OSM\TileSize) * OSM\TileSize
-    CreateThread(@DrawingThread(), Null)
+    ;*** Creates a drawing thread and fill parameters
+    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
+    ;Convert X, Y in tile.decimal into real pixels
+    *Drawing\x = OSM\TargetTile\x ;* OSM\TileSize
+    *Drawing\y = OSM\TargetTile\y ;* OSM\TileSize
+    ;Position in the tile
+    *Drawing\DeltaX = *Drawing\x - Int(*Drawing\x) * OSM\TileSize
+    *Drawing\DeltaY = *Drawing\y - Int(*Drawing\y) * OSM\TileSize
+    OSM\EmergencyQuit = #False
+    *Drawing\PassNb = 1
+    CreateThread(@DrawingThread(), *Drawing)                    
+    ;***
     
   EndProcedure
   
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
+    
+    Protected *Drawing.DrawingParameters
     
     Select mode
       Case #PB_Relative
@@ -682,11 +694,18 @@ Module OSM
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     LatLon2XY(@OSM\TargetLocation, @OSM\TargetTile)
-    OSM\Position\x = OSM\TargetTile\x * OSM\TileSize ;Convert X, Y in tile.decimal into real pixels
-    OSM\Position\y = OSM\TargetTile\y * OSM\TileSize
-    OSM\DeltaX = OSM\Position\x - Int(OSM\Position\x / OSM\TileSize) * OSM\TileSize
-    OSM\DeltaY = OSM\Position\y - Int(OSM\Position\y / OSM\TileSize) * OSM\TileSize
-    CreateThread(@DrawingThread(), Null)
+    ;*** Creates a drawing thread and fill parameters
+    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
+    ;Convert X, Y in tile.decimal into real pixels
+    *Drawing\x = OSM\TargetTile\x ;* OSM\TileSize
+    *Drawing\y = OSM\TargetTile\y ;* OSM\TileSize
+    ;Position in the tile
+    *Drawing\DeltaX = *Drawing\x - Int(*Drawing\x) * OSM\TileSize
+    *Drawing\DeltaY = *Drawing\y - Int(*Drawing\y) * OSM\TileSize
+    OSM\EmergencyQuit = #False
+    *Drawing\PassNb = 1
+    CreateThread(@DrawingThread(), *Drawing)                    
+    ;***
     
   EndProcedure
   
@@ -699,7 +718,6 @@ Module OSM
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
     Protected OldX.i, OldY.i
-    Protected TileX.d, TileY.d
     Protected *Drawing.DrawingParameters
     
     If IsGadget(OSM\Gadget) And GadgetType(OSM\Gadget) = #PB_GadgetType_Canvas 
@@ -725,25 +743,27 @@ Module OSM
                     ;New move values
                     OSM\Position\x - MouseX
                     OSM\Position\y - MouseY
+                    ;-*** Creates a drawing thread and fill parameters
+                    *Drawing = AllocateMemory(SizeOf(DrawingParameters))
                     ;OSM tile position in tile.decimal
-                    TileX = OSM\Position\x / OSM\TileSize
-                    TileY = OSM\Position\y / OSM\TileSize
-                    *Drawing = AllocateMemory(SizeOf(*DrawingParameters))
+                    *Drawing\x = OSM\Position\x / OSM\TileSize
+                    *Drawing\y = OSM\Position\y / OSM\TileSize
                     ;Pixel shift
-                    *Drawing\DeltaX = OSM\Position\x - Int(TileX) * OSM\TileSize
-                    *Drawing\DeltaY = OSM\Position\y - Int(TileY) * OSM\TileSize
+                    *Drawing\DeltaX = OSM\Position\x - Int(*Drawing\x) * OSM\TileSize
+                    *Drawing\DeltaY = OSM\Position\y - Int(*Drawing\y) * OSM\TileSize
                     ;Moved to a new tile ?
-                    If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
-                      Debug "--- New tile"
-                      *Drawing\x = TileX
-                      *Drawing\y = TileY
-                      Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
-                      XY2LatLon(*Drawing, @OSM\TargetLocation)
-                      Debug "OSM\TargetTile\x " + StrD(*Drawing\x) + " ; OSM\TargetTile\y "  + StrD(*Drawing\y) 
-                    EndIf
+                    ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
+                    ;Debug "--- New tile"
+                    ;*Drawing\x = TileX
+                    ;*Drawing\y = TileY
+                    Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
+                    XY2LatLon(*Drawing, @OSM\TargetLocation)
+                    Debug "OSM\TargetTile\x " + StrD(*Drawing\x) + " ; OSM\TargetTile\y "  + StrD(*Drawing\y) 
+                    ;EndIf
                     OSM\EmergencyQuit = #False
                     *Drawing\PassNb = 1
                     CreateThread(@DrawingThread(), *Drawing)
+                    ;- ***
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
                     ;If CallBackLocation send Location to function
@@ -855,8 +875,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 831
-; FirstLine = 803
+; CursorPosition = 750
+; FirstLine = 724
 ; Folding = -----
 ; EnableUnicode
+; EnableThread
 ; EnableXP
