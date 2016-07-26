@@ -514,8 +514,8 @@ Module OSM
     Protected ny = CenterY / OSM\TileSize
     
     ;Pixel shift, aka position in the tile
-    Protected DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
-    Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
+    Protected DeltaX = *Drawing\x * OSM\TileSize - (tx * OSM\TileSize)
+    Protected DeltaY = *Drawing\y * OSM\TileSize - (ty * OSM\TileSize)
     
     Debug "Drawing tiles"
     
@@ -636,6 +636,8 @@ Module OSM
       Pointer(CenterX, CenterY, #Red)
       StopVectorDrawing()
       
+      UnlockMutex(*Drawing\Mutex)
+      
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
       If *Drawing\Dirty
@@ -644,9 +646,7 @@ Module OSM
         *Drawing\PassNb + 1
         SignalSemaphore(*Drawing\Semaphore)
       EndIf
-      
-      UnlockMutex(*Drawing\Mutex)
-      
+           
     Until *Drawing\End
     
   EndProcedure
@@ -860,8 +860,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 635
-; FirstLine = 613
+; CursorPosition = 514
+; FirstLine = 496
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
