@@ -112,7 +112,6 @@ Module OSM
     Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
     LoadingMutex.i
-    DrawingMutex.i
     ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     List TilesThreads.TileThread()
     
@@ -236,7 +235,6 @@ Module OSM
     OSM\TileSize = 256
     OSM\MemCache\Mutex = CreateMutex()
     OSM\LoadingMutex = CreateMutex()
-    OSM\DrawingMutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Semaphore = CreateSemaphore()
@@ -429,15 +427,10 @@ Module OSM
     Debug "Image buffer " + Str(*Buffer)
     
     If *Buffer
-      LockMutex(OSM\LoadingMutex)
       nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-      UnlockMutex(OSM\LoadingMutex)
-      
       If IsImage(nImage)
         Debug "Load from web " + TileURL + " as Tile nb " + nImage
-        LockMutex(OSM\LoadingMutex)
         SaveImage(nImage, OSM\HDDCachePath + CacheFile, #PB_ImagePlugin_PNG)
-        UnlockMutex(OSM\LoadingMutex)
         FreeMemory(*Buffer)
       Else
         Debug "Can't catch image " + TileURL
@@ -458,7 +451,6 @@ Module OSM
     Protected nImage.i = -1
     
     LockMutex(OSM\LoadingMutex)
-    
     LockMutex(OSM\MemCache\Mutex) 
     *CacheImagePtr = AddElement(OSM\MemCache\Image())
     Debug " CacheImagePtr : " + Str(*CacheImagePtr)
@@ -496,8 +488,6 @@ Module OSM
     Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
     Debug "  at coords " + Str(x) + "," + Str(y)
     
-    LockMutex(OSM\DrawingMutex)
-    StartVectorDrawing(CanvasVectorOutput(OSM\Gadget)) 
     If IsImage(*Tile\nImage)    
       MovePathCursor(x, y)
       DrawVectorImage(ImageID(*Tile\nImage))
@@ -507,8 +497,6 @@ Module OSM
       Debug "Image missing"
       OSM\Drawing\Dirty = #True ;Signal that this image is missing so we should have to redraw
     EndIf
-    StopVectorDrawing()
-    UnlockMutex(OSM\DrawingMutex)
     
   EndProcedure
   
@@ -642,13 +630,11 @@ Module OSM
       Protected CenterX = GadgetWidth(OSM\Gadget) / 2
       Protected CenterY = GadgetHeight(OSM\Gadget) / 2
       
-      DrawTiles(*Drawing)
-      LockMutex(OSM\DrawingMutex)
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
+      DrawTiles(*Drawing)
       DrawTrack(*Drawing)
       Pointer(CenterX, CenterY, #Red)
       StopVectorDrawing()
-      UnlockMutex(OSM\DrawingMutex)
       
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
@@ -755,10 +741,7 @@ Module OSM
                     OSM\Drawing\PassNb = 1
                     ;Moved to a new tile ?
                     ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
-                    ;Debug "--- New tile"
-                    Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
-                    Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
                     ;EndIf
                     UnlockMutex(OSM\Drawing\Mutex)
                     ;Start drawing
@@ -877,8 +860,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 332
-; FirstLine = 531
+; CursorPosition = 635
+; FirstLine = 613
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
