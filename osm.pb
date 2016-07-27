@@ -77,14 +77,11 @@ Module OSM
   
   Structure ImgMemCach
     nImage.i
-    Zoom.i
-    XTile.i
-    YTile.i
     Usage.i
   EndStructure
   
   Structure TileMemCach
-    List Image.ImgMemCach()
+    Map Images.ImgMemCach()
     Mutex.i
     Semaphore.i
   EndStructure
@@ -239,7 +236,6 @@ Module OSM
     OSM\ZoomMax = 18
     OSM\MoveStartingPoint\x = - 1
     OSM\TileSize = 256
-    OSM\MemCache\Mutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Mutex = CreateMutex()
@@ -367,23 +363,18 @@ Module OSM
   EndProcedure
   
   Procedure.i GetTileFromMem(Zoom.i, XTile.i, YTile.i)
-    
-    Protected nImage.i = -1
-    
+               
+    Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")
+   
     Debug "Check if we have this image in memory"
     
-    ;TODO : use maps
-    ForEach OSM\MemCache\Image()
-      If Zoom = OSM\MemCache\Image()\Zoom And OSM\MemCache\Image()\xTile = XTile And OSM\MemCache\Image()\yTile = YTile
-        nImage = OSM\MemCache\Image()\nImage
-        Debug "Load from MEM Tile X : " + Str(XTile) + " ; Tile Y : " + Str(YTile) + " nImage:" + Str(nImage)
-        Break;
-             ;ElseIf Zoom<>OSM\MemCache\Image()\Zoom
-             ;        DeleteElement(OSM\MemCache\Image())
-      EndIf 
-    Next 
-    
-    ProcedureReturn nImage
+    If FindMapElement(OSM\MemCache\Images(), key)
+      Debug "Key : " + key + " found !"
+      ProcedureReturn OSM\MemCache\Images()\nImage
+    Else
+      Debug "Key : " + key + " not found !"
+      ProcedureReturn -1
+    EndIf
     
   EndProcedure
   
@@ -450,37 +441,24 @@ Module OSM
   
   Procedure GetImageThread(*Tile.Tile)
     
-    Protected *CacheImagePtr
     Protected nImage.i = -1
-    
-    LockMutex(OSM\MemCache\Mutex)
-    ;Push and pop as we are threaded
-    PushListPosition(OSM\MemCache\Image())
-    *CacheImagePtr = AddElement(OSM\MemCache\Image())
-    Debug " CacheImagePtr : " + Str(*CacheImagePtr)
-    OSM\MemCache\Image()\xTile = *Tile\OSMTileX
-    OSM\MemCache\Image()\yTile = *Tile\OSMTileY
-    OSM\MemCache\Image()\Zoom = *Tile\OSMZoom
-    OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
-    PopListPosition(OSM\MemCache\Image())
-    UnlockMutex(OSM\MemCache\Mutex)
+    Protected key.s = "Z" + RSet(Str(*Tile\OSMZoom), 4, "0") + "X" + RSet(Str(*Tile\OSMTileX), 8, "0") + "Y" + RSet(Str(*Tile\OSMTileY), 8, "0")
+   
+    ;Adding the image to the cache if possible
+    AddMapElement(OSM\MemCache\Images(), key)
     nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
     If nImage = -1
       nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
     EndIf
-    LockMutex(OSM\MemCache\Mutex)
-    ChangeCurrentElement(OSM\MemCache\Image(), *CacheImagePtr)
     If nImage <> -1
-      Debug "Adding tile " + Str(nImage) + " to mem cache"
-      ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
-      OSM\MemCache\Image()\nImage = nImage
+      OSM\MemCache\Images(key)\nImage = nImage
       Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
+      Debug "With the following key : " + key  
     Else
-      Debug "Error GetImageThread procedure, tile not loaded - Zoom:" + Str(*Tile\OSMZoom) + " X:" + Str(*Tile\OSMTileX) + " Y:" + Str(*Tile\OSMTileY)
-      DeleteElement(OSM\MemCache\Image())
+      Debug "Error GetImageThread procedure, image not loaded - " + key
       nImage = -1
     EndIf
-    UnlockMutex(OSM\MemCache\Mutex)
+    ;Define this tile image nb
     *Tile\nImage = nImage
     
   EndProcedure
@@ -524,8 +502,6 @@ Module OSM
     
     Debug "Drawing tiles"
     
-    ;We're locking the cache to launch all drawings with existing tiles (the loading threads will be launched but delayed after the drawing)
-    LockMutex(OSM\MemCache\Mutex)    
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         
@@ -557,6 +533,7 @@ Module OSM
               OSM\TilesThreads()\GetImageThread = \GetImageThread
               Debug " Creating get image thread nb " + Str(\GetImageThread)
             EndIf
+            
             DrawTile(*NewTile)
             
           EndWith  
@@ -567,7 +544,6 @@ Module OSM
         EndIf 
       Next
     Next
-    UnlockMutex(OSM\MemCache\Mutex)
     
     ;Free tile memory when the loading thread has finished
     ;TODO : exit this proc from drawtiles in a special "free ressources" task
@@ -982,8 +958,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 374
-; FirstLine = 348
+; CursorPosition = 481
+; FirstLine = 455
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
