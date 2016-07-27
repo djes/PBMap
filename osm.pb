@@ -241,7 +241,7 @@ Module OSM
     
     Global Proxy = #False
     
-    ;- => Use this to customise your preferences    
+    ;- => Use this to customize your preferences    
     ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
     ;     If Proxy
     ;       PreferenceGroup("PROXY")
@@ -524,7 +524,7 @@ Module OSM
             ;Check if the image exists
             \nImage = GetTileFromMem(\OSMZoom, \OSMTileX, \OSMTileY)
             If \nImage = -1 
-              ;If not, load it in the background (but after the drawing thanks to the mutex)
+              ;If not, load it in the background
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
               OSM\TilesThreads()\GetImageThread = \GetImageThread
               Debug " Creating get image thread nb " + Str(\GetImageThread)
@@ -953,8 +953,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 757
-; FirstLine = 705
+; CursorPosition = 242
+; FirstLine = 222
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
