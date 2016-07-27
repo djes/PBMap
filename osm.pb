@@ -82,14 +82,13 @@ Module OSM
   
   Structure TileMemCach
     Map Images.ImgMemCach()
-    Mutex.i
-    Semaphore.i
   EndStructure
   
   Structure Marker
     Location.Location
     color.l
   EndStructure
+  
   ;-OSM Structure
   Structure OSM
     Gadget.i                                ; Canvas Gadget Id 
@@ -109,15 +108,12 @@ Module OSM
     TileSize.i                              ; Tile size downloaded on the server ex : 256
     
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
-    MemCache.TileMemCach                    ; Image in memory cache
-    List MapImageIndex.ImgMemCach()         ; Index from MemCache\Image() to construct map
+    MemCache.TileMemCach                    ; Images in memory cache
     
     Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
-    ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
+                                            ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     List TilesThreads.TileThread()
-    
-    MapImageMutex.i                         ; Mutex to lock
     
     List track.Location()                   ;to display a GPX track
     List Marker.Marker()                    ; To diplay marker
@@ -363,9 +359,9 @@ Module OSM
   EndProcedure
   
   Procedure.i GetTileFromMem(Zoom.i, XTile.i, YTile.i)
-               
+    
     Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")
-   
+    
     Debug "Check if we have this image in memory"
     
     If FindMapElement(OSM\MemCache\Images(), key)
@@ -443,7 +439,7 @@ Module OSM
     
     Protected nImage.i = -1
     Protected key.s = "Z" + RSet(Str(*Tile\OSMZoom), 4, "0") + "X" + RSet(Str(*Tile\OSMTileX), 8, "0") + "Y" + RSet(Str(*Tile\OSMTileY), 8, "0")
-   
+    
     ;Adding the image to the cache if possible
     AddMapElement(OSM\MemCache\Images(), key)
     nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
@@ -556,7 +552,7 @@ Module OSM
     
   EndProcedure
   
-    Procedure Pointer(x.i, y.i, color.l = #Red)
+  Procedure Pointer(x.i, y.i, color.l = #Red)
     
     color=RGBA(255, 0, 0, 255)
     VectorSourceColor(color)
@@ -578,7 +574,7 @@ Module OSM
     Protected Location.Location
     Protected DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
     Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
-
+    
     If ListSize(OSM\track())>0
       
       ForEach OSM\track()
@@ -615,7 +611,7 @@ Module OSM
     
     Protected DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
     Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
-
+    
     ForEach OSM\Marker()
       If OSM\Marker()\Location\Latitude<>0 And  OSM\Marker()\Location\Longitude<>0
         GetPixelCoordFromLocation(OSM\Marker()\Location,@Pixel)
@@ -633,10 +629,11 @@ Module OSM
       WaitSemaphore(*Drawing\Semaphore)
       
       Debug "--------- Main drawing thread ------------"
-           
-      *Drawing\Dirty = #False
+      
       Protected CenterX = GadgetWidth(OSM\Gadget) / 2
       Protected CenterY = GadgetHeight(OSM\Gadget) / 2
+      
+      *Drawing\Dirty = #False
       
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
       DrawTiles(*Drawing)
@@ -647,8 +644,7 @@ Module OSM
       
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
-      ;Be sure that we're not modifying while moving
-      LockMutex(OSM\Drawing\Mutex)
+      LockMutex(OSM\Drawing\Mutex)      ;Be sure that we're not modifying while moving (seems not useful, but it is, especially to clean the semaphore)
       If *Drawing\Dirty
         Debug "Something was dirty ! We try again to redraw"
         ;Delay(250)
@@ -656,10 +652,10 @@ Module OSM
         SignalSemaphore(*Drawing\Semaphore)
       Else
         ;Clean the semaphore to avoid multiple unuseful redraws
-         Repeat : Until TrySemaphore(*Drawing\Semaphore) = 0
+        Repeat : Until TrySemaphore(*Drawing\Semaphore) = 0
       EndIf
       UnlockMutex(OSM\Drawing\Mutex)
-           
+      
     Until *Drawing\End
     
   EndProcedure
@@ -685,16 +681,15 @@ Module OSM
     
   EndProcedure
   
-   Macro Min(a,b)
+  Macro Min(a,b)
     (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
   EndMacro
   
   Macro Max(a,b)
     (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
   EndMacro
-  
-  
-    Procedure  ZoomToArea()
+    
+  Procedure  ZoomToArea()
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
     Protected MinY.d,MaxY.d,MinX.d,MaxX.d
@@ -766,10 +761,10 @@ Module OSM
     
   EndProcedure
   
-  
   Procedure SetCallBackLocation(CallBackLocation.i)
-    OSM\CallBackLocation=CallBackLocation
+    OSM\CallBackLocation = CallBackLocation
   EndProcedure
+  
   Procedure Event(Event.l)
     
     Protected Gadget.i
@@ -958,8 +953,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 481
-; FirstLine = 455
+; CursorPosition = 757
+; FirstLine = 705
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
