@@ -56,7 +56,6 @@ Module OSM
     OSMTileX.i
     OSMTileY.i
     OSMZoom.i
-    Mutex.i
     Semaphore.i
     Dirty.i
     PassNB.i
@@ -238,7 +237,6 @@ Module OSM
     ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Semaphore = CreateSemaphore()
-    OSM\Drawing\Mutex = CreateMutex()
     
     ;-*** PROXY
     
@@ -623,9 +621,7 @@ Module OSM
       WaitSemaphore(*Drawing\Semaphore)
       
       Debug "--------- Main drawing thread ------------"
-      
-      LockMutex(*Drawing\Mutex) ; Only one main drawing thread at once
-      
+           
       *Drawing\Dirty = #False
       Protected CenterX = GadgetWidth(OSM\Gadget) / 2
       Protected CenterY = GadgetHeight(OSM\Gadget) / 2
@@ -635,8 +631,6 @@ Module OSM
       DrawTrack(*Drawing)
       Pointer(CenterX, CenterY, #Red)
       StopVectorDrawing()
-      
-      UnlockMutex(*Drawing\Mutex)
       
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
@@ -661,13 +655,11 @@ Module OSM
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     
-    LockMutex(OSM\Drawing\Mutex)
     LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
     OSM\Position\X = OSM\Drawing\x * OSM\TileSize
     OSM\Position\Y = OSM\Drawing\y * OSM\TileSize 
     OSM\Drawing\PassNb = 1
-    UnlockMutex(OSM\Drawing\Mutex)
     ;Start drawing
     SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
@@ -686,14 +678,12 @@ Module OSM
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     
-    LockMutex(OSM\Drawing\Mutex)
     LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
     OSM\Position\X = OSM\Drawing\x * OSM\TileSize
     OSM\Position\Y = OSM\Drawing\y * OSM\TileSize 
     ;*** Creates a drawing thread and fill parameters
     OSM\Drawing\PassNb = 1
-    UnlockMutex(OSM\Drawing\Mutex)
     ;Start drawing
     SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
@@ -734,7 +724,6 @@ Module OSM
                     OSM\Position\x - MouseX
                     OSM\Position\y - MouseY
                     ;-*** Fill parameters and signal the drawing thread
-                    LockMutex(OSM\Drawing\Mutex)
                     ;OSM tile position in tile.decimal
                     OSM\Drawing\x = OSM\Position\x / OSM\TileSize
                     OSM\Drawing\y = OSM\Position\y / OSM\TileSize
@@ -743,7 +732,6 @@ Module OSM
                     ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
                     ;EndIf
-                    UnlockMutex(OSM\Drawing\Mutex)
                     ;Start drawing
                     SignalSemaphore(OSM\Drawing\Semaphore)
                     ;- ***                   
@@ -860,8 +848,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 514
-; FirstLine = 496
+; CursorPosition = 45
+; FirstLine = 32
 ; Folding = -----
 ; EnableUnicode
 ; EnableThread
