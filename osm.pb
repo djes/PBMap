@@ -116,7 +116,6 @@ Module OSM
     
     Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
-    LoadingMutex.i
     ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     List TilesThreads.TileThread()
     
@@ -240,7 +239,6 @@ Module OSM
     OSM\MoveStartingPoint\x = - 1
     OSM\TileSize = 256
     OSM\MemCache\Mutex = CreateMutex()
-    OSM\LoadingMutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Semaphore = CreateSemaphore()
@@ -372,7 +370,6 @@ Module OSM
     
     Debug "Check if we have this image in memory"
     
-    LockMutex(OSM\LoadingMutex)   
     LockMutex(OSM\MemCache\Mutex)    
     ForEach OSM\MemCache\Image()
       If Zoom = OSM\MemCache\Image()\Zoom And OSM\MemCache\Image()\xTile = XTile And OSM\MemCache\Image()\yTile = YTile
@@ -384,7 +381,6 @@ Module OSM
       EndIf 
     Next 
     UnlockMutex(OSM\MemCache\Mutex)
-    UnlockMutex(OSM\LoadingMutex)   
     
     ProcedureReturn nImage
     
@@ -455,20 +451,23 @@ Module OSM
     Protected *CacheImagePtr
     Protected nImage.i = -1
     
-    LockMutex(OSM\LoadingMutex)
-    LockMutex(OSM\MemCache\Mutex) 
+    LockMutex(OSM\MemCache\Mutex)
+    ;Push and pop as we are threaded
+    PushListPosition(OSM\MemCache\Image())
     *CacheImagePtr = AddElement(OSM\MemCache\Image())
     Debug " CacheImagePtr : " + Str(*CacheImagePtr)
     OSM\MemCache\Image()\xTile = *Tile\OSMTileX
     OSM\MemCache\Image()\yTile = *Tile\OSMTileY
     OSM\MemCache\Image()\Zoom = *Tile\OSMZoom
     OSM\MemCache\Image()\nImage = -1  ;By now, this tile is in "loading" state, for thread synchro
+    PopListPosition(OSM\MemCache\Image())
     UnlockMutex(OSM\MemCache\Mutex)
     nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
     If nImage = -1
       nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
     EndIf
     LockMutex(OSM\MemCache\Mutex)
+    ChangeCurrentElement(OSM\MemCache\Image(), *CacheImagePtr)
     If nImage <> -1
       Debug "Adding tile " + Str(nImage) + " to mem cache"
       ;AddTileToMemCache(Zoom, XTile, YTile, nImage)
@@ -481,7 +480,6 @@ Module OSM
     EndIf
     UnlockMutex(OSM\MemCache\Mutex)
     *Tile\nImage = nImage
-    UnlockMutex(OSM\LoadingMutex)
     
   EndProcedure
   
@@ -673,10 +671,11 @@ Module OSM
         ;Delay(250)
         *Drawing\PassNb + 1
         SignalSemaphore(*Drawing\Semaphore)
-;       Else
-;         ;Clean the semaphore
-;         Repeat
-;         Until TrySemaphore(*Drawing\Semaphore) = 0
+        ;TODO : Could be nice to avoid multiple redraws when not moving anymore
+        ;        Else
+;          ;Clean the semaphore
+;          Repeat
+;          Until TrySemaphore(*Drawing\Semaphore) = 0
       EndIf
            
     Until *Drawing\End
@@ -975,8 +974,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 661
-; FirstLine = 642
+; CursorPosition = 672
+; FirstLine = 646
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
