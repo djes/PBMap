@@ -21,13 +21,15 @@ UsePNGImageEncoder()
 
 DeclareModule OSM
   Declare InitOSM()
-  Declare OSMGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15)
   Declare DrawingThread(Null)
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
+  Declare ZoomToArea()
   Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
+  Declare AddMarker(Latitude.d,Longitude.d,color.l=-1)
 EndDeclareModule
 
 Module OSM 
@@ -86,6 +88,10 @@ Module OSM
     Semaphore.i
   EndStructure
   
+  Structure Marker
+    Location.Location
+    color.l
+  EndStructure
   ;-OSM Structure
   Structure OSM
     Gadget.i                                ; Canvas Gadget Id 
@@ -117,7 +123,8 @@ Module OSM
     MapImageMutex.i                         ; Mutex to lock
     
     List track.Location()                   ;to display a GPX track
-    
+    List Marker.Marker()                    ; To diplay marker
+    EditMarkerIndex.l
   EndStructure
   
   Global OSM.OSM, Null.i
@@ -272,7 +279,7 @@ Module OSM
   EndProcedure
   ;- ***
   
-  Procedure OSMGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
       OSM\Gadget = CanvasGadget(OSM\Gadget, X, Y, Width, Height)
     Else
@@ -300,7 +307,7 @@ Module OSM
     *Location\Latitude = Degree(LatitudeRad)
   EndProcedure
   
-  Procedure getPixelCoorfromLocation(*Location.Location, *Pixel.Pixel) ; TODO to Optimize 
+  Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.Pixel) ; TODO to Optimize 
     Protected mapWidth.l    = Pow(2,OSM\Zoom+8)
     Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
     Protected x1.l,y1.l
@@ -517,8 +524,8 @@ Module OSM
     
     Debug "Drawing tiles"
     
-    For y = - ny To ny
-      For x = - nx To nx
+    For y = - ny - 1 To ny + 1
+      For x = - nx - 1 To nx + 1
         
         ;Was quiting the loop if a move occured, giving maybe smoother movement
         ;If OSM\Moving
@@ -570,6 +577,22 @@ Module OSM
     
   EndProcedure
   
+    Procedure Pointer(x.i, y.i, color.l = #Red)
+    
+    color=RGBA(255, 0, 0, 255)
+    VectorSourceColor(color)
+    MovePathCursor(x, y)
+    AddPathLine(-8,-16,#PB_Path_Relative)
+    AddPathCircle(8,0,8,180,0,#PB_Path_Relative)
+    AddPathLine(-8,16,#PB_Path_Relative)
+    ;FillPath(#PB_Path_Preserve) 
+    ;ClipPath(#PB_Path_Preserve)
+    AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
+    VectorSourceColor(color)
+    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
+    
+  EndProcedure
+  
   Procedure  DrawTrack(*Drawing.DrawingParameters)
     
     Protected Pixel.Pixel
@@ -581,7 +604,7 @@ Module OSM
       
       ForEach OSM\track()
         If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
-          getPixelCoorfromLocation(@OSM\track(), @Pixel)
+          GetPixelCoordFromLocation(@OSM\track(), @Pixel)
           If ListIndex(OSM\track())=0
             MovePathCursor(Pixel\X + DeltaX, Pixel\Y + DeltaY)
           Else
@@ -598,20 +621,30 @@ Module OSM
     
   EndProcedure
   
-  Procedure Pointer(x.i, y.i, color.l = #Red)
+  
+  ; Add a Marker To the Map
+  Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1)
+    AddElement(OSM\Marker())
+    OSM\Marker()\Location\Latitude=Latitude
+    OSM\Marker()\Location\Longitude=Longitude
+    OSM\Marker()\color=color
+  EndProcedure
+  
+  ; Draw all markers on the screen !
+  Procedure  DrawMarker(*Drawing.DrawingParameters)
+    Protected Pixel.Pixel
     
-    color=RGBA(255, 0, 0, 255)
-    VectorSourceColor(color)
-    MovePathCursor(x, y)
-    AddPathLine(-8,-16,#PB_Path_Relative)
-    AddPathCircle(8,0,8,180,0,#PB_Path_Relative)
-    AddPathLine(-8,16,#PB_Path_Relative)
-    ;FillPath(#PB_Path_Preserve) 
-    ;ClipPath(#PB_Path_Preserve)
-    AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
-    VectorSourceColor(color)
-    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
-    
+    Protected DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
+    Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
+
+    ForEach OSM\Marker()
+      If OSM\Marker()\Location\Latitude<>0 And  OSM\Marker()\Location\Longitude<>0
+        GetPixelCoordFromLocation(OSM\Marker()\Location,@Pixel)
+        If Pixel\X+ DeltaX>0 And Pixel\Y+ DeltaY>0 And Pixel\X+ DeltaX<GadgetWidth(OSM\Gadget) And Pixel\Y<GadgetHeight(OSM\Gadget) ; Only if visible ^_^
+          Pointer(Pixel\X+ DeltaX,Pixel\Y+ DeltaY,OSM\Marker()\color)
+        EndIf 
+      EndIf 
+    Next
   EndProcedure
   
   Procedure DrawingThread(*Drawing.DrawingParameters)
@@ -629,6 +662,7 @@ Module OSM
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
       DrawTiles(*Drawing)
       DrawTrack(*Drawing)
+      DrawMarker(*Drawing)
       Pointer(CenterX, CenterY, #Red)
       StopVectorDrawing()
       
@@ -639,6 +673,10 @@ Module OSM
         ;Delay(250)
         *Drawing\PassNb + 1
         SignalSemaphore(*Drawing\Semaphore)
+;       Else
+;         ;Clean the semaphore
+;         Repeat
+;         Until TrySemaphore(*Drawing\Semaphore) = 0
       EndIf
            
     Until *Drawing\End
@@ -663,6 +701,63 @@ Module OSM
     ;Start drawing
     SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
+    
+  EndProcedure
+  
+   Macro Min(a,b)
+    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
+  EndMacro
+  
+  Macro Max(a,b)
+    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
+  EndMacro
+  
+  
+    Procedure  ZoomToArea()
+    ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
+    ;bounding box in long/lat coords (x=long, y=lat)
+    Protected MinY.d,MaxY.d,MinX.d,MaxX.d
+    ForEach OSM\track()
+      If ListIndex(OSM\track())=0 Or OSM\track()\Longitude<MinX
+        MinX=OSM\track()\Longitude
+      EndIf
+      If ListIndex(OSM\track())=0 Or OSM\track()\Longitude>MaxX
+        MaxX=OSM\track()\Longitude
+      EndIf
+      If ListIndex(OSM\track())=0 Or OSM\track()\Latitude<MinY
+        MinY=OSM\track()\Latitude
+      EndIf
+      If ListIndex(OSM\track())=0 Or OSM\track()\Latitude>MaxY
+        MaxY=OSM\track()\Latitude
+      EndIf
+    Next 
+    Protected DeltaX.d=MaxX-MinX                            ;assumption ! In original code DeltaX have no source
+    Protected centerX.d=MinX+DeltaX/2                       ; assumption ! In original code CenterX have no source
+    Protected paddingFactor.f= 1.2                          ;paddingFactor: this can be used to get the "120%" effect ThomM refers to. Value of 1.2 would get you the 120%.
+    
+    Protected ry1.d = Log((Sin(Radian(MinY)) + 1) / Cos(Radian(MinY)))
+    Protected ry2.d = Log((Sin(Radian(MaxY)) + 1) / Cos(Radian(MaxY)))
+    Protected ryc.d = (ry1 + ry2) / 2                                 
+    Protected centerY.d = Degree(ATan(SinH(ryc)))                     
+    
+    Protected resolutionHorizontal.d = DeltaX / GadgetWidth(OSM\Gadget)
+    
+    Protected vy0.d = Log(Tan(#PI*(0.25 + centerY/360)));
+    Protected vy1.d = Log(Tan(#PI*(0.25 + MaxY/360)))   ;
+    Protected viewHeightHalf.d = GadgetHeight(OSM\Gadget)/2;
+    Protected zoomFactorPowered.d = viewHeightHalf / (40.7436654315252*(vy1 - vy0))
+    Protected resolutionVertical.d = 360.0 / (zoomFactorPowered * OSM\TileSize)    
+    If resolutionHorizontal<>0 And resolutionVertical<>0
+      Protected resolution.d = Max(resolutionHorizontal, resolutionVertical)* paddingFactor
+      Protected zoom.d = Log(360 / (resolution * OSM\TileSize))/Log(2)
+      
+      Protected lon.d = centerX;
+      Protected lat.d = centerY;
+      
+      SetLocation(lat,lon, Round(zoom,#PB_Round_Down))
+    Else
+      SetLocation(OSM\TargetLocation\Latitude,OSM\TargetLocation\Longitude, 15)
+    EndIf
     
   EndProcedure
   
@@ -764,16 +859,17 @@ Module OSM
   EndProcedure
 EndModule
 
-
-;Demonstration
+;-Exemple
 CompilerIf #PB_Compiler_IsMainFile 
+  InitNetwork()
+  
   Enumeration
     #Window_0
     #Map
-    #Button_0
-    #Button_1
-    #Button_2
-    #Button_3
+    #Gdt_Left
+    #Gdt_Right
+    #Gdt_Up
+    #Gdt_Down
     #Button_4
     #Button_5
     #Combo_0
@@ -785,6 +881,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #String_0
     #String_1
     #Gdt_LoadGpx
+    #Gdt_AddMarker
   EndEnumeration
   
   Structure Location
@@ -798,20 +895,36 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
-  ;- Main
-  If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered )
-    
+  Procedure ResizeAll()
+    ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
+    ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Left,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Right,WindowWidth(#Window_0)-90,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Up,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Down,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_2,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_4,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Button_5,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_3,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#String_0,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#String_1,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+  EndProcedure
+  
+  If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     OSM::InitOSM()
     LoadFont(0, "Wingdings", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
     
-    OSM::OSMGadget(#Map, 10, 10, 512, 512)
+    OSM::MapGadget(#Map, 10, 10, 512, 512)
     
     TextGadget(#Text_1, 530, 50, 60, 15, "Movements : ")
-    ButtonGadget(#Button_0, 550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Button_0, FontID(0)) 
-    ButtonGadget(#Button_1, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Button_1, FontID(0)) 
-    ButtonGadget(#Button_2, 580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Button_2, FontID(0)) 
-    ButtonGadget(#Button_3, 580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Button_3, FontID(0)) 
+    ButtonGadget(#Gdt_Left, 550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
+    ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
+    ButtonGadget(#Gdt_Up, 580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
+    ButtonGadget(#Gdt_Down, 580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
     TextGadget(#Text_2, 530, 160, 60, 15, "Zoom : ")
     ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
     ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
@@ -819,7 +932,8 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#String_0, 600, 230, 90, 20, "")
     TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
     StringGadget(#String_1, 600, 250, 90, 20, "")
-    ButtonGadget(#Gdt_LoadGpx, 530, 280, 150, 30, "Load GPX")
+    ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
+    ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -835,22 +949,35 @@ CompilerIf #PB_Compiler_IsMainFile
         Case #PB_Event_Gadget ;{
           Gadget = EventGadget()
           Select Gadget
+            Case #Gdt_Up
+              ;OSM::Move(0,-0.5)
+            Case #Gdt_Down
+              ;OSM::Move(0,0.5)
+            Case #Gdt_Left
+              ;OSM::Move(-0.5,0)
+            Case #Gdt_Right
+              ;OSM::Move(0.5,0)
             Case #Button_4
               OSM::SetZoom(1)
             Case #Button_5
               OSM::SetZoom( - 1)
             Case #Gdt_LoadGpx
               OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
+              OSM::ZoomToArea() ; <-To center the view, and to viex all the track
+            Case #Gdt_AddMarker
+              OSM:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
           EndSelect
+        Case #PB_Event_SizeWindow
+          ResizeAll()
       EndSelect
     Until Quit = #True
   EndIf
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 45
-; FirstLine = 32
-; Folding = -----
+; CursorPosition = 661
+; FirstLine = 642
+; Folding = ------
 ; EnableUnicode
 ; EnableThread
 ; EnableXP
