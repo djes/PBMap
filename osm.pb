@@ -58,6 +58,7 @@ Module OSM
     OSMTileX.i
     OSMTileY.i
     OSMZoom.i
+    Mutex.i
     Semaphore.i
     Dirty.i
     PassNB.i
@@ -241,6 +242,7 @@ Module OSM
     OSM\MemCache\Mutex = CreateMutex()
     ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
+    OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
     
     ;-*** PROXY
@@ -370,7 +372,7 @@ Module OSM
     
     Debug "Check if we have this image in memory"
     
-    LockMutex(OSM\MemCache\Mutex)    
+    ;TODO : use maps
     ForEach OSM\MemCache\Image()
       If Zoom = OSM\MemCache\Image()\Zoom And OSM\MemCache\Image()\xTile = XTile And OSM\MemCache\Image()\yTile = YTile
         nImage = OSM\MemCache\Image()\nImage
@@ -380,7 +382,6 @@ Module OSM
              ;        DeleteElement(OSM\MemCache\Image())
       EndIf 
     Next 
-    UnlockMutex(OSM\MemCache\Mutex)
     
     ProcedureReturn nImage
     
@@ -394,6 +395,7 @@ Module OSM
     Debug "Check if we have this image on HDD"
     
     If FileSize(OSM\HDDCachePath + cacheFile) > 0
+      
       nImage = LoadImage(#PB_Any, OSM\HDDCachePath + CacheFile)
       
       If IsImage(nImage)
@@ -522,6 +524,8 @@ Module OSM
     
     Debug "Drawing tiles"
     
+    ;We're locking the cache to launch all drawings with existing tiles (the loading threads will be launched but delayed after the drawing)
+    LockMutex(OSM\MemCache\Mutex)    
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         
@@ -548,7 +552,7 @@ Module OSM
             ;Check if the image exists
             \nImage = GetTileFromMem(\OSMZoom, \OSMTileX, \OSMTileY)
             If \nImage = -1 
-              ;If not, load it in the background
+              ;If not, load it in the background (but after the drawing thanks to the mutex)
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
               OSM\TilesThreads()\GetImageThread = \GetImageThread
               Debug " Creating get image thread nb " + Str(\GetImageThread)
@@ -563,6 +567,7 @@ Module OSM
         EndIf 
       Next
     Next
+    UnlockMutex(OSM\MemCache\Mutex)
     
     ;Free tile memory when the loading thread has finished
     ;TODO : exit this proc from drawtiles in a special "free ressources" task
@@ -666,17 +671,18 @@ Module OSM
       
       ;- Redraw
       ;If something was not correctly drawn, redraw after a while
+      ;Be sure that we're not modifying while moving
+      LockMutex(OSM\Drawing\Mutex)
       If *Drawing\Dirty
         Debug "Something was dirty ! We try again to redraw"
         ;Delay(250)
         *Drawing\PassNb + 1
         SignalSemaphore(*Drawing\Semaphore)
-        ;TODO : Could be nice to avoid multiple redraws when not moving anymore
-        ;        Else
-;          ;Clean the semaphore
-;          Repeat
-;          Until TrySemaphore(*Drawing\Semaphore) = 0
+      Else
+        ;Clean the semaphore to avoid multiple unuseful redraws
+         Repeat : Until TrySemaphore(*Drawing\Semaphore) = 0
       EndIf
+      UnlockMutex(OSM\Drawing\Mutex)
            
     Until *Drawing\End
     
@@ -819,9 +825,11 @@ Module OSM
                     OSM\Position\y - MouseY
                     ;-*** Fill parameters and signal the drawing thread
                     ;OSM tile position in tile.decimal
+                    LockMutex(OSM\Drawing\Mutex)
                     OSM\Drawing\x = OSM\Position\x / OSM\TileSize
                     OSM\Drawing\y = OSM\Position\y / OSM\TileSize
                     OSM\Drawing\PassNb = 1
+                    UnlockMutex(OSM\Drawing\Mutex)
                     ;Moved to a new tile ?
                     ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
@@ -974,8 +982,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 672
-; FirstLine = 646
+; CursorPosition = 374
+; FirstLine = 348
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
