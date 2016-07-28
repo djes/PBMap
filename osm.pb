@@ -237,11 +237,11 @@ Module OSM
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
     
-    ;-*** PROXY
+    ;- Proxy details
     
     Global Proxy = #False
     
-    ;- => Use this to customize your preferences    
+    ;Use this to customize your preferences    
     ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
     ;     If Proxy
     ;       PreferenceGroup("PROXY")
@@ -254,6 +254,7 @@ Module OSM
     ;     EndIf
     
     Result = OpenPreferences(GetHomeDirectory() + "OSM.prefs")
+    
     If Proxy
       PreferenceGroup("PROXY")       
       Global ProxyURL$  = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
@@ -264,12 +265,13 @@ Module OSM
     If Result
       ClosePreferences()
     EndIf
-    
+       
     curl_global_init(#CURL_GLOBAL_ALL);
+    
+    ;- Main drawing thread launching
     CreateThread(@DrawingThread(), @OSM\Drawing)
     
   EndProcedure
-  ;- ***
   
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
@@ -402,7 +404,6 @@ Module OSM
     Protected nImage.i = -1
     
     Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"
-    ; Test if in cache else download it
     Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
     
     Debug "Check if we have this image on Web"
@@ -474,7 +475,7 @@ Module OSM
       DrawVectorText(Str(x) + ", " + Str(y))
     Else
       Debug "Image missing"
-      OSM\Drawing\Dirty = #True ;Signal that this image is missing so we should have to redraw
+      OSM\Drawing\Dirty = #True ;Signals that this image is missing so we should have to redraw
     EndIf
     
   EndProcedure
@@ -505,7 +506,7 @@ Module OSM
         ;If OSM\Moving
         ;  Break 2
         ;EndIf
-        
+       
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
           With *NewTile
@@ -953,8 +954,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 242
-; FirstLine = 222
+; CursorPosition = 723
+; FirstLine = 671
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
