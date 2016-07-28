@@ -93,7 +93,7 @@ Module OSM
   ;-OSM Structure
   Structure OSM
     Gadget.i                                ; Canvas Gadget Id 
-    
+    Font.i                                  ; Font to uses when write on the map 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
     
@@ -238,7 +238,8 @@ Module OSM
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
     OSM\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
-                                                  ;- Proxy details
+    OSM\Font=LoadFont(#PB_Any, "Comic Sans MS", 20, #PB_Font_Bold)
+                                                ;- Proxy details
     
     Global Proxy = #False
     
@@ -274,6 +275,14 @@ Module OSM
     
   EndProcedure
   
+    Macro Min(a,b)
+    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
+  EndMacro
+  
+  Macro Max(a,b)
+    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
+  EndMacro
+  
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
       OSM\Gadget = CanvasGadget(OSM\Gadget, X, Y, Width, Height)
@@ -302,6 +311,23 @@ Module OSM
     *Location\Latitude = Degree(LatitudeRad)
   EndProcedure
   
+  ; HaversineAlgorithm 
+  ; http://andrew.hedges.name/experiments/haversine/
+  Procedure.d HaversineInKM(*posA.Location,*posB.Location)
+    Protected eQuatorialEarthRadius.d = 6378.1370;6372.795477598;
+    Protected dlong.d = (*posB\Longitude - *posA\Longitude);
+    Protected dlat.d = (*posB\Latitude - *posA\Latitude)   ;
+    Protected alpha.d=dlat/2
+    Protected beta.d=dlong/2
+    Protected a.d = Sin(Radian(alpha)) * Sin(Radian(alpha)) + Cos(Radian(*posA\Latitude)) * Cos(Radian(*posB\Latitude)) * Sin(Radian(beta)) * Sin(Radian(beta)) 
+    Protected c.d = ASin(Min(1,Sqr(a)));
+    Protected distance.d = 2*eQuatorialEarthRadius * c     
+    ProcedureReturn distance                                                                                                        ;
+  EndProcedure
+  
+  Procedure.d HaversineInM(*posA.Location,*posB.Location)
+    ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
+  EndProcedure
   Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.Pixel) ; TODO to Optimize 
     Protected mapWidth.l    = Pow(2,OSM\Zoom+8)
     Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
@@ -574,23 +600,46 @@ Module OSM
     
     Protected Pixel.Pixel
     Protected Location.Location
+
     Protected DeltaX = *Drawing\x * OSM\TileSize - (Int(*Drawing\x) * OSM\TileSize)
     Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
-    
+    Protected km.f, memKm.i
+                      
     If ListSize(OSM\track())>0
       
-      ForEach OSM\track()
+     LockMutex(OSM\Drawing\Mutex)
+     ForEach OSM\track()
+        ;-Test Distance
+        If ListIndex(OSM\track())=0
+          Location\Latitude=OSM\track()\Latitude
+          Location\Longitude=OSM\track()\Longitude 
+        Else 
+          km=km+HaversineInKM(@Location,@OSM\track()) ;<- display Distance 
+          Location\Latitude=OSM\track()\Latitude
+          Location\Longitude=OSM\track()\Longitude 
+        EndIf 
         If @OSM\TargetLocation\Latitude<>0 And  @OSM\TargetLocation\Longitude<>0
-          GetPixelCoordFromLocation(@OSM\track(), @Pixel)
+          GetPixelCoordFromLocation(@OSM\track(),@Pixel)
           If ListIndex(OSM\track())=0
             MovePathCursor(Pixel\X + DeltaX, Pixel\Y + DeltaY)
           Else
             AddPathLine(Pixel\X + DeltaX, Pixel\Y + DeltaY)
+            If Int(km)<>memKm
+              memKm=Int(km)
+              If OSM\Zoom>10
+              BeginVectorLayer()
+              VectorFont(FontID(OSM\Font), OSM\Zoom)
+              VectorSourceColor(RGBA(50, 50, 50, 255))
+              DrawVectorText(Str(Int(km)))
+              EndVectorLayer()
+              EndIf 
+            EndIf
+            
           EndIf 
-          
         EndIf 
-        
       Next
+      UnlockMutex(OSM\Drawing\Mutex)  
+                            
       VectorSourceColor(RGBA(0, 255, 0, 150))
       StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
       
@@ -688,13 +737,6 @@ Module OSM
     
   EndProcedure
   
-  Macro Min(a,b)
-    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
-  EndMacro
-  
-  Macro Max(a,b)
-    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
-  EndMacro
   
   Procedure  ZoomToArea()
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
@@ -1000,9 +1042,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 840
-; FirstLine = 805
-; Folding = ------
+; CursorPosition = 605
+; FirstLine = 598
+; Folding = -------
 ; EnableUnicode
 ; EnableThread
 ; EnableXP
