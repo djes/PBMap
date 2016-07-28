@@ -136,13 +136,13 @@ Module OSM
     If *ReceiveHTTPToMemoryBuffer = 0
       *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
       If *ReceiveHTTPToMemoryBuffer = 0
-        Debug "Problem allocating memory"
+       ; Debug "Problem allocating memory"
         End
       EndIf
     Else
       *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
       If *ReceiveHTTPToMemoryBuffer = 0
-        Debug "Problem reallocating memory"
+       ; Debug "Problem reallocating memory"
         End
       EndIf  
     EndIf
@@ -179,7 +179,7 @@ Module OSM
           If Len(ProxyPort$)
             ProxyURL$ + ":" + ProxyPort$
           EndIf
-          Debug ProxyURL$
+         ; Debug ProxyURL$
           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
           If Len(ProxyUser$)
             If Len(ProxyPassword$)
@@ -201,22 +201,22 @@ Module OSM
             *ReceiveHTTPToMemoryBuffer = #Null
             ReceiveHTTPToMemoryBufferPtr = 0
           Else
-            Debug "Problem allocating buffer"         
+           ; Debug "Problem allocating buffer"         
           EndIf        
           ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
         Else
-          Debug "CURL NOT OK"
+         ; Debug "CURL NOT OK"
         EndIf
         
         curl_easy_cleanup(curl)
         
       Else
-        Debug "Can't Init CURL"
+       ; Debug "Can't Init CURL"
       EndIf
       
     EndIf
     
-    Debug "Curl Buffer : " + Str(*Buffer)
+   ; Debug "Curl Buffer : " + Str(*Buffer)
     
     ProcedureReturn *Buffer
     
@@ -289,8 +289,8 @@ Module OSM
     Protected LatRad.d = Radian(*Location\Latitude)
     *Tile\x = n * ( (*Location\Longitude + 180.0) / 360.0)
     *Tile\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
-    Debug "Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude)
-    Debug "Tile X : " + Str(*Tile\x) + " ; Tile Y : " + Str(*Tile\y)
+   ; Debug "Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude)
+   ; Debug "Tile X : " + Str(*Tile\x) + " ; Tile Y : " + Str(*Tile\y)
   EndProcedure
   
   ;*** Converts tile.decimal to coords
@@ -365,13 +365,13 @@ Module OSM
     
     Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")
     
-    Debug "Check if we have this image in memory"
+   ; Debug "Check if we have this image in memory"
     
     If FindMapElement(OSM\MemCache\Images(), key)
-      Debug "Key : " + key + " found !"
+     ; Debug "Key : " + key + " found !"
       ProcedureReturn OSM\MemCache\Images()\nImage
     Else
-      Debug "Key : " + key + " not found !"
+     ; Debug "Key : " + key + " not found !"
       ProcedureReturn -1
     EndIf
     
@@ -382,14 +382,14 @@ Module OSM
     Protected nImage.i
     Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
     
-    Debug "Check if we have this image on HDD"
+   ; Debug "Check if we have this image on HDD"
     
     If FileSize(OSM\HDDCachePath + cacheFile) > 0
       
       nImage = LoadImage(#PB_Any, OSM\HDDCachePath + CacheFile)
       
       If IsImage(nImage)
-        Debug "Load from HDD Tile " + CacheFile
+       ; Debug "Load from HDD Tile " + CacheFile
         ProcedureReturn nImage
       EndIf 
       
@@ -407,7 +407,7 @@ Module OSM
     Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"
     Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
     
-    Debug "Check if we have this image on Web"
+   ; Debug "Check if we have this image on Web"
     
     If Proxy
       ;LockMutex(OSM\CurlMutex)             ;Seems no more necessary
@@ -416,21 +416,21 @@ Module OSM
     Else
       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
     EndIf
-    Debug "Image buffer " + Str(*Buffer)
+   ; Debug "Image buffer " + Str(*Buffer)
     
     If *Buffer
       nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
       If IsImage(nImage)
-        Debug "Load from web " + TileURL + " as Tile nb " + nImage
+       ; Debug "Load from web " + TileURL + " as Tile nb " + nImage
         SaveImage(nImage, OSM\HDDCachePath + CacheFile, #PB_ImagePlugin_PNG)
         FreeMemory(*Buffer)
       Else
-        Debug "Can't catch image " + TileURL
+       ; Debug "Can't catch image " + TileURL
         nImage = -1
         ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
       EndIf
     Else
-      Debug "Problem loading from web " + TileURL  
+     ; Debug "Problem loading from web " + TileURL  
     EndIf      
     
     ProcedureReturn nImage
@@ -450,10 +450,10 @@ Module OSM
     EndIf
     If nImage <> -1
       OSM\MemCache\Images(key)\nImage = nImage
-      Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
-      Debug "With the following key : " + key  
+     ; Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
+     ; Debug "With the following key : " + key  
     Else
-      Debug "Error GetImageThread procedure, image not loaded - " + key
+     ; Debug "Error GetImageThread procedure, image not loaded - " + key
       nImage = -1
     EndIf
     ;Define this tile image nb
@@ -466,8 +466,8 @@ Module OSM
     Protected x = *Tile\x 
     Protected y = *Tile\y 
     
-    Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
-    Debug "  at coords " + Str(x) + "," + Str(y)
+   ; Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
+   ; Debug "  at coords " + Str(x) + "," + Str(y)
     
     If IsImage(*Tile\nImage)    
       MovePathCursor(x, y)
@@ -475,7 +475,7 @@ Module OSM
       MovePathCursor(x, y)
       DrawVectorText(Str(x) + ", " + Str(y))
     Else
-      Debug "Image missing"
+     ; Debug "Image missing"
       OSM\Drawing\Dirty = #True ;Signals that this image is missing so we should have to redraw
     EndIf
     
@@ -498,7 +498,7 @@ Module OSM
     Protected DeltaX = *Drawing\x * OSM\TileSize - (tx * OSM\TileSize)
     Protected DeltaY = *Drawing\y * OSM\TileSize - (ty * OSM\TileSize)
     
-    Debug "Drawing tiles"
+   ; Debug "Drawing tiles"
     
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
@@ -529,7 +529,7 @@ Module OSM
               ;If not, load it in the background
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
               OSM\TilesThreads()\GetImageThread = \GetImageThread
-              Debug " Creating get image thread nb " + Str(\GetImageThread)
+             ; Debug " Creating get image thread nb " + Str(\GetImageThread)
             EndIf
             
             DrawTile(*NewTile)
@@ -537,7 +537,7 @@ Module OSM
           EndWith  
           
         Else
-          Debug" Error, can't create a new tile."
+         ; Debug" Error, can't create a new tile."
           Break 2
         EndIf 
       Next
@@ -635,7 +635,7 @@ Module OSM
       
       WaitSemaphore(*Drawing\Semaphore)
       
-      Debug "--------- Main drawing thread ------------"
+     ; Debug "--------- Main drawing thread ------------"
       
       Protected CenterX = GadgetWidth(OSM\Gadget) / 2
       Protected CenterY = GadgetHeight(OSM\Gadget) / 2
@@ -653,7 +653,7 @@ Module OSM
       ;If something was not correctly drawn, redraw after a while
       LockMutex(OSM\Drawing\Mutex)      ;Be sure that we're not modifying while moving (seems not useful, but it is, especially to clean the semaphore)
       If *Drawing\Dirty
-        Debug "Something was dirty ! We try again to redraw"
+       ; Debug "Something was dirty ! We try again to redraw"
         ;Delay(250)
         *Drawing\PassNb + 1
         SignalSemaphore(*Drawing\Semaphore)
@@ -814,7 +814,7 @@ Module OSM
                       SelectElement(OSM\Marker(), OSM\EditMarkerIndex)
                       Protected Tile.Tile
                       LatLon2XY(@OSM\Marker()\Location, @Tile)
-                      Debug MouseX
+                     ; Debug MouseX
                       Tile\x + MouseX / OSM\TileSize
                       Tile\y + MouseY / OSM\TileSize
                       XY2LatLon(@Tile, @OSM\Marker()\Location)                      
@@ -852,10 +852,10 @@ Module OSM
                   Else ;Move Map
                     OSM\Drawing\x = OSM\Position\x / OSM\TileSize
                     OSM\Drawing\y = OSM\Position\y / OSM\TileSize
-                    Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
+                   ; Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
                     ;Draw()
-                    Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
+                   ; Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
                     ;SetGadgetText(#String_1, StrD(OSM\TargetLocation\Latitude))
                     ;SetGadgetText(#String_0, StrD(OSM\TargetLocation\Longitude))
                   EndIf 
@@ -1000,8 +1000,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 850
-; FirstLine = 771
+; CursorPosition = 840
+; FirstLine = 805
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
