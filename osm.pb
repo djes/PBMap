@@ -29,7 +29,7 @@ DeclareModule OSM
   Declare ZoomToArea()
   Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
-  Declare AddMarker(Latitude.d,Longitude.d,color.l=-1)
+  Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
 EndDeclareModule
 
 Module OSM 
@@ -85,8 +85,9 @@ Module OSM
   EndStructure
   
   Structure Marker
-    Location.Location
-    color.l
+    Location.Location                       ; Latitude and Longitude from Marker
+    color.l                                 ; Color Marker
+    CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (You must use VectorDrawing lib)
   EndStructure
   
   ;-OSM Structure
@@ -236,8 +237,8 @@ Module OSM
     OSM\Dirty = #False
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
-    
-    ;- Proxy details
+    OSM\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
+                                                  ;- Proxy details
     
     Global Proxy = #False
     
@@ -265,7 +266,7 @@ Module OSM
     If Result
       ClosePreferences()
     EndIf
-       
+    
     curl_global_init(#CURL_GLOBAL_ALL);
     
     ;- Main drawing thread launching
@@ -506,7 +507,7 @@ Module OSM
         ;If OSM\Moving
         ;  Break 2
         ;EndIf
-       
+        
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
           With *NewTile
@@ -599,11 +600,12 @@ Module OSM
   
   
   ; Add a Marker To the Map
-  Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1)
+  Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
     AddElement(OSM\Marker())
     OSM\Marker()\Location\Latitude=Latitude
     OSM\Marker()\Location\Longitude=Longitude
     OSM\Marker()\color=color
+    OSM\Marker()\CallBackPointer = CallBackPointer
   EndProcedure
   
   ; Draw all markers on the screen !
@@ -614,10 +616,14 @@ Module OSM
     Protected DeltaY = *Drawing\y * OSM\TileSize - (Int(*Drawing\y) * OSM\TileSize)
     
     ForEach OSM\Marker()
-      If OSM\Marker()\Location\Latitude<>0 And  OSM\Marker()\Location\Longitude<>0
-        GetPixelCoordFromLocation(OSM\Marker()\Location,@Pixel)
-        If Pixel\X+ DeltaX>0 And Pixel\Y+ DeltaY>0 And Pixel\X+ DeltaX<GadgetWidth(OSM\Gadget) And Pixel\Y<GadgetHeight(OSM\Gadget) ; Only if visible ^_^
-          Pointer(Pixel\X+ DeltaX,Pixel\Y+ DeltaY,OSM\Marker()\color)
+      If OSM\Marker()\Location\Latitude <> 0 And OSM\Marker()\Location\Longitude <> 0
+        GetPixelCoordFromLocation(OSM\Marker()\Location, @Pixel)
+        If Pixel\X + DeltaX > 0 And Pixel\Y + DeltaY > 0 And Pixel\X + DeltaX < GadgetWidth(OSM\Gadget) And Pixel\Y < GadgetHeight(OSM\Gadget) ; Only if visible ^_^
+          If OSM\Marker()\CallBackPointer > 0
+            CallFunctionFast(OSM\Marker()\CallBackPointer, Pixel\X + DeltaX, Pixel\Y + DeltaY)
+          Else
+            Pointer(Pixel\X + DeltaX, Pixel\Y + DeltaY, OSM\Marker()\color)
+          EndIf
         EndIf 
       EndIf 
     Next
@@ -689,7 +695,7 @@ Module OSM
   Macro Max(a,b)
     (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
   EndMacro
-    
+  
   Procedure  ZoomToArea()
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
@@ -771,6 +777,7 @@ Module OSM
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
     Protected OldX.i, OldY.i
+    Protected DeltaX.d, DeltaY.d
     Protected *Drawing.DrawingParameters
     
     If IsGadget(OSM\Gadget) And GadgetType(OSM\Gadget) = #PB_GadgetType_Canvas 
@@ -781,6 +788,19 @@ Module OSM
             Case OSM\Gadget
               Select EventType()
                 Case #PB_EventType_LeftButtonDown
+                  ;Check if we select a marker
+                  Protected Pixel.Pixel
+                  ForEach OSM\Marker()
+                    GetPixelCoordFromLocation(@OSM\Marker()\Location, @Pixel)
+                    ;LockMutex(OSM\Drawing\Mutex)
+                    DeltaX = OSM\Drawing\x * OSM\TileSize - (Int(OSM\Drawing\x) * OSM\TileSize)
+                    DeltaY = OSM\Drawing\y * OSM\TileSize - (Int(OSM\Drawing\y) * OSM\TileSize)
+                    ;UnlockMutex(OSM\Drawing\Mutex)
+                    If Pixel\X + DeltaX > GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - 4 And Pixel\X + DeltaX < GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) + 4 And Pixel\Y + DeltaY > GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - 4 And Pixel\Y + DeltaY < GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) + 4
+                      OSM\EditMarkerIndex = ListIndex(OSM\Marker())  
+                      Break
+                    EndIf  
+                  Next
                   ;Mem cursor Coord
                   OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                   OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) 
@@ -789,44 +809,56 @@ Module OSM
                     MouseX = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - OSM\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - OSM\MoveStartingPoint\y
                     OSM\Moving = #True
-                    ;Old move values 
-                    OldX = OSM\Position\x 
-                    OldY = OSM\Position\y
-                    ;New move values
-                    OSM\Position\x - MouseX
-                    OSM\Position\y - MouseY
-                    ;-*** Fill parameters and signal the drawing thread
-                    ;OSM tile position in tile.decimal
-                    LockMutex(OSM\Drawing\Mutex)
-                    OSM\Drawing\x = OSM\Position\x / OSM\TileSize
-                    OSM\Drawing\y = OSM\Position\y / OSM\TileSize
-                    OSM\Drawing\PassNb = 1
-                    UnlockMutex(OSM\Drawing\Mutex)
-                    ;Moved to a new tile ?
-                    ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
-                    XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
-                    ;EndIf
+                    ;move Marker
+                    If OSM\EditMarkerIndex > -1
+                      SelectElement(OSM\Marker(), OSM\EditMarkerIndex)
+                      Protected Tile.Tile
+                      LatLon2XY(@OSM\Marker()\Location, @Tile)
+                      Debug MouseX
+                      Tile\x + MouseX / OSM\TileSize
+                      Tile\y + MouseY / OSM\TileSize
+                      XY2LatLon(@Tile, @OSM\Marker()\Location)                      
+                    Else
+                      ;New move values
+                      OSM\Position\x - MouseX
+                      OSM\Position\y - MouseY
+                      ;-*** Fill parameters and signal the drawing thread
+                      ;OSM tile position in tile.decimal
+                      LockMutex(OSM\Drawing\Mutex)
+                      OSM\Drawing\x = OSM\Position\x / OSM\TileSize
+                      OSM\Drawing\y = OSM\Position\y / OSM\TileSize
+                      OSM\Drawing\PassNb = 1
+                      UnlockMutex(OSM\Drawing\Mutex)
+                      ;Moved to a new tile ?
+                      ;If (Int(OSM\Position\x / OSM\TileSize)) <> (Int(OldX / OSM\TileSize)) Or (Int(OSM\Position\y / OSM\TileSize)) <> (Int(OldY / OSM\TileSize)) 
+                      XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
+                      ;EndIf
+                      ;If CallBackLocation send Location to function
+                      If OSM\CallBackLocation > 0
+                        CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+                      EndIf 
+                    EndIf
                     ;Start drawing
                     SignalSemaphore(OSM\Drawing\Semaphore)
                     ;- ***                   
                     OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
                     OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
-                    ;If CallBackLocation send Location to function
-                    If OSM\CallBackLocation>0
-                      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
-                    EndIf 
-                  EndIf
+                  EndIf 
                 Case #PB_EventType_LeftButtonUp
                   OSM\Moving = #False
                   OSM\MoveStartingPoint\x = - 1
-                  OSM\Drawing\x = OSM\Position\x / OSM\TileSize
-                  OSM\Drawing\y = OSM\Position\y / OSM\TileSize
-                  Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
-                  XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
-                  ;Draw()
-                  Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
-                  ;SetGadgetText(#String_1, StrD(OSM\TargetLocation\Latitude))
-                  ;SetGadgetText(#String_0, StrD(OSM\TargetLocation\Longitude))
+                  If OSM\EditMarkerIndex > -1
+                    OSM\EditMarkerIndex = -1
+                  Else ;Move Map
+                    OSM\Drawing\x = OSM\Position\x / OSM\TileSize
+                    OSM\Drawing\y = OSM\Position\y / OSM\TileSize
+                    Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
+                    XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
+                    ;Draw()
+                    Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
+                    ;SetGadgetText(#String_1, StrD(OSM\TargetLocation\Latitude))
+                    ;SetGadgetText(#String_0, StrD(OSM\TargetLocation\Longitude))
+                  EndIf 
               EndSelect
           EndSelect
       EndSelect
@@ -874,6 +906,18 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
+  Procedure MyPointer(x.i, y.i)
+    Protected color.l
+    color=RGBA(0, 255, 0, 255)
+    VectorSourceColor(color)
+    MovePathCursor(x, y)
+    AddPathLine(-16,-32,#PB_Path_Relative)
+    AddPathCircle(16,0,16,180,0,#PB_Path_Relative)
+    AddPathLine(-16,32,#PB_Path_Relative)
+    VectorSourceColor(color)
+    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
+  EndProcedure
+  
   Procedure ResizeAll()
     ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
     ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -918,6 +962,8 @@ CompilerIf #PB_Compiler_IsMainFile
     Define pfValue.d
     OSM::SetLocation(49.04599, 2.03347, 17)
     OSM::SetCallBackLocation(@UpdateLocation())
+    OSM::AddMarker(49.0446828398,2.0349812508,-1,@MyPointer())
+    
     
     Repeat
       Event = WaitWindowEvent()
@@ -954,8 +1000,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 723
-; FirstLine = 671
+; CursorPosition = 850
+; FirstLine = 771
 ; Folding = ------
 ; EnableUnicode
 ; EnableThread
