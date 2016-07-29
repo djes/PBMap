@@ -669,7 +669,7 @@ Module OSM
     ForEach OSM\Marker()
       If OSM\Marker()\Location\Latitude <> 0 And OSM\Marker()\Location\Longitude <> 0
         GetPixelCoordFromLocation(OSM\Marker()\Location, @Pixel)
-        If Pixel\X > 0 And Pixel\Y > 0 And Pixel\X < GadgetWidth(OSM\Gadget) And Pixel\Y < GadgetHeight(OSM\Gadget) ; Only if visible ^_^
+        If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(OSM\Gadget) And Pixel\Y < GadgetHeight(OSM\Gadget) ; Only if visible ^_^
           If OSM\Marker()\CallBackPointer > 0
             CallFunctionFast(OSM\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
           Else
@@ -869,7 +869,6 @@ Module OSM
                     ;move Marker
                     If OSM\EditMarkerIndex > -1
                       SelectElement(OSM\Marker(), OSM\EditMarkerIndex)
-                      Protected Tile.Tile
                       LatLon2XY(@OSM\Marker()\Location, @Marker)
                       Marker\x + MouseX / OSM\TileSize
                       Marker\y + MouseY / OSM\TileSize
@@ -1055,8 +1054,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 697
-; FirstLine = 683
+; CursorPosition = 883
+; FirstLine = 869
 ; Folding = -------
 ; EnableUnicode
 ; EnableThread
