@@ -30,6 +30,8 @@ DeclareModule OSM
   Declare SetCallBackLocation(*CallBackLocation)
   Declare LoadGpxFile(file.s);  
   Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
+  Declare Quit()
+  Declare Error(msg.s)
 EndDeclareModule
 
 Module OSM 
@@ -124,6 +126,7 @@ Module OSM
     Dirty.i                                 ;To signal that drawing need a refresh
     CurlMutex.i                             ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     
+    MainDrawingThread.i
     List TilesThreads.TileThread()
     
     List track.Location()                   ;to display a GPX track
@@ -132,6 +135,10 @@ Module OSM
   EndStructure
   
   Global OSM.OSM, Null.i
+  
+  Procedure Error(msg.s)
+    Debug msg, 2
+  EndProcedure
   
   ;- *** CURL specific ***
   
@@ -146,13 +153,13 @@ Module OSM
     If *ReceiveHTTPToMemoryBuffer = 0
       *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
       If *ReceiveHTTPToMemoryBuffer = 0
-        ; Debug "Problem allocating memory"
+         Debug "Problem allocating memory"
         End
       EndIf
     Else
       *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
       If *ReceiveHTTPToMemoryBuffer = 0
-        ; Debug "Problem reallocating memory"
+         Debug "Problem reallocating memory"
         End
       EndIf  
     EndIf
@@ -171,7 +178,7 @@ Module OSM
     ;Debug "ReceiveHTTPToMemory" + URL$ + ProxyURL$ + ProxyPort$ + ProxyUser$ + ProxyPassword$
     
     If Len(URL$)
-      
+
       curl  = curl_easy_init()
       
       If curl
@@ -181,7 +188,8 @@ Module OSM
         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
-        curl_easy_setopt(curl, #CURLOPT_HEADER, 0)      
+        curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
+        curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
         
         If Len(ProxyURL$)
@@ -201,9 +209,12 @@ Module OSM
         EndIf
         
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
+        LockMutex(OSM\CurlMutex)
         res = curl_easy_perform(curl)
-        
+        UnlockMutex(OSM\CurlMutex)  
+    
         If res = #CURLE_OK
+
           *Buffer = AllocateMemory(ReceiveHTTPToMemoryBufferPtr)
           If *Buffer
             CopyMemory(*ReceiveHTTPToMemoryBuffer, *Buffer, ReceiveHTTPToMemoryBufferPtr)
@@ -278,11 +289,32 @@ Module OSM
       ClosePreferences()
     EndIf
     
-    curl_global_init(#CURL_GLOBAL_ALL);
+    curl_global_init(#CURL_GLOBAL_WIN32);
     
     ;- Main drawing thread launching
-    CreateThread(@DrawingThread(), @OSM\Drawing)
+    OSM\MainDrawingThread = CreateThread(@DrawingThread(), @OSM\Drawing)
+    If OSM\MainDrawingThread = 0
+      Error("MapGadget : Can't create main drawing thread")
+      End
+    EndIf
     
+  EndProcedure
+  
+  Procedure Quit()
+    ;kill main drawing thread
+    KillThread(OSM\MainDrawingThread)
+    
+    ;wait for loading threads to finish nicely
+    ResetList( OSM\TilesThreads()) 
+    While NextElement(OSM\TilesThreads())
+      If IsThread(OSM\TilesThreads()\GetImageThread) = 0
+        FreeMemory(OSM\TilesThreads()\Tile)
+        DeleteElement(OSM\TilesThreads())
+        ResetList( OSM\TilesThreads()) 
+      EndIf
+    Wend
+    
+    curl_global_cleanup()  
   EndProcedure
   
   Macro Min(a,b)
@@ -452,9 +484,9 @@ Module OSM
      Debug "Check if we have this image on Web"
     
     If Proxy
-      LockMutex(OSM\CurlMutex)             ;Seems no more necessary
+      ;LockMutex(OSM\CurlMutex)
       *Buffer = CurlReceiveHTTPToMemory(TileURL, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
-      UnlockMutex(OSM\CurlMutex)
+      ;UnlockMutex(OSM\CurlMutex)
     Else
       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
     EndIf
@@ -1051,12 +1083,14 @@ CompilerIf #PB_Compiler_IsMainFile
           ResizeAll()
       EndSelect
     Until Quit = #True
+    
+    OSM::Quit()
   EndIf
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 245
-; FirstLine = 235
+; CursorPosition = 213
+; FirstLine = 188
 ; Folding = -------
 ; EnableUnicode
 ; EnableThread
