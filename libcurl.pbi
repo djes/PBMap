@@ -1049,19 +1049,24 @@ Procedure.s curlGetData()
 EndProcedure
 
 Procedure.s str2curl(string.s)
-  Protected *curlstring 
-  If *curlstring : FreeMemory(*curlstring) : EndIf
+  Protected *curlstring, newstring.s
   *curlstring = AllocateMemory(Len(string) + 1)
-  PokeS(*curlstring,string,-1,#PB_Ascii)
-  ProcedureReturn PeekS(*curlstring,-1)
+  If *curlstring 
+    PokeS(*curlstring,string,-1,#PB_Ascii)
+    newstring = PeekS(*curlstring,-1)
+    FreeMemory(*curlstring)
+    ProcedureReturn newstring
+  Else
+    ProcedureReturn ""
+  EndIf
 EndProcedure
 ; IDE Options = PureBasic 5.40 LTS Beta 5 (Windows - x86)
 ; EnableUnicode
 ; EnableXP
 ; EnableBuildCount = 0
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 1041
-; FirstLine = 1003
+; CursorPosition = 1057
+; FirstLine = 1008
 ; Folding = --
 ; EnableUnicode
 ; EnableXP

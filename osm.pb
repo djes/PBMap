@@ -122,7 +122,8 @@ Module OSM
     
     Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
-                                            ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
+    CurlMutex.i                             ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
+    
     List TilesThreads.TileThread()
     
     List track.Location()                   ;to display a GPX track
@@ -242,7 +243,7 @@ Module OSM
     OSM\ZoomMax = 18
     OSM\MoveStartingPoint\x = - 1
     OSM\TileSize = 256
-    ;OSM\CurlMutex = CreateMutex()
+    OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
@@ -250,7 +251,7 @@ Module OSM
     OSM\Font=LoadFont(#PB_Any, "Comic Sans MS", 20, #PB_Font_Bold)
     ;- Proxy details
     
-    Global Proxy = #False
+    Global Proxy = #True
     
     ;Use this to customize your preferences    
     ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
@@ -448,30 +449,30 @@ Module OSM
     Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"
     Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
     
-    ; Debug "Check if we have this image on Web"
+     Debug "Check if we have this image on Web"
     
     If Proxy
-      ;LockMutex(OSM\CurlMutex)             ;Seems no more necessary
+      LockMutex(OSM\CurlMutex)             ;Seems no more necessary
       *Buffer = CurlReceiveHTTPToMemory(TileURL, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
-      ;UnlockMutex(OSM\CurlMutex)
+      UnlockMutex(OSM\CurlMutex)
     Else
       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
     EndIf
-    ; Debug "Image buffer " + Str(*Buffer)
+     Debug "Image buffer " + Str(*Buffer)
     
     If *Buffer
       nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
       If IsImage(nImage)
-        ; Debug "Load from web " + TileURL + " as Tile nb " + nImage
+         Debug "Load from web " + TileURL + " as Tile nb " + nImage
         SaveImage(nImage, OSM\HDDCachePath + CacheFile, #PB_ImagePlugin_PNG)
         FreeMemory(*Buffer)
       Else
-        ; Debug "Can't catch image " + TileURL
+         Debug "Can't catch image " + TileURL
         nImage = -1
         ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
       EndIf
     Else
-      ; Debug "Problem loading from web " + TileURL  
+       Debug "Problem loading from web " + TileURL  
     EndIf      
     
     ProcedureReturn nImage
@@ -1053,9 +1054,9 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
 CompilerEndIf
 
-; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 883
-; FirstLine = 869
+; IDE Options = PureBasic 5.42 LTS (Windows - x86)
+; CursorPosition = 245
+; FirstLine = 235
 ; Folding = -------
 ; EnableUnicode
 ; EnableThread
