@@ -208,6 +208,7 @@ Module OSM
           EndIf
         EndIf
         
+        ;TODO improve with https://github.com/Progi1984/RWrappers/tree/master/LibCurl
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
         LockMutex(OSM\CurlMutex)
         res = curl_easy_perform(curl)
@@ -1089,7 +1090,7 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 213
+; CursorPosition = 211
 ; FirstLine = 188
 ; Folding = -------
 ; EnableUnicode
