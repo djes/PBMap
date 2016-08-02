@@ -16,6 +16,7 @@ CompilerEndIf
 EnableExplicit
 
 InitNetwork()
+OpenConsole()
 UsePNGImageDecoder()
 UsePNGImageEncoder()
 
@@ -124,7 +125,7 @@ Module OSM
     
     Moving.i
     Dirty.i                                 ;To signal that drawing need a refresh
-    CurlMutex.i                             ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
+    ;CurlMutex.i                             ;CurlMutex.i                            ;seems that I can't thread curl ! :(((((
     
     MainDrawingThread.i
     List TilesThreads.TileThread()
@@ -142,55 +143,140 @@ Module OSM
   
   ;- *** CURL specific ***
   
-  Global *ReceiveHTTPToMemoryBuffer, ReceiveHTTPToMemoryBufferPtr.i, ReceivedData.s
-  IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
+;   Global *ReceiveHTTPToMemoryBuffer, ReceiveHTTPToMemoryBufferPtr.i, ReceivedData.s
+   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
+;   
+;   ProcedureC ReceiveHTTPWriteToMemoryFunction(*ptr, Size.i, NMemB.i, *Stream)
+;     
+;     Protected SizeProper.i  = Size & 255
+;     Protected NMemBProper.i = NMemB
+;     
+;     If *ReceiveHTTPToMemoryBuffer = 0
+;       *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
+;       If *ReceiveHTTPToMemoryBuffer = 0
+;         Debug "Problem allocating memory"
+;         End
+;       EndIf
+;     Else
+;       *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
+;       If *ReceiveHTTPToMemoryBuffer = 0
+;         Debug "Problem reallocating memory"
+;         End
+;       EndIf  
+;     EndIf
+;     
+;     CopyMemory(*ptr, *ReceiveHTTPToMemoryBuffer + ReceiveHTTPToMemoryBufferPtr, SizeProper * NMemBProper)
+;     ReceiveHTTPToMemoryBufferPtr + SizeProper * NMemBProper
+;     
+;     ProcedureReturn SizeProper * NMemBProper
+;     
+;   EndProcedure
+;   
+;   Procedure.i CurlReceiveHTTPToMemory(URL$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
+;     
+;     Protected *Buffer, curl.i, Timeout.i, res.i
+;     
+;     ;Debug "ReceiveHTTPToMemory" + URL$ + ProxyURL$ + ProxyPort$ + ProxyUser$ + ProxyPassword$
+;     
+;     If Len(URL$)
+;       
+;       curl  = curl_easy_init()
+;       
+;       If curl
+;         
+;         Timeout = 3
+;         
+;         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
+;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
+;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
+;         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
+;         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
+;         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
+;         
+;         If Len(ProxyURL$)
+;           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
+;           If Len(ProxyPort$)
+;             ProxyURL$ + ":" + ProxyPort$
+;           EndIf
+;           ; Debug ProxyURL$
+;           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
+;           If Len(ProxyUser$)
+;             If Len(ProxyPassword$)
+;               ProxyUser$ + ":" + ProxyPassword$
+;             EndIf
+;             ;Debug ProxyUser$
+;             curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
+;           EndIf
+;         EndIf
+;         
+;         ;TODO improve with https://github.com/Progi1984/RWrappers/tree/master/LibCurl
+;         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
+;         LockMutex(OSM\CurlMutex)
+;         res = curl_easy_perform(curl)
+;         UnlockMutex(OSM\CurlMutex)  
+;         
+;         If res = #CURLE_OK
+;           
+;           *Buffer = AllocateMemory(ReceiveHTTPToMemoryBufferPtr)
+;           If *Buffer
+;             CopyMemory(*ReceiveHTTPToMemoryBuffer, *Buffer, ReceiveHTTPToMemoryBufferPtr)
+;             FreeMemory(*ReceiveHTTPToMemoryBuffer)
+;             *ReceiveHTTPToMemoryBuffer = #Null
+;             ReceiveHTTPToMemoryBufferPtr = 0
+;           Else
+;             ; Debug "Problem allocating buffer"         
+;           EndIf        
+;           ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
+;         Else
+;           ; Debug "CURL NOT OK"
+;         EndIf
+;         
+;         curl_easy_cleanup(curl)
+;         
+;       Else
+;         ; Debug "Can't Init CURL"
+;       EndIf
+;       
+;     EndIf
+;     
+;     ; Debug "Curl Buffer : " + Str(*Buffer)
+;     
+;     ProcedureReturn *Buffer
+;     
+;   EndProcedure
   
-  ProcedureC ReceiveHTTPWriteToMemoryFunction(*ptr, Size.i, NMemB.i, *Stream)
-    
-    Protected SizeProper.i  = Size & 255
-    Protected NMemBProper.i = NMemB
-    
-    If *ReceiveHTTPToMemoryBuffer = 0
-      *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
-      If *ReceiveHTTPToMemoryBuffer = 0
-         Debug "Problem allocating memory"
-        End
-      EndIf
-    Else
-      *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
-      If *ReceiveHTTPToMemoryBuffer = 0
-         Debug "Problem reallocating memory"
-        End
-      EndIf  
-    EndIf
-    
-    CopyMemory(*ptr, *ReceiveHTTPToMemoryBuffer + ReceiveHTTPToMemoryBufferPtr, SizeProper * NMemBProper)
-    ReceiveHTTPToMemoryBufferPtr + SizeProper * NMemBProper
-    
-    ProcedureReturn SizeProper * NMemBProper
+  ProcedureC ReceiveHTTPWriteToFileFunction(*ptr, Size.i, NMemB.i, FileHandle.i)
+       
+    ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)
     
   EndProcedure
   
-  Procedure.i CurlReceiveHTTPToMemory(URL$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
+  Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
     
     Protected *Buffer, curl.i, Timeout.i, res.i
+    Protected FileHandle.i
     
-    ;Debug "ReceiveHTTPToMemory" + URL$ + ProxyURL$ + ProxyPort$ + ProxyUser$ + ProxyPassword$
+    Debug "ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$
+    Debug " to file : " + DestFileName$
     
-    If Len(URL$)
-
+    FileHandle = CreateFile(#PB_Any, DestFileName$)
+    
+    If FileHandle And Len(URL$)
+      
       curl  = curl_easy_init()
       
       If curl
         
-        Timeout = 3
+        Timeout = 120
         
         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
-        curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
+        curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)        
+        curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
+        curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 0)
         
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
@@ -208,41 +294,30 @@ Module OSM
           EndIf
         EndIf
         
-        ;TODO improve with https://github.com/Progi1984/RWrappers/tree/master/LibCurl
-        curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
-        LockMutex(OSM\CurlMutex)
+        curl_easy_setopt(curl, #CURLOPT_WRITEDATA, FileHandle)
+        curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
+        ;LockMutex(OSM\CurlMutex) ;Not any more necessary
         res = curl_easy_perform(curl)
-        UnlockMutex(OSM\CurlMutex)  
-    
-        If res = #CURLE_OK
-
-          *Buffer = AllocateMemory(ReceiveHTTPToMemoryBufferPtr)
-          If *Buffer
-            CopyMemory(*ReceiveHTTPToMemoryBuffer, *Buffer, ReceiveHTTPToMemoryBufferPtr)
-            FreeMemory(*ReceiveHTTPToMemoryBuffer)
-            *ReceiveHTTPToMemoryBuffer = #Null
-            ReceiveHTTPToMemoryBufferPtr = 0
-          Else
-            ; Debug "Problem allocating buffer"         
-          EndIf        
-          ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
-        Else
-          ; Debug "CURL NOT OK"
+        ;UnlockMutex(OSM\CurlMutex)  
+        If res <> #CURLE_OK
+          Debug "CURL NOT OK"
         EndIf
         
         curl_easy_cleanup(curl)
         
       Else
-        ; Debug "Can't Init CURL"
+        Debug "Can't Init CURL"
       EndIf
+      
+      CloseFile(FileHandle)
+      ProcedureReturn FileSize(DestFileName$)
       
     EndIf
     
-    ; Debug "Curl Buffer : " + Str(*Buffer)
-    
-    ProcedureReturn *Buffer
+    ProcedureReturn #False
     
   EndProcedure
+  
   ;- ***
   
   Procedure InitOSM()
@@ -255,7 +330,7 @@ Module OSM
     OSM\ZoomMax = 18
     OSM\MoveStartingPoint\x = - 1
     OSM\TileSize = 256
-    OSM\CurlMutex = CreateMutex()
+    ;OSM\CurlMutex = CreateMutex()
     OSM\Dirty = #False
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
@@ -384,7 +459,7 @@ Module OSM
     Protected mapWidth.l    = Pow(2,OSM\Zoom+8)
     Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
     Protected x1.l,y1.l
-        
+    
     ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
@@ -452,61 +527,64 @@ Module OSM
     
   EndProcedure
   
-  Procedure.i GetTileFromHDD(Zoom.i, XTile.i, YTile.i)
+  Procedure.i GetTileFromHDD(CacheFile.s)
     
     Protected nImage.i
-    Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
-    
-    ; Debug "Check if we have this image on HDD"
-    
-    If FileSize(OSM\HDDCachePath + cacheFile) > 0
+        
+    If FileSize(CacheFile) > 0
       
-      nImage = LoadImage(#PB_Any, OSM\HDDCachePath + CacheFile)
+      nImage = LoadImage(#PB_Any, CacheFile)
       
       If IsImage(nImage)
-        ; Debug "Load from HDD Tile " + CacheFile
-        ProcedureReturn nImage
-      EndIf 
+        Debug "Loadimage " + CacheFile + " -> Success !"
+        ProcedureReturn nImage  
+      EndIf
       
     EndIf
+    
+    Debug "Loadimage " + CacheFile + " -> Failed !"
     
     ProcedureReturn -1
     
   EndProcedure
   
-  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i)
+  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s)
     
     Protected *Buffer
     Protected nImage.i = -1
+    Protected FileHandle.i
     
     Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"
-    Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
+    ;    Protected CacheFile.s = "OSM_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
     
-     Debug "Check if we have this image on Web"
+    Debug "Check if we have this image on Web"
     
     If Proxy
-      ;LockMutex(OSM\CurlMutex)
-      *Buffer = CurlReceiveHTTPToMemory(TileURL, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
-      ;UnlockMutex(OSM\CurlMutex)
-    Else
-      *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-    EndIf
-     Debug "Image buffer " + Str(*Buffer)
-    
-    If *Buffer
-      nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-      If IsImage(nImage)
-         Debug "Load from web " + TileURL + " as Tile nb " + nImage
-        SaveImage(nImage, OSM\HDDCachePath + CacheFile, #PB_ImagePlugin_PNG)
-        FreeMemory(*Buffer)
+      ;*Buffer = CurlReceiveHTTPToMemory(TileURL, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
+      FileHandle = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
+      If FileHandle
+        nImage = GetTileFromHDD(CacheFile)
       Else
-         Debug "Can't catch image " + TileURL
-        nImage = -1
-        ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
+        Debug "File " + TileURL + " not correctly received with Curl and proxy"
       EndIf
     Else
-       Debug "Problem loading from web " + TileURL  
-    EndIf      
+      *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
+      
+      If *Buffer
+        nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
+        If IsImage(nImage)
+          Debug "Load from web " + TileURL + " as Tile nb " + nImage
+          SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
+          FreeMemory(*Buffer)
+        Else
+          Debug "Can't catch image " + TileURL
+          nImage = -1
+          ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
+        EndIf
+      Else
+        Debug "ReceiveHTTPMemory's buffer is empty"
+      EndIf
+    EndIf
     
     ProcedureReturn nImage
     
@@ -516,12 +594,13 @@ Module OSM
     
     Protected nImage.i = -1
     Protected key.s = "Z" + RSet(Str(*Tile\OSMZoom), 4, "0") + "X" + RSet(Str(*Tile\OSMTileX), 8, "0") + "Y" + RSet(Str(*Tile\OSMTileY), 8, "0")
+    Protected CacheFile.s = OSM\HDDCachePath + "OSM_" + Str(*Tile\OSMZoom) + "_" + Str(*Tile\OSMTileX) + "_" + Str(*Tile\OSMTileY) + ".png"
     
     ;Adding the image to the cache if possible
     AddMapElement(OSM\MemCache\Images(), key)
-    nImage = GetTileFromHDD(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
+    nImage = GetTileFromHDD(CacheFile)
     If nImage = -1
-      nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY)
+      nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY, CacheFile)
     EndIf
     If nImage <> -1
       OSM\MemCache\Images(key)\nImage = nImage
@@ -712,7 +791,7 @@ Module OSM
         EndIf 
       EndIf 
     Next
-      
+    
   EndProcedure
   
   Procedure DrawingThread(*SharedDrawing.DrawingParameters)
@@ -1090,8 +1169,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 211
-; FirstLine = 188
+; ExecutableFormat = Console
+; CursorPosition = 146
+; FirstLine = 117
 ; Folding = -------
 ; EnableUnicode
 ; EnableThread

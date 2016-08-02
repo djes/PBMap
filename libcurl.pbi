@@ -1026,27 +1026,27 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   EndImport
 CompilerEndIf
 
-ProcedureC  curlWriteData(*ptr, Size, NMemB, *Stream)
-  ;retreives utf-8/ascii encoded data
-  Protected SizeProper.i  = Size & 255
-  Protected NMemBProper.i = NMemB
-  Protected MyDataS.s
-  ;Shared ReceivedData.s
-  
-  MyDataS = PeekS(*ptr, SizeProper * NMemBProper, #PB_UTF8)
-  ReceivedData + MyDataS
-  ProcedureReturn SizeProper * NMemBProper
-EndProcedure
+; ProcedureC  curlWriteData(*ptr, Size, NMemB, *Stream)
+;   ;retreives utf-8/ascii encoded data
+;   Protected SizeProper.i  = Size & 255
+;   Protected NMemBProper.i = NMemB
+;   Protected MyDataS.s
+;   ;Shared ReceivedData.s
+;   
+;   MyDataS = PeekS(*ptr, SizeProper * NMemBProper, #PB_UTF8)
+;   ReceivedData + MyDataS
+;   ProcedureReturn SizeProper * NMemBProper
+; EndProcedure
 
-Procedure.s curlGetData()
-  ;Shared ReceivedData.s
-  Protected ReturnData.s
-  
-  ReturnData.s = ReceivedData.s
-  ReceivedData.s = ""
-  
-  ProcedureReturn ReturnData.s
-EndProcedure
+; Procedure.s curlGetData()
+;   ;Shared ReceivedData.s
+;   Protected ReturnData.s
+;   
+;   ReturnData.s = ReceivedData.s
+;   ReceivedData.s = ""
+;   
+;   ProcedureReturn ReturnData.s
+; EndProcedure
 
 Procedure.s str2curl(string.s)
   Protected *curlstring, newstring.s
@@ -1065,7 +1065,7 @@ EndProcedure
 ; EnableXP
 ; EnableBuildCount = 0
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 1057
+; CursorPosition = 1048
 ; FirstLine = 1008
 ; Folding = --
 ; EnableUnicode
