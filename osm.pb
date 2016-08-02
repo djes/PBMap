@@ -626,16 +626,44 @@ Module OSM
     
   EndProcedure
   
+Procedure TrackPointer(x.i, y.i,dist.l)
+    Protected color.l
+    color=RGBA(0, 0, 0, 255)
+    MovePathCursor(x,y)
+    AddPathLine(-8,-16,#PB_Path_Relative)
+    AddPathLine(16,0,#PB_Path_Relative)
+    AddPathLine(-8,16,#PB_Path_Relative)
+    VectorSourceColor(color)
+    AddPathCircle(x,y-20,14)
+    FillPath()
+    VectorSourceColor(RGBA(255, 255, 255, 255))
+    AddPathCircle(x,y-20,12)
+    FillPath()
+    VectorFont(FontID(OSM\Font), 13)
+    MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-20-VectorTextHeight(Str(dist))/2)
+     VectorSourceColor(RGBA(0, 0, 0, 255))
+    DrawVectorText(Str(dist))
+EndProcedure
   Procedure  DrawTrack(*Drawing.DrawingParameters)
-    
     Protected Pixel.PixelPosition
     Protected Location.Location
-    
     Protected km.f, memKm.i
-    
     If ListSize(OSM\track())>0
-      
+      ;Trace Track
       LockMutex(OSM\Drawing\Mutex)
+      ForEach OSM\track()
+        If *Drawing\TargetLocation\Latitude<>0 And  *Drawing\TargetLocation\Longitude<>0
+          GetPixelCoordFromLocation(@OSM\track(),@Pixel)
+          If ListIndex(OSM\track())=0
+            MovePathCursor(Pixel\X, Pixel\Y)
+          Else
+            AddPathLine(Pixel\X, Pixel\Y)    
+          EndIf 
+        EndIf 
+      Next
+      VectorSourceColor(RGBA(0, 255, 0, 150))
+      StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
+      ;Draw Distance
       ForEach OSM\track()
         ;-Test Distance
         If ListIndex(OSM\track())=0
@@ -646,33 +674,18 @@ Module OSM
           Location\Latitude=OSM\track()\Latitude
           Location\Longitude=OSM\track()\Longitude 
         EndIf 
-        If *Drawing\TargetLocation\Latitude<>0 And  *Drawing\TargetLocation\Longitude<>0
-          GetPixelCoordFromLocation(@OSM\track(),@Pixel)
-          If ListIndex(OSM\track())=0
-            MovePathCursor(Pixel\X, Pixel\Y)
-          Else
-            AddPathLine(Pixel\X, Pixel\Y)
-            If Int(km)<>memKm
-              memKm=Int(km)
-              If OSM\Zoom>10
-                BeginVectorLayer()
-                VectorFont(FontID(OSM\Font), OSM\Zoom)
-                VectorSourceColor(RGBA(50, 50, 50, 255))
-                DrawVectorText(Str(Int(km)))
-                EndVectorLayer()
-              EndIf 
-            EndIf
-            
+        GetPixelCoordFromLocation(@OSM\track(),@Pixel)
+        If Int(km)<>memKm
+          memKm=Int(km)
+          If OSM\Zoom>10
+            BeginVectorLayer()
+            TrackPointer(Pixel\X , Pixel\Y,Int(km))
+            EndVectorLayer()
           EndIf 
-        EndIf 
+        EndIf
       Next
       UnlockMutex(OSM\Drawing\Mutex)  
-      
-      VectorSourceColor(RGBA(0, 255, 0, 150))
-      StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
-      
     EndIf
-    
   EndProcedure
   
   ; Add a Marker To the Map
