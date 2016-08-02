@@ -24,7 +24,7 @@ DeclareModule OSM
   Declare InitOSM()
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
-  Declare SetLocation(latitude.d, longitude.d, zoom = 15)
+  Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
   Declare DrawingThread(Null)
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare ZoomToArea()
@@ -33,6 +33,7 @@ DeclareModule OSM
   Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
   Declare Quit()
   Declare Error(msg.s)
+  Declare Refresh()
 EndDeclareModule
 
 Module OSM 
@@ -770,13 +771,25 @@ EndProcedure
     
   EndProcedure
   
-  Procedure SetLocation(latitude.d, longitude.d, zoom = 15)
+  Procedure Refresh()
     
-    OSM\TargetLocation\Latitude = latitude
-    OSM\TargetLocation\Longitude = longitude
+    SignalSemaphore(OSM\Drawing\Semaphore)
     
-    OSM\Zoom = zoom
+  EndProcedure
+  
+  Procedure SetLocation(latitude.d, longitude.d, zoom = 15, Mode.i = #PB_Absolute)
     
+    Select Mode
+      Case #PB_Absolute
+        OSM\TargetLocation\Latitude = latitude
+        OSM\TargetLocation\Longitude = longitude
+        OSM\Zoom = zoom
+      Case #PB_Relative
+        OSM\TargetLocation\Latitude  + latitude
+        OSM\TargetLocation\Longitude + longitude
+        OSM\Zoom + zoom
+    EndSelect
+        
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     
@@ -788,6 +801,9 @@ EndProcedure
     ;Start drawing
     SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
+    If OSM\CallBackLocation > 0
+      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+    EndIf 
     
   EndProcedure
   
@@ -861,6 +877,9 @@ EndProcedure
     ;Start drawing
     SignalSemaphore(OSM\Drawing\Semaphore)
     ;***
+    If OSM\CallBackLocation > 0
+      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+    EndIf 
     
   EndProcedure
   
@@ -1012,10 +1031,10 @@ CompilerIf #PB_Compiler_IsMainFile
   Procedure ResizeAll()
     ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
     ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Left,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Right,WindowWidth(#Window_0)-90,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Up,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Down,WindowWidth(#Window_0)-110,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Left, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Right,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Up,   WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Down, WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Text_2,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Button_4,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Button_5,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -1025,8 +1044,10 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    OSM::Refresh()
   EndProcedure
   
+  ;- MAIN TEST
   If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     OSM::InitOSM()
     LoadFont(0, "Wingdings", 12)
@@ -1034,12 +1055,12 @@ CompilerIf #PB_Compiler_IsMainFile
     
     OSM::MapGadget(#Map, 10, 10, 512, 512)
     
-    TextGadget(#Text_1, 530, 50, 60, 15, "Movements : ")
-    ButtonGadget(#Gdt_Left, 550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
+    TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
+    ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
-    ButtonGadget(#Gdt_Up, 580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
-    ButtonGadget(#Gdt_Down, 580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
-    TextGadget(#Text_2, 530, 160, 60, 15, "Zoom : ")
+    ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
+    ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
+    TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
     ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
     ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
     TextGadget(#Text_3, 530, 230, 60, 15, "Latitude : ")
@@ -1051,10 +1072,9 @@ CompilerIf #PB_Compiler_IsMainFile
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
-    OSM::SetLocation(49.04599, 2.03347, 17)
     OSM::SetCallBackLocation(@UpdateLocation())
+    OSM::SetLocation(49.04599, 2.03347, 17)
     OSM::AddMarker(49.0446828398,2.0349812508,-1,@MyPointer())
-    
     
     Repeat
       Event = WaitWindowEvent()
@@ -1066,19 +1086,19 @@ CompilerIf #PB_Compiler_IsMainFile
           Gadget = EventGadget()
           Select Gadget
             Case #Gdt_Up
-              ;OSM::Move(0,-0.5)
+              OSM::SetLocation(0.0001, 0, 0, #PB_Relative)
             Case #Gdt_Down
-              ;OSM::Move(0,0.5)
+              OSM::SetLocation(-0.0001, 0, 0, #PB_Relative)
             Case #Gdt_Left
-              ;OSM::Move(-0.5,0)
+              OSM::SetLocation(0, -0.0001, 0, #PB_Relative)
             Case #Gdt_Right
-              ;OSM::Move(0.5,0)
+              OSM::SetLocation(0, 0.0001, 0, #PB_Relative)
             Case #Button_4
               OSM::SetZoom(1)
             Case #Button_5
               OSM::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier Ã  charger", "", "*.gpx", 0))
+              OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
               OSM::ZoomToArea() ; <-To center the view, and to viex all the track
             Case #Gdt_AddMarker
               OSM:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
@@ -1094,9 +1114,9 @@ CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
 ; ExecutableFormat = Console
-; CursorPosition = 594
-; FirstLine = 569
-; Folding = -------
+; CursorPosition = 273
+; FirstLine = 237
+; Folding = --------
 ; EnableUnicode
 ; EnableThread
 ; EnableXP
