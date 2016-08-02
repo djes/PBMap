@@ -142,10 +142,10 @@ Module OSM
   
   ;- *** CURL specific ***
   
-   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
+  IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
   
   ProcedureC ReceiveHTTPWriteToFileFunction(*ptr, Size.i, NMemB.i, FileHandle.i)
-       
+    
     ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)
     
   EndProcedure
@@ -175,7 +175,7 @@ Module OSM
         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)        
         curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
-        curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 0)
+        ;curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 60)
         
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
@@ -512,8 +512,29 @@ Module OSM
     
     MovePathCursor(x, y)
     DrawVectorImage(ImageID(*Tile\nImage))
+    
+  EndProcedure
+  
+  Procedure DrawLoading(*Tile.Tile)
+    
+    Protected x = *Tile\Position\x 
+    Protected y = *Tile\Position\y 
+    Protected Text$ = "Loading"
+    
+    ; Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
+    ; Debug "  at coords " + Str(x) + "," + Str(y)
+    
+    BeginVectorLayer()
+    ;MovePathCursor(x, y)
+    VectorSourceColor(RGBA(255, 255, 255, 128))
+    AddPathBox(x, y, OSM\TileSize, OSM\TileSize)
+    FillPath()
     MovePathCursor(x, y)
-    DrawVectorText(Str(x) + ", " + Str(y))
+    VectorFont(FontID(OSM\Font), OSM\TileSize / 20)
+    VectorSourceColor(RGBA(150, 150, 150, 255))
+    MovePathCursor(x + (OSM\TileSize - VectorTextWidth(Text$)) / 2, y + (OSM\TileSize - VectorTextHeight(Text$)) / 2)
+    DrawVectorText(Text$)
+    EndVectorLayer()
     
   EndProcedure
   
@@ -564,7 +585,8 @@ Module OSM
             If IsImage(\nImage)   
               DrawTile(*NewTile)
             Else
-              ; Debug "Image missing"
+              ;Debug "Image missing"
+              DrawLoading(*NewTile)
               *Drawing\Dirty = #True ;Signals that this image is missing so we should have to redraw
             EndIf
             
@@ -681,6 +703,8 @@ Module OSM
     
   EndProcedure
   
+  ;-*** Main drawing thread
+  ; always running, waiting for a semaphore to start refreshing
   Procedure DrawingThread(*SharedDrawing.DrawingParameters)
     
     Protected Drawing.DrawingParameters
@@ -692,11 +716,12 @@ Module OSM
       
       ; Debug "--------- Main drawing thread ------------"
       
-      ;Creates a copy of the structure to work with, and precalculus some values
+      ;Creates a copy of the structure to work with
       LockMutex(*SharedDrawing\Mutex)
       CopyStructure(*SharedDrawing, @Drawing, DrawingParameters)    
       UnlockMutex(*SharedDrawing\Mutex)
       
+      ;Precalc some values
       Drawing\CenterX = GadgetWidth(OSM\Gadget) / 2
       Drawing\CenterY = GadgetHeight(OSM\Gadget) / 2
       ;Pixel shift, aka position in the tile
@@ -715,12 +740,11 @@ Module OSM
       Pointer(Drawing\CenterX, Drawing\CenterY, #Red)
       StopVectorDrawing()
       
-      ;- Redraw
+      ;Redraw
       ;If something was not correctly drawn, redraw after a while
       LockMutex(*SharedDrawing\Mutex)      ;Be sure that we're not modifying while moving (seems not useful, but it is, especially to clean the semaphore)
       If Drawing\Dirty
         ; Debug "Something was dirty ! We try again to redraw"
-        ;Delay(250)
         Drawing\PassNb + 1
         SignalSemaphore(*SharedDrawing\Semaphore)
       Else
@@ -1057,8 +1081,8 @@ CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
 ; ExecutableFormat = Console
-; CursorPosition = 435
-; FirstLine = 448
+; CursorPosition = 594
+; FirstLine = 569
 ; Folding = -------
 ; EnableUnicode
 ; EnableThread
