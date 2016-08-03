@@ -267,6 +267,13 @@ Module PBMap
     EndIf
   EndProcedure
   
+  Procedure SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
+    PBMap\ServerURL = ServerURL
+    PBMap\ZoomMin = ZoomMin
+    PBMap\ZoomMax = ZoomMax
+    PBMap\TileSize = TileSize
+  EndProcedure
+  
   Procedure Quit()
     ;kill main drawing thread (nicer than KillThread(PBMap\MainDrawingThread))
     LockMutex(PBMap\Drawing\Mutex)
@@ -1058,8 +1065,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x86)
-; CursorPosition = 835
-; FirstLine = 811
+; CursorPosition = 272
+; FirstLine = 224
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
