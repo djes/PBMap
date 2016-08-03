@@ -16,11 +16,14 @@ CompilerEndIf
 EnableExplicit
 
 InitNetwork()
-OpenConsole()
 UsePNGImageDecoder()
 UsePNGImageEncoder()
 
 DeclareModule OSM
+  ;-Show debug infos
+  Global Verbose = #True
+  ;-Proxy ON/OFF
+  Global Proxy = #True
   Declare InitOSM()
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
@@ -101,9 +104,9 @@ Module OSM
   EndStructure
   
   Structure Marker
-    Location.Location                       ; Latitude and Longitude from Marker
-    color.l                                 ; Color Marker
-    CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (You must use VectorDrawing lib)
+    Location.Location                       ; Marker latitude and longitude
+    color.l                                 ; Marker color
+    CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
   
   ;-OSM Structure
@@ -112,66 +115,67 @@ Module OSM
     Font.i                                  ; Font to uses when write on the map 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
-    
+    ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
-    
+    ;
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
-    
+    ;
     ServerURL.s                             ; Web URL ex: http://tile.openstreetmap.org/
     ZoomMin.i                               ; Min Zoom supported by server
     ZoomMax.i                               ; Max Zoom supported by server
     Zoom.i                                  ; Current zoom
     TileSize.i                              ; Tile size downloaded on the server ex : 256
-    
+    ;
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
-    
+    ;
     Moving.i
-    Dirty.i                                 ;To signal that drawing need a refresh
-    
+    Dirty.i                                 ; To signal that drawing need a refresh
+    ;
     MainDrawingThread.i
     List TilesThreads.TileThread()
-    
-    List track.Location()                   ;to display a GPX track
+    ;
+    List track.Location()                   ; To display a GPX track
     List Marker.Marker()                    ; To diplay marker
     EditMarkerIndex.l
   EndStructure
   
   Global OSM.OSM, Null.i
   
+  ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
-    Debug msg, 2
+    MessageRequester("MapGadget", msg, #PB_MessageRequester_Ok)
+    End
+  EndProcedure
+  
+  ;Send debug infos to stdout
+  Procedure MyDebug(msg.s)
+    If Verbose
+      PrintN(msg)
+    EndIf
   EndProcedure
   
   ;- *** CURL specific ***
+  ; (program has To be compiled in console format for curl debug infos)
   
   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
   
+  ;Curl write callback (needed for win32 dll)
   ProcedureC ReceiveHTTPWriteToFileFunction(*ptr, Size.i, NMemB.i, FileHandle.i)
-    
-    ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)
-    
+    ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)    
   EndProcedure
   
   Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
-    
     Protected *Buffer, curl.i, Timeout.i, res.i
     Protected FileHandle.i
-    
-    ;Debug "ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$
-    ;Debug " to file : " + DestFileName$
-    
+    MyDebug("ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$)
+    MyDebug(" to file : " + DestFileName$)
     FileHandle = CreateFile(#PB_Any, DestFileName$)
-    
     If FileHandle And Len(URL$)
-      
       curl  = curl_easy_init()
-      
       If curl
-        
         Timeout = 120
-        
         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
@@ -180,53 +184,43 @@ Module OSM
         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)        
         curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
         ;curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 60)
-        
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
           If Len(ProxyPort$)
             ProxyURL$ + ":" + ProxyPort$
           EndIf
-          ; Debug ProxyURL$
+          MyDebug( ProxyURL$)
           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
           If Len(ProxyUser$)
             If Len(ProxyPassword$)
               ProxyUser$ + ":" + ProxyPassword$
             EndIf
-            ;Debug ProxyUser$
+            MyDebug( ProxyUser$)
             curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
           EndIf
         EndIf
-        
         curl_easy_setopt(curl, #CURLOPT_WRITEDATA, FileHandle)
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
-        
         res = curl_easy_perform(curl)
-        
         If res <> #CURLE_OK
-          Debug "CURL NOT OK"
+          MyDebug("CURL problem")
         EndIf
-        
         curl_easy_cleanup(curl)
-        
       Else
-        Debug "Can't Init CURL"
+        MyDebug("Can't init CURL")
       EndIf
-      
       CloseFile(FileHandle)
       ProcedureReturn FileSize(DestFileName$)
-      
     EndIf
-    
     ProcedureReturn #False
-    
   EndProcedure
-  
   ;- ***
   
   Procedure InitOSM()
-    
     Protected Result.i
-    
+    If Verbose
+      OpenConsole()
+    EndIf
     OSM\HDDCachePath = GetTemporaryDirectory()
     OSM\ServerURL = "http://tile.openstreetmap.org/"
     OSM\ZoomMin = 0
@@ -237,12 +231,9 @@ Module OSM
     OSM\Drawing\Mutex = CreateMutex()
     OSM\Drawing\Semaphore = CreateSemaphore()
     OSM\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
-    OSM\Font=LoadFont(#PB_Any, "Comic Sans MS", 20, #PB_Font_Bold)
+    OSM\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     ;- Proxy details
-    
-    Global Proxy = #True
-    
-    ;Use this to customize your preferences    
+    ;Use this to create and customize your preferences file for the first time
     ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
     ;     If Proxy
     ;       PreferenceGroup("PROXY")
@@ -253,35 +244,30 @@ Module OSM
     ;     If Result 
     ;       ClosePreferences()    
     ;     EndIf
-    
     Result = OpenPreferences(GetHomeDirectory() + "OSM.prefs")
-    
     If Proxy
       PreferenceGroup("PROXY")       
       Global ProxyURL$  = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
       Global ProxyPort$ = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
       Global ProxyUser$ = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-      Global ProxyPassword$ = InputRequester("ProxyPass"  , "Do you use a password ? Then enter it", "")
+      Global ProxyPassword$ = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "")
     EndIf
     If Result
       ClosePreferences()
     EndIf
-    
     curl_global_init(#CURL_GLOBAL_WIN32);
-    
     ;- Main drawing thread launching
     OSM\MainDrawingThread = CreateThread(@DrawingThread(), @OSM\Drawing)
     If OSM\MainDrawingThread = 0
-      Error("MapGadget : Can't create main drawing thread")
-      End
+      Error("MapGadget : can't create main drawing thread.")
     EndIf
-    
   EndProcedure
   
   Procedure Quit()
-    ;kill main drawing thread
-    KillThread(OSM\MainDrawingThread)
-    
+    ;kill main drawing thread (nicer than KillThread(OSM\MainDrawingThread))
+    LockMutex(OSM\Drawing\Mutex)
+    OSM\Drawing\End = #True
+    UnlockMutex(OSM\Drawing\Mutex)
     ;wait for loading threads to finish nicely
     ResetList( OSM\TilesThreads()) 
     While NextElement(OSM\TilesThreads())
@@ -291,7 +277,6 @@ Module OSM
         ResetList( OSM\TilesThreads()) 
       EndIf
     Wend
-    
     curl_global_cleanup()  
   EndProcedure
   
@@ -325,8 +310,8 @@ Module OSM
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * ( (*Location\Longitude + 180.0) / 360.0)
     *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
-    ; Debug "Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude)
-    ; Debug "Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y)
+    MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude))
+    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y))
   EndProcedure
   
   ;*** Converts tile.decimal to coords
@@ -361,24 +346,20 @@ Module OSM
     Protected mapWidth.l    = Pow(2, OSM\Zoom + 8)
     Protected mapHeight.l   = Pow(2, OSM\Zoom + 8)
     Protected x1.l,y1.l
-    
     ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     Protected latRad.d = *Location\Latitude*#PI/180;
-    
     Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
     y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
-    
     Protected x2.l, y2.l
     ; get x value
     x2 = (OSM\TargetLocation\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     latRad = OSM\TargetLocation\Latitude*#PI/180;
-                                                ; get y value
-    mercN = Log(Tan((#PI/4)+(latRad/2)))        ;
-    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));
-    
+    ; get y value
+    mercN = Log(Tan((#PI/4)+(latRad/2)))        
+    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
     *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1)
     *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1)
   EndProcedure
@@ -414,19 +395,15 @@ Module OSM
   EndProcedure
   
   Procedure.i GetTileFromMem(Zoom.i, XTile.i, YTile.i)
-    
-    Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")
-    
-    ; Debug "Check if we have this image in memory"
-    
+    Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")   
+    MyDebug("Check if we have this image in memory")
     If FindMapElement(OSM\MemCache\Images(), key)
-      ; Debug "Key : " + key + " found !"
+      MyDebug("Key : " + key + " found !")
       ProcedureReturn OSM\MemCache\Images()\nImage
     Else
-      ; Debug "Key : " + key + " not found !"
+      MyDebug("Key : " + key + " not found !")
       ProcedureReturn -1
     EndIf
-    
   EndProcedure
   
   Procedure.i GetTileFromHDD(CacheFile.s)
@@ -434,59 +411,51 @@ Module OSM
     If FileSize(CacheFile) > 0
       nImage = LoadImage(#PB_Any, CacheFile)
       If IsImage(nImage)
-        ;Debug "Loadimage " + CacheFile + " -> Success !"
+        MyDebug("Loadimage " + CacheFile + " -> Success !")
         ProcedureReturn nImage  
       EndIf
     EndIf
-    ;Debug "Loadimage " + CacheFile + " -> Failed !"
+    MyDebug("Loadimage " + CacheFile + " -> Failed !")
     ProcedureReturn -1
   EndProcedure
   
   Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s)
-    
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileHandle.i
-    
     Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
-    ;Debug "Check if we have this image on Web"
-    
+    MyDebug("Check if we have this image on Web")
     If Proxy
       FileHandle = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
       If FileHandle
         nImage = GetTileFromHDD(CacheFile)
       Else
-        ;Debug "File " + TileURL + " not correctly received with Curl and proxy"
+        MyDebug("File " + TileURL + " not correctly received with Curl and proxy")
       EndIf
     Else
       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-      
       If *Buffer
         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
         If IsImage(nImage)
-          ;Debug "Load from web " + TileURL + " as Tile nb " + nImage
+          MyDebug("Load from web " + TileURL + " as Tile nb " + nImage)
           SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
           FreeMemory(*Buffer)
         Else
-          ;Debug "Can't catch image " + TileURL
+          MyDebug("Can't catch image " + TileURL)
           nImage = -1
           ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
         EndIf
       Else
-        ;Debug "ReceiveHTTPMemory's buffer is empty"
+        MyDebug("ReceiveHTTPMemory's buffer is empty")
       EndIf
     EndIf
-    
     ProcedureReturn nImage
-    
   EndProcedure
   
   Procedure GetImageThread(*Tile.Tile)
-    
     Protected nImage.i = -1
     Protected key.s = "Z" + RSet(Str(*Tile\OSMZoom), 4, "0") + "X" + RSet(Str(*Tile\OSMTileX), 8, "0") + "Y" + RSet(Str(*Tile\OSMTileY), 8, "0")
     Protected CacheFile.s = OSM\HDDCachePath + "OSM_" + Str(*Tile\OSMZoom) + "_" + Str(*Tile\OSMTileX) + "_" + Str(*Tile\OSMTileY) + ".png"
-    
     ;Adding the image to the cache if possible
     AddMapElement(OSM\MemCache\Images(), key)
     nImage = GetTileFromHDD(CacheFile)
@@ -495,39 +464,31 @@ Module OSM
     EndIf
     If nImage <> -1
       OSM\MemCache\Images(key)\nImage = nImage
-      ; Debug "Image nb " + Str(nImage) + " successfully added to mem cache"   
-      ; Debug "With the following key : " + key  
+      MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
+      MyDebug("With the following key : " + key)  
     Else
-      ; Debug "Error GetImageThread procedure, image not loaded - " + key
+      MyDebug("Error GetImageThread procedure, image not loaded - " + key)
       nImage = -1
     EndIf
     ;Define this tile image nb
     *Tile\nImage = nImage
-    
   EndProcedure
   
   Procedure DrawTile(*Tile.Tile)
-    
     Protected x = *Tile\Position\x 
     Protected y = *Tile\Position\y 
-    
-    ; Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
-    ; Debug "  at coords " + Str(x) + "," + Str(y)
-    
+    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX))
+    MyDebug("  at coords " + Str(x) + "," + Str(y))
     MovePathCursor(x, y)
     DrawVectorImage(ImageID(*Tile\nImage))
-    
   EndProcedure
   
   Procedure DrawLoading(*Tile.Tile)
-    
     Protected x = *Tile\Position\x 
     Protected y = *Tile\Position\y 
     Protected Text$ = "Loading"
-    
-    ; Debug "  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX)
-    ; Debug "  at coords " + Str(x) + "," + Str(y)
-    
+    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX))
+    MyDebug("  at coords " + Str(x) + "," + Str(y))
     BeginVectorLayer()
     ;MovePathCursor(x, y)
     VectorSourceColor(RGBA(255, 255, 255, 128))
@@ -539,70 +500,55 @@ Module OSM
     MovePathCursor(x + (OSM\TileSize - VectorTextWidth(Text$)) / 2, y + (OSM\TileSize - VectorTextHeight(Text$)) / 2)
     DrawVectorText(Text$)
     EndVectorLayer()
-    
   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters)
-    
     Protected x.i, y.i
-    
     Protected tx = Int(*Drawing\Position\x)  ;Don't forget the Int() !
     Protected ty = Int(*Drawing\Position\y)
-    
     Protected nx = *Drawing\CenterX / OSM\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / OSM\TileSize
-    
-    ; Debug "Drawing tiles"
-    
+    MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
-        
         ;Was quiting the loop if a move occured, giving maybe smoother movement
         ;If OSM\Moving
         ;  Break 2
         ;EndIf
-        
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
           With *NewTile
-            
             ;Keep a track of tiles (especially to free memory)
             AddElement(OSM\TilesThreads())
             OSM\TilesThreads()\Tile = *NewTile
-            
             ;New tile parameters
             \Position\x = *Drawing\CenterX + x * OSM\TileSize - *Drawing\DeltaX
             \Position\y = *Drawing\CenterY + y * OSM\TileSize - *Drawing\DeltaY
             \OSMTileX = tx + x
             \OSMTileY = ty + y
             \OSMZoom  = OSM\Zoom
-            
             ;Check if the image exists
             \nImage = GetTileFromMem(\OSMZoom, \OSMTileX, \OSMTileY)
             If \nImage = -1 
               ;If not, load it in the background
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
               OSM\TilesThreads()\GetImageThread = \GetImageThread
-              ; Debug " Creating get image thread nb " + Str(\GetImageThread)
+              MyDebug(" Creating get image thread nb " + Str(\GetImageThread))
             EndIf
-            
             If IsImage(\nImage)   
               DrawTile(*NewTile)
             Else
-              ;Debug "Image missing"
+              MyDebug("Image missing")
               DrawLoading(*NewTile)
               *Drawing\Dirty = #True ;Signals that this image is missing so we should have to redraw
             EndIf
-            
           EndWith  
-          
         Else
-          ; Debug" Error, can't create a new tile."
+          MyDebug(" Error, can't create a new tile")
           Break 2
         EndIf 
       Next
     Next
-    
     ;Free tile memory when the loading thread has finished
     ;TODO : get out this proc from drawtiles in a special "free ressources" task
     ForEach OSM\TilesThreads()
@@ -611,11 +557,9 @@ Module OSM
         DeleteElement(OSM\TilesThreads())
       EndIf         
     Next
-    
   EndProcedure
   
   Procedure Pointer(x.i, y.i, color.l = #Red)
-    
     color=RGBA(255, 0, 0, 255)
     VectorSourceColor(color)
     MovePathCursor(x, y)
@@ -627,7 +571,6 @@ Module OSM
     AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
     VectorSourceColor(color)
     FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
-    
   EndProcedure
   
   Procedure TrackPointer(x.i, y.i,dist.l)
@@ -705,7 +648,6 @@ Module OSM
   ; Draw all markers on the screen !
   Procedure  DrawMarker(*Drawing.DrawingParameters)
     Protected Pixel.PixelPosition
-    
     ForEach OSM\Marker()
       If OSM\Marker()\Location\Latitude <> 0 And OSM\Marker()\Location\Longitude <> 0
         GetPixelCoordFromLocation(OSM\Marker()\Location, @Pixel)
@@ -718,27 +660,20 @@ Module OSM
         EndIf 
       EndIf 
     Next
-    
   EndProcedure
   
   ;-*** Main drawing thread
   ; always running, waiting for a semaphore to start refreshing
   Procedure DrawingThread(*SharedDrawing.DrawingParameters)
-    
     Protected Drawing.DrawingParameters
     Protected Px.d, Py.d
-    
     Repeat
-      
       WaitSemaphore(*SharedDrawing\Semaphore)
-      
-      ; Debug "--------- Main drawing thread ------------"
-      
-      ;Creates a copy of the structure to work with
+      MyDebug("--------- Main drawing thread ------------")
+      ;Creates a copy of the structure to work with to avoid multiple mutex locks
       LockMutex(*SharedDrawing\Mutex)
       CopyStructure(*SharedDrawing, @Drawing, DrawingParameters)    
       UnlockMutex(*SharedDrawing\Mutex)
-      
       ;Precalc some values
       Drawing\CenterX = GadgetWidth(OSM\Gadget) / 2
       Drawing\CenterY = GadgetHeight(OSM\Gadget) / 2
@@ -748,41 +683,34 @@ Module OSM
       Drawing\DeltaY = Py * OSM\TileSize - (Int(Py) * OSM\TileSize)
       Drawing\TargetLocation\Latitude = OSM\TargetLocation\Latitude
       Drawing\TargetLocation\Longitude = OSM\TargetLocation\Longitude
-      
       Drawing\Dirty = #False
-      
+      ;Main drawing stuff
       StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
       DrawTiles(@Drawing)
       DrawTrack(@Drawing)
       DrawMarker(@Drawing)
       Pointer(Drawing\CenterX, Drawing\CenterY, #Red)
       StopVectorDrawing()
-      
       ;Redraw
-      ;If something was not correctly drawn, redraw after a while
-      LockMutex(*SharedDrawing\Mutex)      ;Be sure that we're not modifying while moving (seems not useful, but it is, especially to clean the semaphore)
+      ; If something was not correctly drawn, redraw after a while
+      LockMutex(*SharedDrawing\Mutex)      ;Be sure that we're not modifying variables while moving (seems not useful, but it is, especially to clean the semaphore)
       If Drawing\Dirty
-        ; Debug "Something was dirty ! We try again to redraw"
+        MyDebug("Something was dirty ! We try again to redraw")
         Drawing\PassNb + 1
         SignalSemaphore(*SharedDrawing\Semaphore)
       Else
         ;Clean the semaphore to avoid multiple unuseful redraws
         Repeat : Until TrySemaphore(*SharedDrawing\Semaphore) = 0
       EndIf
-      UnlockMutex(*SharedDrawing\Mutex)
-      
-    Until Drawing\End
-    
+      UnlockMutex(*SharedDrawing\Mutex)      
+    Until Drawing\End    
   EndProcedure
   
   Procedure Refresh()
-    
     SignalSemaphore(OSM\Drawing\Semaphore)
-    
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15, Mode.i = #PB_Absolute)
-    
     Select Mode
       Case #PB_Absolute
         OSM\TargetLocation\Latitude = latitude
@@ -793,10 +721,8 @@ Module OSM
         OSM\TargetLocation\Longitude + longitude
         OSM\Zoom + zoom
     EndSelect
-    
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
-    
     LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
     OSM\Position\x = OSM\Drawing\Position\x * OSM\TileSize
@@ -808,7 +734,6 @@ Module OSM
     If OSM\CallBackLocation > 0
       CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
     EndIf 
-    
   EndProcedure
   
   Procedure  ZoomToArea()
@@ -832,14 +757,11 @@ Module OSM
     Protected DeltaX.d=MaxX-MinX                            ;assumption ! In original code DeltaX have no source
     Protected centerX.d=MinX+DeltaX/2                       ; assumption ! In original code CenterX have no source
     Protected paddingFactor.f= 1.2                          ;paddingFactor: this can be used to get the "120%" effect ThomM refers to. Value of 1.2 would get you the 120%.
-    
     Protected ry1.d = Log((Sin(Radian(MinY)) + 1) / Cos(Radian(MinY)))
     Protected ry2.d = Log((Sin(Radian(MaxY)) + 1) / Cos(Radian(MaxY)))
     Protected ryc.d = (ry1 + ry2) / 2                                 
     Protected centerY.d = Degree(ATan(SinH(ryc)))                     
-    
     Protected resolutionHorizontal.d = DeltaX / GadgetWidth(OSM\Gadget)
-    
     Protected vy0.d = Log(Tan(#PI*(0.25 + centerY/360)));
     Protected vy1.d = Log(Tan(#PI*(0.25 + MaxY/360)))   ;
     Protected viewHeightHalf.d = GadgetHeight(OSM\Gadget)/2;
@@ -848,29 +770,23 @@ Module OSM
     If resolutionHorizontal<>0 And resolutionVertical<>0
       Protected resolution.d = Max(resolutionHorizontal, resolutionVertical)* paddingFactor
       Protected zoom.d = Log(360 / (resolution * OSM\TileSize))/Log(2)
-      
       Protected lon.d = centerX;
       Protected lat.d = centerY;
-      
       SetLocation(lat,lon, Round(zoom,#PB_Round_Down))
     Else
       SetLocation(OSM\TargetLocation\Latitude,OSM\TargetLocation\Longitude, 15)
     EndIf
-    
   EndProcedure
   
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
-    
     Select mode
       Case #PB_Relative
         OSM\Zoom = OSM\Zoom + zoom
       Case #PB_Absolute
         OSM\Zoom = zoom
     EndSelect
-    
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
-    
     LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
     OSM\Position\X = OSM\Drawing\Position\x * OSM\TileSize
@@ -883,7 +799,6 @@ Module OSM
     If OSM\CallBackLocation > 0
       CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
     EndIf 
-    
   EndProcedure
   
   Procedure SetCallBackLocation(CallBackLocation.i)
@@ -915,12 +830,10 @@ Module OSM
   EndProcedure
   
   Procedure Event(Event.l)
-    
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
     Protected Marker.Position
     Protected *Drawing.DrawingParameters
-    
     If IsGadget(OSM\Gadget) And GadgetType(OSM\Gadget) = #PB_GadgetType_Canvas 
       Select Event
         Case #PB_Event_Gadget ;{
@@ -988,13 +901,9 @@ Module OSM
                     LockMutex(OSM\Drawing\Mutex)                  
                     OSM\Drawing\Position\x = OSM\Position\x / OSM\TileSize
                     OSM\Drawing\Position\y = OSM\Position\y / OSM\TileSize
-                    ; Debug "OSM\Position\x " + Str(OSM\Position\x) + " ; OSM\Position\y " + Str(OSM\Position\y) 
+                    MyDebug("OSM\Drawing\Position\x " + Str(OSM\Drawing\Position\x) + " ; OSM\Drawing\Position\y " + Str(OSM\Drawing\Position\y) )
                     XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
                     UnlockMutex(OSM\Drawing\Mutex)
-                    ;Draw()
-                    ; Debug "OSM\Drawing\x " + StrD(OSM\Drawing\x) + " ; OSM\Drawing\y "  + StrD(OSM\Drawing\y) 
-                    ;SetGadgetText(#String_1, StrD(OSM\TargetLocation\Latitude))
-                    ;SetGadgetText(#String_0, StrD(OSM\TargetLocation\Longitude))
                   EndIf 
               EndSelect
           EndSelect
@@ -1073,15 +982,13 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     OSM::Refresh()
   EndProcedure
-    
+  
   ;- MAIN TEST
   If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
-    OSM::InitOSM()
+    
     LoadFont(0, "Wingdings", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
-    
-    OSM::MapGadget(#Map, 10, 10, 512, 512)
-    
+        
     TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
     ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
@@ -1099,13 +1006,16 @@ CompilerIf #PB_Compiler_IsMainFile
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
+    
+    ;Our main gadget
+    OSM::InitOSM()
+    OSM::MapGadget(#Map, 10, 10, 512, 512)
     OSM::SetCallBackLocation(@UpdateLocation())
     OSM::SetLocation(49.04599, 2.03347, 17)
     OSM::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
     Repeat
       Event = WaitWindowEvent()
-      
       OSM::Event(Event)
       Select Event
         Case #PB_Event_CloseWindow : Quit = 1
@@ -1140,9 +1050,7 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; ExecutableFormat = Console
-; CursorPosition = 1115
-; FirstLine = 1083
+; CursorPosition = 458
 ; Folding = --------
 ; EnableUnicode
 ; EnableThread
