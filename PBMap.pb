@@ -1,11 +1,13 @@
 ;************************************************************** 
-; Program:           OSM (OpenStreetMap Module) 
+; Program:           PBMap
+; Description:       Permits the use of tiled maps like 
+;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon And Djes
 ; Date:              Mai 17, 2016
 ; License:           Free, unrestricted, credit appreciated 
 ;                    but not required.
 ; Note:              Please share improvement !
-; Thanks:            Progi1984, 
+; Thanks:            Progi1984
 ;************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
@@ -19,12 +21,12 @@ InitNetwork()
 UsePNGImageDecoder()
 UsePNGImageEncoder()
 
-DeclareModule OSM
+DeclareModule PBMap
   ;-Show debug infos
   Global Verbose = #True
   ;-Proxy ON/OFF
   Global Proxy = #True
-  Declare InitOSM()
+  Declare InitPBMap()
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
@@ -42,7 +44,7 @@ DeclareModule OSM
   Declare.i GetZoom()
 EndDeclareModule
 
-Module OSM 
+Module PBMap 
   
   EnableExplicit
   
@@ -64,9 +66,9 @@ Module OSM
   ;- Tile Structure
   Structure Tile
     Position.Position
-    OSMTileX.i
-    OSMTileY.i
-    OSMZoom.i
+    PBMapTileX.i
+    PBMapTileY.i
+    PBMapZoom.i
     nImage.i
     GetImageThread.i
   EndStructure
@@ -74,9 +76,9 @@ Module OSM
   Structure DrawingParameters
     Position.Position
     Canvas.i
-    OSMTileX.i
-    OSMTileY.i
-    OSMZoom.i
+    PBMapTileX.i
+    PBMapTileY.i
+    PBMapZoom.i
     Mutex.i
     TargetLocation.Location
     CenterX.i
@@ -109,8 +111,8 @@ Module OSM
     CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
   
-  ;-OSM Structure
-  Structure OSM
+  ;-PBMap Structure
+  Structure PBMap
     Gadget.i                                ; Canvas Gadget Id 
     Font.i                                  ; Font to uses when write on the map 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
@@ -141,7 +143,7 @@ Module OSM
     EditMarkerIndex.l
   EndStructure
   
-  Global OSM.OSM, Null.i
+  Global PBMap.PBMap, Null.i
   
   ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
@@ -216,25 +218,25 @@ Module OSM
   EndProcedure
   ;- ***
   
-  Procedure InitOSM()
+  Procedure InitPBMap()
     Protected Result.i
     If Verbose
       OpenConsole()
     EndIf
-    OSM\HDDCachePath = GetTemporaryDirectory()
-    OSM\ServerURL = "http://tile.openstreetmap.org/"
-    OSM\ZoomMin = 0
-    OSM\ZoomMax = 18
-    OSM\MoveStartingPoint\x = - 1
-    OSM\TileSize = 256
-    OSM\Dirty = #False
-    OSM\Drawing\Mutex = CreateMutex()
-    OSM\Drawing\Semaphore = CreateSemaphore()
-    OSM\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
-    OSM\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+    PBMap\HDDCachePath = GetTemporaryDirectory()
+    PBMap\ServerURL = "http://tile.openstreetmap.org/"
+    PBMap\ZoomMin = 0
+    PBMap\ZoomMax = 18
+    PBMap\MoveStartingPoint\x = - 1
+    PBMap\TileSize = 256
+    PBMap\Dirty = #False
+    PBMap\Drawing\Mutex = CreateMutex()
+    PBMap\Drawing\Semaphore = CreateSemaphore()
+    PBMap\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
+    PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     ;- Proxy details
     ;Use this to create and customize your preferences file for the first time
-    ;     Result = CreatePreferences(GetHomeDirectory() + "OSM.prefs")
+    ;     Result = CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
     ;     If Proxy
     ;       PreferenceGroup("PROXY")
     ;       WritePreferenceString("ProxyURL", "myproxy.fr")
@@ -244,7 +246,7 @@ Module OSM
     ;     If Result 
     ;       ClosePreferences()    
     ;     EndIf
-    Result = OpenPreferences(GetHomeDirectory() + "OSM.prefs")
+    Result = OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
     If Proxy
       PreferenceGroup("PROXY")       
       Global ProxyURL$  = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
@@ -257,24 +259,24 @@ Module OSM
     EndIf
     curl_global_init(#CURL_GLOBAL_WIN32);
     ;- Main drawing thread launching
-    OSM\MainDrawingThread = CreateThread(@DrawingThread(), @OSM\Drawing)
-    If OSM\MainDrawingThread = 0
+    PBMap\MainDrawingThread = CreateThread(@DrawingThread(), @PBMap\Drawing)
+    If PBMap\MainDrawingThread = 0
       Error("MapGadget : can't create main drawing thread.")
     EndIf
   EndProcedure
   
   Procedure Quit()
-    ;kill main drawing thread (nicer than KillThread(OSM\MainDrawingThread))
-    LockMutex(OSM\Drawing\Mutex)
-    OSM\Drawing\End = #True
-    UnlockMutex(OSM\Drawing\Mutex)
+    ;kill main drawing thread (nicer than KillThread(PBMap\MainDrawingThread))
+    LockMutex(PBMap\Drawing\Mutex)
+    PBMap\Drawing\End = #True
+    UnlockMutex(PBMap\Drawing\Mutex)
     ;wait for loading threads to finish nicely
-    ResetList( OSM\TilesThreads()) 
-    While NextElement(OSM\TilesThreads())
-      If IsThread(OSM\TilesThreads()\GetImageThread) = 0
-        FreeMemory(OSM\TilesThreads()\Tile)
-        DeleteElement(OSM\TilesThreads())
-        ResetList( OSM\TilesThreads()) 
+    ResetList(PBMap\TilesThreads()) 
+    While NextElement(PBMap\TilesThreads())
+      If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
+        FreeMemory(PBMap\TilesThreads()\Tile)
+        DeleteElement(PBMap\TilesThreads())
+        ResetList( PBMap\TilesThreads()) 
       EndIf
     Wend
     curl_global_cleanup()  
@@ -296,17 +298,17 @@ Module OSM
   
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
-      OSM\Gadget = CanvasGadget(OSM\Gadget, X, Y, Width, Height)
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
     Else
-      OSM\Gadget = Gadget
-      CanvasGadget(OSM\Gadget, X, Y, Width, Height)
+      PBMap\Gadget = Gadget
+      CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
     EndIf 
   EndProcedure
   
   ;*** Converts coords to tile.decimal
   ;Warning, structures used in parameters are not tested
   Procedure LatLon2XY(*Location.Location, *Coords.Position)
-    Protected n.d = Pow(2.0, OSM\Zoom)
+    Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * ( (*Location\Longitude + 180.0) / 360.0)
     *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
@@ -317,7 +319,7 @@ Module OSM
   ;*** Converts tile.decimal to coords
   ;Warning, structures used in parameters are not tested
   Procedure XY2LatLon(*Coords.Position, *Location.Location)
-    Protected n.d = Pow(2.0, OSM\Zoom)
+    Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatitudeRad.d
     *Location\Longitude  = *Coords\x / n * 360.0 - 180.0
     LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
@@ -343,8 +345,8 @@ Module OSM
   EndProcedure
   
   Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.PixelPosition) ; TODO to Optimize 
-    Protected mapWidth.l    = Pow(2, OSM\Zoom + 8)
-    Protected mapHeight.l   = Pow(2, OSM\Zoom + 8)
+    Protected mapWidth.l    = Pow(2, PBMap\Zoom + 8)
+    Protected mapHeight.l   = Pow(2, PBMap\Zoom + 8)
     Protected x1.l,y1.l
     ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
@@ -354,14 +356,14 @@ Module OSM
     y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
     Protected x2.l, y2.l
     ; get x value
-    x2 = (OSM\TargetLocation\Longitude+180)*(mapWidth/360)
+    x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
-    latRad = OSM\TargetLocation\Latitude*#PI/180;
+    latRad = PBMap\TargetLocation\Latitude*#PI/180;
     ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
-    *Pixel\x=GadgetWidth(OSM\Gadget)/2  - (x2-x1)
-    *Pixel\y=GadgetHeight(OSM\Gadget)/2 - (y2-y1)
+    *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
+    *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
   EndProcedure
   
   Procedure LoadGpxFile(file.s)
@@ -376,17 +378,17 @@ Module OSM
       Protected *MainNode,*subNode,*child,child.l
       *MainNode=MainXMLNode(0)
       *MainNode=XMLNodeFromPath(*MainNode,"/gpx/trk/trkseg")
-      ClearList(OSM\track())
+      ClearList(PBMap\track())
       For child = 1 To XMLChildCount(*MainNode)
         *child = ChildXMLNode(*MainNode, child)
-        AddElement(OSM\track())
+        AddElement(PBMap\track())
         If ExamineXMLAttributes(*child)
           While NextXMLAttribute(*child)
             Select XMLAttributeName(*child)
               Case "lat"
-                OSM\track()\Latitude=ValD(XMLAttributeValue(*child))
+                PBMap\track()\Latitude=ValD(XMLAttributeValue(*child))
               Case "lon"
-                OSM\track()\Longitude=ValD(XMLAttributeValue(*child))
+                PBMap\track()\Longitude=ValD(XMLAttributeValue(*child))
             EndSelect
           Wend
         EndIf
@@ -397,9 +399,9 @@ Module OSM
   Procedure.i GetTileFromMem(Zoom.i, XTile.i, YTile.i)
     Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")   
     MyDebug("Check if we have this image in memory")
-    If FindMapElement(OSM\MemCache\Images(), key)
+    If FindMapElement(PBMap\MemCache\Images(), key)
       MyDebug("Key : " + key + " found !")
-      ProcedureReturn OSM\MemCache\Images()\nImage
+      ProcedureReturn PBMap\MemCache\Images()\nImage
     Else
       MyDebug("Key : " + key + " not found !")
       ProcedureReturn -1
@@ -423,7 +425,7 @@ Module OSM
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileHandle.i
-    Protected TileURL.s = OSM\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
+    Protected TileURL.s = PBMap\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
     MyDebug("Check if we have this image on Web")
     If Proxy
       FileHandle = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
@@ -454,16 +456,16 @@ Module OSM
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    Protected key.s = "Z" + RSet(Str(*Tile\OSMZoom), 4, "0") + "X" + RSet(Str(*Tile\OSMTileX), 8, "0") + "Y" + RSet(Str(*Tile\OSMTileY), 8, "0")
-    Protected CacheFile.s = OSM\HDDCachePath + "OSM_" + Str(*Tile\OSMZoom) + "_" + Str(*Tile\OSMTileX) + "_" + Str(*Tile\OSMTileY) + ".png"
+    Protected key.s = "Z" + RSet(Str(*Tile\PBMapZoom), 4, "0") + "X" + RSet(Str(*Tile\PBMapTileX), 8, "0") + "Y" + RSet(Str(*Tile\PBMapTileY), 8, "0")
+    Protected CacheFile.s = PBMap\HDDCachePath + "PBMap_" + Str(*Tile\PBMapZoom) + "_" + Str(*Tile\PBMapTileX) + "_" + Str(*Tile\PBMapTileY) + ".png"
     ;Adding the image to the cache if possible
-    AddMapElement(OSM\MemCache\Images(), key)
+    AddMapElement(PBMap\MemCache\Images(), key)
     nImage = GetTileFromHDD(CacheFile)
     If nImage = -1
-      nImage = GetTileFromWeb(*Tile\OSMZoom, *Tile\OSMTileX, *Tile\OSMTileY, CacheFile)
+      nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, CacheFile)
     EndIf
     If nImage <> -1
-      OSM\MemCache\Images(key)\nImage = nImage
+      PBMap\MemCache\Images(key)\nImage = nImage
       MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
       MyDebug("With the following key : " + key)  
     Else
@@ -477,7 +479,7 @@ Module OSM
   Procedure DrawTile(*Tile.Tile)
     Protected x = *Tile\Position\x 
     Protected y = *Tile\Position\y 
-    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX))
+    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX))
     MyDebug("  at coords " + Str(x) + "," + Str(y))
     MovePathCursor(x, y)
     DrawVectorImage(ImageID(*Tile\nImage))
@@ -487,17 +489,17 @@ Module OSM
     Protected x = *Tile\Position\x 
     Protected y = *Tile\Position\y 
     Protected Text$ = "Loading"
-    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\OSMTileX) + " Y : " + Str(*Tile\OSMTileX))
+    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX))
     MyDebug("  at coords " + Str(x) + "," + Str(y))
     BeginVectorLayer()
     ;MovePathCursor(x, y)
     VectorSourceColor(RGBA(255, 255, 255, 128))
-    AddPathBox(x, y, OSM\TileSize, OSM\TileSize)
+    AddPathBox(x, y, PBMap\TileSize, PBMap\TileSize)
     FillPath()
     MovePathCursor(x, y)
-    VectorFont(FontID(OSM\Font), OSM\TileSize / 20)
+    VectorFont(FontID(PBMap\Font), PBMap\TileSize / 20)
     VectorSourceColor(RGBA(150, 150, 150, 255))
-    MovePathCursor(x + (OSM\TileSize - VectorTextWidth(Text$)) / 2, y + (OSM\TileSize - VectorTextHeight(Text$)) / 2)
+    MovePathCursor(x + (PBMap\TileSize - VectorTextWidth(Text$)) / 2, y + (PBMap\TileSize - VectorTextHeight(Text$)) / 2)
     DrawVectorText(Text$)
     EndVectorLayer()
   EndProcedure
@@ -506,33 +508,33 @@ Module OSM
     Protected x.i, y.i
     Protected tx = Int(*Drawing\Position\x)  ;Don't forget the Int() !
     Protected ty = Int(*Drawing\Position\y)
-    Protected nx = *Drawing\CenterX / OSM\TileSize ;How many tiles around the point
-    Protected ny = *Drawing\CenterY / OSM\TileSize
+    Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
+    Protected ny = *Drawing\CenterY / PBMap\TileSize
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         ;Was quiting the loop if a move occured, giving maybe smoother movement
-        ;If OSM\Moving
+        ;If PBMap\Moving
         ;  Break 2
         ;EndIf
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
           With *NewTile
             ;Keep a track of tiles (especially to free memory)
-            AddElement(OSM\TilesThreads())
-            OSM\TilesThreads()\Tile = *NewTile
+            AddElement(PBMap\TilesThreads())
+            PBMap\TilesThreads()\Tile = *NewTile
             ;New tile parameters
-            \Position\x = *Drawing\CenterX + x * OSM\TileSize - *Drawing\DeltaX
-            \Position\y = *Drawing\CenterY + y * OSM\TileSize - *Drawing\DeltaY
-            \OSMTileX = tx + x
-            \OSMTileY = ty + y
-            \OSMZoom  = OSM\Zoom
+            \Position\x = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
+            \Position\y = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
+            \PBMapTileX = tx + x
+            \PBMapTileY = ty + y
+            \PBMapZoom  = PBMap\Zoom
             ;Check if the image exists
-            \nImage = GetTileFromMem(\OSMZoom, \OSMTileX, \OSMTileY)
+            \nImage = GetTileFromMem(\PBMapZoom, \PBMapTileX, \PBMapTileY)
             If \nImage = -1 
               ;If not, load it in the background
               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-              OSM\TilesThreads()\GetImageThread = \GetImageThread
+              PBMap\TilesThreads()\GetImageThread = \GetImageThread
               MyDebug(" Creating get image thread nb " + Str(\GetImageThread))
             EndIf
             If IsImage(\nImage)   
@@ -551,10 +553,10 @@ Module OSM
     Next
     ;Free tile memory when the loading thread has finished
     ;TODO : get out this proc from drawtiles in a special "free ressources" task
-    ForEach OSM\TilesThreads()
-      If IsThread(OSM\TilesThreads()\GetImageThread) = 0
-        FreeMemory(OSM\TilesThreads()\Tile)
-        DeleteElement(OSM\TilesThreads())
+    ForEach PBMap\TilesThreads()
+      If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
+        FreeMemory(PBMap\TilesThreads()\Tile)
+        DeleteElement(PBMap\TilesThreads())
       EndIf         
     Next
   EndProcedure
@@ -586,7 +588,7 @@ Module OSM
     VectorSourceColor(RGBA(255, 255, 255, 255))
     AddPathCircle(x,y-20,12)
     FillPath()
-    VectorFont(FontID(OSM\Font), 13)
+    VectorFont(FontID(PBMap\Font), 13)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-20-VectorTextHeight(Str(dist))/2)
     VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
@@ -596,13 +598,13 @@ Module OSM
     Protected Pixel.PixelPosition
     Protected Location.Location
     Protected km.f, memKm.i
-    If ListSize(OSM\track())>0
+    If ListSize(PBMap\track())>0
       ;Trace Track
-      LockMutex(OSM\Drawing\Mutex)
-      ForEach OSM\track()
+      LockMutex(PBMap\Drawing\Mutex)
+      ForEach PBMap\track()
         If *Drawing\TargetLocation\Latitude<>0 And  *Drawing\TargetLocation\Longitude<>0
-          GetPixelCoordFromLocation(@OSM\track(),@Pixel)
-          If ListIndex(OSM\track())=0
+          GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
+          If ListIndex(PBMap\track())=0
             MovePathCursor(Pixel\X, Pixel\Y)
           Else
             AddPathLine(Pixel\X, Pixel\Y)    
@@ -612,50 +614,50 @@ Module OSM
       VectorSourceColor(RGBA(0, 255, 0, 150))
       StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
       ;Draw Distance
-      ForEach OSM\track()
+      ForEach PBMap\track()
         ;-Test Distance
-        If ListIndex(OSM\track())=0
-          Location\Latitude=OSM\track()\Latitude
-          Location\Longitude=OSM\track()\Longitude 
+        If ListIndex(PBMap\track())=0
+          Location\Latitude=PBMap\track()\Latitude
+          Location\Longitude=PBMap\track()\Longitude 
         Else 
-          km=km+HaversineInKM(@Location,@OSM\track()) ;<- display Distance 
-          Location\Latitude=OSM\track()\Latitude
-          Location\Longitude=OSM\track()\Longitude 
+          km=km+HaversineInKM(@Location,@PBMap\track()) ;<- display Distance 
+          Location\Latitude=PBMap\track()\Latitude
+          Location\Longitude=PBMap\track()\Longitude 
         EndIf 
-        GetPixelCoordFromLocation(@OSM\track(),@Pixel)
+        GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
         If Int(km)<>memKm
           memKm=Int(km)
-          If OSM\Zoom>10
+          If PBMap\Zoom>10
             BeginVectorLayer()
             TrackPointer(Pixel\X , Pixel\Y,Int(km))
             EndVectorLayer()
           EndIf 
         EndIf
       Next
-      UnlockMutex(OSM\Drawing\Mutex)  
+      UnlockMutex(PBMap\Drawing\Mutex)  
     EndIf
   EndProcedure
   
   ; Add a Marker To the Map
   Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
-    AddElement(OSM\Marker())
-    OSM\Marker()\Location\Latitude=Latitude
-    OSM\Marker()\Location\Longitude=Longitude
-    OSM\Marker()\color=color
-    OSM\Marker()\CallBackPointer = CallBackPointer
+    AddElement(PBMap\Marker())
+    PBMap\Marker()\Location\Latitude=Latitude
+    PBMap\Marker()\Location\Longitude=Longitude
+    PBMap\Marker()\color=color
+    PBMap\Marker()\CallBackPointer = CallBackPointer
   EndProcedure
   
   ; Draw all markers on the screen !
   Procedure  DrawMarker(*Drawing.DrawingParameters)
     Protected Pixel.PixelPosition
-    ForEach OSM\Marker()
-      If OSM\Marker()\Location\Latitude <> 0 And OSM\Marker()\Location\Longitude <> 0
-        GetPixelCoordFromLocation(OSM\Marker()\Location, @Pixel)
-        If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(OSM\Gadget) And Pixel\Y < GadgetHeight(OSM\Gadget) ; Only if visible ^_^
-          If OSM\Marker()\CallBackPointer > 0
-            CallFunctionFast(OSM\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
+    ForEach PBMap\Marker()
+      If PBMap\Marker()\Location\Latitude <> 0 And PBMap\Marker()\Location\Longitude <> 0
+        GetPixelCoordFromLocation(PBMap\Marker()\Location, @Pixel)
+        If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
+          If PBMap\Marker()\CallBackPointer > 0
+            CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
           Else
-            Pointer(Pixel\X, Pixel\Y, OSM\Marker()\color)
+            Pointer(Pixel\X, Pixel\Y, PBMap\Marker()\color)
           EndIf
         EndIf 
       EndIf 
@@ -675,17 +677,17 @@ Module OSM
       CopyStructure(*SharedDrawing, @Drawing, DrawingParameters)    
       UnlockMutex(*SharedDrawing\Mutex)
       ;Precalc some values
-      Drawing\CenterX = GadgetWidth(OSM\Gadget) / 2
-      Drawing\CenterY = GadgetHeight(OSM\Gadget) / 2
+      Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
+      Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
       ;Pixel shift, aka position in the tile
       Px = Drawing\Position\x : Py = Drawing\Position\y
-      Drawing\DeltaX = Px * OSM\TileSize - (Int(Px) * OSM\TileSize) ;Don't forget the Int() !
-      Drawing\DeltaY = Py * OSM\TileSize - (Int(Py) * OSM\TileSize)
-      Drawing\TargetLocation\Latitude = OSM\TargetLocation\Latitude
-      Drawing\TargetLocation\Longitude = OSM\TargetLocation\Longitude
+      Drawing\DeltaX = Px * PBMap\TileSize - (Int(Px) * PBMap\TileSize) ;Don't forget the Int() !
+      Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
+      Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
+      Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
       Drawing\Dirty = #False
       ;Main drawing stuff
-      StartVectorDrawing(CanvasVectorOutput(OSM\Gadget))
+      StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
       DrawTiles(@Drawing)
       DrawTrack(@Drawing)
       DrawMarker(@Drawing)
@@ -707,32 +709,32 @@ Module OSM
   EndProcedure
   
   Procedure Refresh()
-    SignalSemaphore(OSM\Drawing\Semaphore)
+    SignalSemaphore(PBMap\Drawing\Semaphore)
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15, Mode.i = #PB_Absolute)
     Select Mode
       Case #PB_Absolute
-        OSM\TargetLocation\Latitude = latitude
-        OSM\TargetLocation\Longitude = longitude
-        OSM\Zoom = zoom
+        PBMap\TargetLocation\Latitude = latitude
+        PBMap\TargetLocation\Longitude = longitude
+        PBMap\Zoom = zoom
       Case #PB_Relative
-        OSM\TargetLocation\Latitude  + latitude
-        OSM\TargetLocation\Longitude + longitude
-        OSM\Zoom + zoom
+        PBMap\TargetLocation\Latitude  + latitude
+        PBMap\TargetLocation\Longitude + longitude
+        PBMap\Zoom + zoom
     EndSelect
-    If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
-    If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
-    LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
+    If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
+    If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
-    OSM\Position\x = OSM\Drawing\Position\x * OSM\TileSize
-    OSM\Position\y = OSM\Drawing\Position\y * OSM\TileSize 
-    OSM\Drawing\PassNb = 1
+    PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
+    PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize 
+    PBMap\Drawing\PassNb = 1
     ;Start drawing
-    SignalSemaphore(OSM\Drawing\Semaphore)
+    SignalSemaphore(PBMap\Drawing\Semaphore)
     ;***
-    If OSM\CallBackLocation > 0
-      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
     EndIf 
   EndProcedure
   
@@ -740,18 +742,18 @@ Module OSM
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
     Protected MinY.d,MaxY.d,MinX.d,MaxX.d
-    ForEach OSM\track()
-      If ListIndex(OSM\track())=0 Or OSM\track()\Longitude<MinX
-        MinX=OSM\track()\Longitude
+    ForEach PBMap\track()
+      If ListIndex(PBMap\track())=0 Or PBMap\track()\Longitude<MinX
+        MinX=PBMap\track()\Longitude
       EndIf
-      If ListIndex(OSM\track())=0 Or OSM\track()\Longitude>MaxX
-        MaxX=OSM\track()\Longitude
+      If ListIndex(PBMap\track())=0 Or PBMap\track()\Longitude>MaxX
+        MaxX=PBMap\track()\Longitude
       EndIf
-      If ListIndex(OSM\track())=0 Or OSM\track()\Latitude<MinY
-        MinY=OSM\track()\Latitude
+      If ListIndex(PBMap\track())=0 Or PBMap\track()\Latitude<MinY
+        MinY=PBMap\track()\Latitude
       EndIf
-      If ListIndex(OSM\track())=0 Or OSM\track()\Latitude>MaxY
-        MaxY=OSM\track()\Latitude
+      If ListIndex(PBMap\track())=0 Or PBMap\track()\Latitude>MaxY
+        MaxY=PBMap\track()\Latitude
       EndIf
     Next 
     Protected DeltaX.d=MaxX-MinX                            ;assumption ! In original code DeltaX have no source
@@ -761,71 +763,71 @@ Module OSM
     Protected ry2.d = Log((Sin(Radian(MaxY)) + 1) / Cos(Radian(MaxY)))
     Protected ryc.d = (ry1 + ry2) / 2                                 
     Protected centerY.d = Degree(ATan(SinH(ryc)))                     
-    Protected resolutionHorizontal.d = DeltaX / GadgetWidth(OSM\Gadget)
+    Protected resolutionHorizontal.d = DeltaX / GadgetWidth(PBMap\Gadget)
     Protected vy0.d = Log(Tan(#PI*(0.25 + centerY/360)));
     Protected vy1.d = Log(Tan(#PI*(0.25 + MaxY/360)))   ;
-    Protected viewHeightHalf.d = GadgetHeight(OSM\Gadget)/2;
+    Protected viewHeightHalf.d = GadgetHeight(PBMap\Gadget)/2;
     Protected zoomFactorPowered.d = viewHeightHalf / (40.7436654315252*(vy1 - vy0))
-    Protected resolutionVertical.d = 360.0 / (zoomFactorPowered * OSM\TileSize)    
+    Protected resolutionVertical.d = 360.0 / (zoomFactorPowered * PBMap\TileSize)    
     If resolutionHorizontal<>0 And resolutionVertical<>0
       Protected resolution.d = Max(resolutionHorizontal, resolutionVertical)* paddingFactor
-      Protected zoom.d = Log(360 / (resolution * OSM\TileSize))/Log(2)
+      Protected zoom.d = Log(360 / (resolution * PBMap\TileSize))/Log(2)
       Protected lon.d = centerX;
       Protected lat.d = centerY;
       SetLocation(lat,lon, Round(zoom,#PB_Round_Down))
     Else
-      SetLocation(OSM\TargetLocation\Latitude,OSM\TargetLocation\Longitude, 15)
+      SetLocation(PBMap\TargetLocation\Latitude,PBMap\TargetLocation\Longitude, 15)
     EndIf
   EndProcedure
   
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
     Select mode
       Case #PB_Relative
-        OSM\Zoom = OSM\Zoom + zoom
+        PBMap\Zoom = PBMap\Zoom + zoom
       Case #PB_Absolute
-        OSM\Zoom = zoom
+        PBMap\Zoom = zoom
     EndSelect
-    If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
-    If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
-    LatLon2XY(@OSM\TargetLocation, @OSM\Drawing)
+    If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
+    If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
-    OSM\Position\X = OSM\Drawing\Position\x * OSM\TileSize
-    OSM\Position\Y = OSM\Drawing\Position\y * OSM\TileSize 
+    PBMap\Position\X = PBMap\Drawing\Position\x * PBMap\TileSize
+    PBMap\Position\Y = PBMap\Drawing\Position\y * PBMap\TileSize 
     ;*** Creates a drawing thread and fill parameters
-    OSM\Drawing\PassNb = 1
+    PBMap\Drawing\PassNb = 1
     ;Start drawing
-    SignalSemaphore(OSM\Drawing\Semaphore)
+    SignalSemaphore(PBMap\Drawing\Semaphore)
     ;***
-    If OSM\CallBackLocation > 0
-      CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
     EndIf 
   EndProcedure
   
   Procedure SetCallBackLocation(CallBackLocation.i)
-    OSM\CallBackLocation = CallBackLocation
+    PBMap\CallBackLocation = CallBackLocation
   EndProcedure
   
   Procedure.d GetLatitude()
     Protected Value.d
-    LockMutex(OSM\Drawing\Mutex)
-    Value = OSM\TargetLocation\Latitude
-    UnlockMutex(OSM\Drawing\Mutex)
+    LockMutex(PBMap\Drawing\Mutex)
+    Value = PBMap\TargetLocation\Latitude
+    UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value
   EndProcedure
   
   Procedure.d GetLongitude()
     Protected Value.d
-    LockMutex(OSM\Drawing\Mutex)
-    Value = OSM\TargetLocation\Longitude
-    UnlockMutex(OSM\Drawing\Mutex)
+    LockMutex(PBMap\Drawing\Mutex)
+    Value = PBMap\TargetLocation\Longitude
+    UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value 
   EndProcedure
   
   Procedure.i GetZoom()
     Protected Value.d
-    LockMutex(OSM\Drawing\Mutex)
-    Value = OSM\Zoom
-    UnlockMutex(OSM\Drawing\Mutex)
+    LockMutex(PBMap\Drawing\Mutex)
+    Value = PBMap\Zoom
+    UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value
   EndProcedure
   
@@ -834,82 +836,82 @@ Module OSM
     Protected MouseX.i, MouseY.i
     Protected Marker.Position
     Protected *Drawing.DrawingParameters
-    If IsGadget(OSM\Gadget) And GadgetType(OSM\Gadget) = #PB_GadgetType_Canvas 
+    If IsGadget(PBMap\Gadget) And GadgetType(PBMap\Gadget) = #PB_GadgetType_Canvas 
       Select Event
         Case #PB_Event_Gadget ;{
           Gadget = EventGadget()
           Select Gadget
-            Case OSM\Gadget
+            Case PBMap\Gadget
               Select EventType()
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
-                  MouseX = OSM\Position\x - GadgetWidth(OSM\Gadget) / 2 + GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX)
-                  MouseY = OSM\Position\y - GadgetHeight(OSM\Gadget) / 2 + GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
-                  ForEach OSM\Marker()                   
-                    LatLon2XY(@OSM\Marker()\Location, @Marker)                   
-                    Marker\x * OSM\TileSize
-                    Marker\y * OSM\TileSize 
+                  MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+                  MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+                  ForEach PBMap\Marker()                   
+                    LatLon2XY(@PBMap\Marker()\Location, @Marker)                   
+                    Marker\x * PBMap\TileSize
+                    Marker\y * PBMap\TileSize 
                     If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
-                      OSM\EditMarkerIndex = ListIndex(OSM\Marker())  
+                      PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
                       Break
                     EndIf
                   Next
                   ;Mem cursor Coord
-                  OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
-                  OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) 
+                  PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+                  PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
                 Case #PB_EventType_MouseMove
-                  If OSM\MoveStartingPoint\x <> - 1
-                    MouseX = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) - OSM\MoveStartingPoint\x
-                    MouseY = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY) - OSM\MoveStartingPoint\y
-                    OSM\Moving = #True
+                  If PBMap\MoveStartingPoint\x <> - 1
+                    MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
+                    MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
+                    PBMap\Moving = #True
                     ;move Marker
-                    If OSM\EditMarkerIndex > -1
-                      SelectElement(OSM\Marker(), OSM\EditMarkerIndex)
-                      LatLon2XY(@OSM\Marker()\Location, @Marker)
-                      Marker\x + MouseX / OSM\TileSize
-                      Marker\y + MouseY / OSM\TileSize
-                      XY2LatLon(@Marker, @OSM\Marker()\Location)                      
+                    If PBMap\EditMarkerIndex > -1
+                      SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
+                      LatLon2XY(@PBMap\Marker()\Location, @Marker)
+                      Marker\x + MouseX / PBMap\TileSize
+                      Marker\y + MouseY / PBMap\TileSize
+                      XY2LatLon(@Marker, @PBMap\Marker()\Location)                      
                     Else
                       ;New move values
-                      OSM\Position\x - MouseX
-                      OSM\Position\y - MouseY
+                      PBMap\Position\x - MouseX
+                      PBMap\Position\y - MouseY
                       ;-*** Fill parameters and signal the drawing thread
-                      LockMutex(OSM\Drawing\Mutex)
-                      ;OSM tile position in tile.decimal
-                      OSM\Drawing\Position\x = OSM\Position\x / OSM\TileSize
-                      OSM\Drawing\Position\y = OSM\Position\y / OSM\TileSize
-                      OSM\Drawing\PassNb = 1
-                      XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
+                      LockMutex(PBMap\Drawing\Mutex)
+                      ;PBMap tile position in tile.decimal
+                      PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+                      PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+                      PBMap\Drawing\PassNb = 1
+                      XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
                       ;If CallBackLocation send Location to function
-                      If OSM\CallBackLocation > 0
-                        CallFunctionFast(OSM\CallBackLocation, @OSM\TargetLocation)
+                      If PBMap\CallBackLocation > 0
+                        CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
                       EndIf 
-                      UnlockMutex(OSM\Drawing\Mutex)
+                      UnlockMutex(PBMap\Drawing\Mutex)
                     EndIf
                     ;Start drawing
-                    SignalSemaphore(OSM\Drawing\Semaphore)
+                    SignalSemaphore(PBMap\Drawing\Semaphore)
                     ;- ***                   
-                    OSM\MoveStartingPoint\x = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseX) 
-                    OSM\MoveStartingPoint\y = GetGadgetAttribute(OSM\Gadget, #PB_Canvas_MouseY)
+                    PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+                    PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
                   EndIf 
                 Case #PB_EventType_LeftButtonUp
-                  OSM\Moving = #False
-                  OSM\MoveStartingPoint\x = - 1
-                  If OSM\EditMarkerIndex > -1
-                    OSM\EditMarkerIndex = -1
+                  PBMap\Moving = #False
+                  PBMap\MoveStartingPoint\x = - 1
+                  If PBMap\EditMarkerIndex > -1
+                    PBMap\EditMarkerIndex = -1
                   Else ;Move Map
-                    LockMutex(OSM\Drawing\Mutex)                  
-                    OSM\Drawing\Position\x = OSM\Position\x / OSM\TileSize
-                    OSM\Drawing\Position\y = OSM\Position\y / OSM\TileSize
-                    MyDebug("OSM\Drawing\Position\x " + Str(OSM\Drawing\Position\x) + " ; OSM\Drawing\Position\y " + Str(OSM\Drawing\Position\y) )
-                    XY2LatLon(@OSM\Drawing, @OSM\TargetLocation)
-                    UnlockMutex(OSM\Drawing\Mutex)
+                    LockMutex(PBMap\Drawing\Mutex)                  
+                    PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+                    PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+                    MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
+                    XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+                    UnlockMutex(PBMap\Drawing\Mutex)
                   EndIf 
               EndSelect
           EndSelect
       EndSelect
     Else
-      MessageRequester("Module OSM", "You must use OSMGadget before", #PB_MessageRequester_Ok )
+      MessageRequester("Module PBMap", "You must use PBMapGadget before", #PB_MessageRequester_Ok )
       End
     EndIf  
     
@@ -980,7 +982,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    OSM::Refresh()
+    PBMap::Refresh()
   EndProcedure
   
   ;- MAIN TEST
@@ -1008,49 +1010,49 @@ CompilerIf #PB_Compiler_IsMainFile
     Define pfValue.d
     
     ;Our main gadget
-    OSM::InitOSM()
-    OSM::MapGadget(#Map, 10, 10, 512, 512)
-    OSM::SetCallBackLocation(@UpdateLocation())
-    OSM::SetLocation(49.04599, 2.03347, 17)
-    OSM::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
+    PBMap::InitPBMap()
+    PBMap::MapGadget(#Map, 10, 10, 512, 512)
+    PBMap::SetCallBackLocation(@UpdateLocation())
+    PBMap::SetLocation(49.04599, 2.03347, 17)
+    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
     Repeat
       Event = WaitWindowEvent()
-      OSM::Event(Event)
+      PBMap::Event(Event)
       Select Event
         Case #PB_Event_CloseWindow : Quit = 1
         Case #PB_Event_Gadget ;{
           Gadget = EventGadget()
           Select Gadget
             Case #Gdt_Up
-              OSM::SetLocation(10* 360 / Pow(2, OSM::GetZoom() + 8), 0, 0, #PB_Relative)
+              PBMap::SetLocation(10* 360 / Pow(2, PBMap::GetZoom() + 8), 0, 0, #PB_Relative)
             Case #Gdt_Down
-              OSM::SetLocation(10* -360 / Pow(2, OSM::GetZoom() + 8), 0, 0, #PB_Relative)
+              PBMap::SetLocation(10* -360 / Pow(2, PBMap::GetZoom() + 8), 0, 0, #PB_Relative)
             Case #Gdt_Left
-              OSM::SetLocation(0, 10* -360 / Pow(2, OSM::GetZoom() + 8), 0, #PB_Relative)
+              PBMap::SetLocation(0, 10* -360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
             Case #Gdt_Right
-              OSM::SetLocation(0, 10* 360 / Pow(2, OSM::GetZoom() + 8), 0, #PB_Relative)
+              PBMap::SetLocation(0, 10* 360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
             Case #Button_4
-              OSM::SetZoom(1)
+              PBMap::SetZoom(1)
             Case #Button_5
-              OSM::SetZoom( - 1)
+              PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              OSM::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
-              OSM::ZoomToArea() ; <-To center the view, and to viex all the track
+              PBMap::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
+              PBMap::ZoomToArea() ; <-To center the view, and to viex all the track
             Case #Gdt_AddMarker
-              OSM:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
       EndSelect
     Until Quit = #True
     
-    OSM::Quit()
+    PBMap::Quit()
   EndIf
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 458
+; CursorPosition = 8
 ; Folding = --------
 ; EnableUnicode
 ; EnableThread
