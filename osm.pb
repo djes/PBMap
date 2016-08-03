@@ -34,6 +34,9 @@ DeclareModule OSM
   Declare Quit()
   Declare Error(msg.s)
   Declare Refresh()
+  Declare.d GetLatitude()
+  Declare.d GetLongitude()
+  Declare.i GetZoom()
 EndDeclareModule
 
 Module OSM 
@@ -355,8 +358,8 @@ Module OSM
   EndProcedure
   
   Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.PixelPosition) ; TODO to Optimize 
-    Protected mapWidth.l    = Pow(2,OSM\Zoom+8)
-    Protected mapHeight.l   = Pow(2,OSM\Zoom+8)
+    Protected mapWidth.l    = Pow(2, OSM\Zoom + 8)
+    Protected mapHeight.l   = Pow(2, OSM\Zoom + 8)
     Protected x1.l,y1.l
     
     ; get x value
@@ -601,7 +604,7 @@ Module OSM
     Next
     
     ;Free tile memory when the loading thread has finished
-    ;TODO : exit this proc from drawtiles in a special "free ressources" task
+    ;TODO : get out this proc from drawtiles in a special "free ressources" task
     ForEach OSM\TilesThreads()
       If IsThread(OSM\TilesThreads()\GetImageThread) = 0
         FreeMemory(OSM\TilesThreads()\Tile)
@@ -627,7 +630,7 @@ Module OSM
     
   EndProcedure
   
-Procedure TrackPointer(x.i, y.i,dist.l)
+  Procedure TrackPointer(x.i, y.i,dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -642,9 +645,10 @@ Procedure TrackPointer(x.i, y.i,dist.l)
     FillPath()
     VectorFont(FontID(OSM\Font), 13)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-20-VectorTextHeight(Str(dist))/2)
-     VectorSourceColor(RGBA(0, 0, 0, 255))
+    VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
-EndProcedure
+  EndProcedure
+  
   Procedure  DrawTrack(*Drawing.DrawingParameters)
     Protected Pixel.PixelPosition
     Protected Location.Location
@@ -789,7 +793,7 @@ EndProcedure
         OSM\TargetLocation\Longitude + longitude
         OSM\Zoom + zoom
     EndSelect
-        
+    
     If OSM\Zoom > OSM\ZoomMax : OSM\Zoom = OSM\ZoomMax : EndIf
     If OSM\Zoom < OSM\ZoomMin : OSM\Zoom = OSM\ZoomMin : EndIf
     
@@ -806,7 +810,6 @@ EndProcedure
     EndIf 
     
   EndProcedure
-  
   
   Procedure  ZoomToArea()
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
@@ -885,6 +888,30 @@ EndProcedure
   
   Procedure SetCallBackLocation(CallBackLocation.i)
     OSM\CallBackLocation = CallBackLocation
+  EndProcedure
+  
+  Procedure.d GetLatitude()
+    Protected Value.d
+    LockMutex(OSM\Drawing\Mutex)
+    Value = OSM\TargetLocation\Latitude
+    UnlockMutex(OSM\Drawing\Mutex)
+    ProcedureReturn Value
+  EndProcedure
+  
+  Procedure.d GetLongitude()
+    Protected Value.d
+    LockMutex(OSM\Drawing\Mutex)
+    Value = OSM\TargetLocation\Longitude
+    UnlockMutex(OSM\Drawing\Mutex)
+    ProcedureReturn Value 
+  EndProcedure
+  
+  Procedure.i GetZoom()
+    Protected Value.d
+    LockMutex(OSM\Drawing\Mutex)
+    Value = OSM\Zoom
+    UnlockMutex(OSM\Drawing\Mutex)
+    ProcedureReturn Value
   EndProcedure
   
   Procedure Event(Event.l)
@@ -1046,7 +1073,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     OSM::Refresh()
   EndProcedure
-  
+    
   ;- MAIN TEST
   If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     OSM::InitOSM()
@@ -1074,7 +1101,7 @@ CompilerIf #PB_Compiler_IsMainFile
     Define pfValue.d
     OSM::SetCallBackLocation(@UpdateLocation())
     OSM::SetLocation(49.04599, 2.03347, 17)
-    OSM::AddMarker(49.0446828398,2.0349812508,-1,@MyPointer())
+    OSM::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
     Repeat
       Event = WaitWindowEvent()
@@ -1086,13 +1113,13 @@ CompilerIf #PB_Compiler_IsMainFile
           Gadget = EventGadget()
           Select Gadget
             Case #Gdt_Up
-              OSM::SetLocation(0.0001, 0, 0, #PB_Relative)
+              OSM::SetLocation(10* 360 / Pow(2, OSM::GetZoom() + 8), 0, 0, #PB_Relative)
             Case #Gdt_Down
-              OSM::SetLocation(-0.0001, 0, 0, #PB_Relative)
+              OSM::SetLocation(10* -360 / Pow(2, OSM::GetZoom() + 8), 0, 0, #PB_Relative)
             Case #Gdt_Left
-              OSM::SetLocation(0, -0.0001, 0, #PB_Relative)
+              OSM::SetLocation(0, 10* -360 / Pow(2, OSM::GetZoom() + 8), 0, #PB_Relative)
             Case #Gdt_Right
-              OSM::SetLocation(0, 0.0001, 0, #PB_Relative)
+              OSM::SetLocation(0, 10* 360 / Pow(2, OSM::GetZoom() + 8), 0, #PB_Relative)
             Case #Button_4
               OSM::SetZoom(1)
             Case #Button_5
@@ -1114,8 +1141,8 @@ CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
 ; ExecutableFormat = Console
-; CursorPosition = 273
-; FirstLine = 237
+; CursorPosition = 1115
+; FirstLine = 1083
 ; Folding = --------
 ; EnableUnicode
 ; EnableThread
