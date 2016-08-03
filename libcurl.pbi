@@ -1062,13 +1062,9 @@ Procedure.s str2curl(string.s)
 EndProcedure
 
 
-; IDE Options = PureBasic 5.40 LTS Beta 5 (Windows - x86)
-; EnableUnicode
-; EnableXP
-; EnableBuildCount = 0
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 1031
-; FirstLine = 986
+; CursorPosition = 1063
+; FirstLine = 1006
 ; Folding = --
 ; EnableUnicode
 ; EnableXP
