@@ -833,6 +833,10 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
+  Procedure RefreshMapGadget()
+    SignalSemaphore(OSM\Drawing\Semaphore)
+  EndProcedure
+  
   Procedure Event(Event.l)
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
@@ -1053,9 +1057,10 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
 CompilerEndIf
 
-; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 11
-; Folding = --------
-; EnableUnicode
+; IDE Options = PureBasic 5.50 (Windows - x86)
+; CursorPosition = 835
+; FirstLine = 811
+; Folding = ---------
 ; EnableThread
 ; EnableXP
+; EnableUnicode
