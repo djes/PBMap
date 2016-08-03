@@ -8,6 +8,8 @@
 ;                    but not required.
 ; Note:              Please share improvement !
 ; Thanks:            Progi1984
+; Usage:             Change the Proxy global variables if needed
+;                    (see also Proxy Details)
 ;************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
@@ -23,9 +25,9 @@ UsePNGImageEncoder()
 
 DeclareModule PBMap
   ;-Show debug infos
-  Global Verbose = #True
+  Global Verbose = #False
   ;-Proxy ON/OFF
-  Global Proxy = #True
+  Global Proxy = #False
   Declare InitPBMap()
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
@@ -986,7 +988,7 @@ CompilerIf #PB_Compiler_IsMainFile
   EndProcedure
   
   ;- MAIN TEST
-  If OpenWindow(#Window_0, 260, 225, 700, 571, "OpenStreetMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
+  If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     
     LoadFont(0, "Wingdings", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
@@ -1052,7 +1054,7 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 8
+; CursorPosition = 11
 ; Folding = --------
 ; EnableUnicode
 ; EnableThread
