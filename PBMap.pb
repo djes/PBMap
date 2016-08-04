@@ -27,7 +27,7 @@ DeclareModule PBMap
   ;-Show debug infos
   Global Verbose = #False
   ;-Proxy ON/OFF
-  Global Proxy = #False
+  Global Proxy = #True
   Declare InitPBMap()
   Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
@@ -121,25 +121,25 @@ Module PBMap
     Font.i                                  ; Font to uses when write on the map 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
-    ;
+                                            ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                   ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    ;
+                                            ;
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
-    ;
+                                            ;
     ServerURL.s                             ; Web URL ex: http://tile.openstreetmap.org/
     ZoomMin.i                               ; Min Zoom supported by server
     ZoomMax.i                               ; Max Zoom supported by server
     Zoom.i                                  ; Current zoom
     TileSize.i                              ; Tile size downloaded on the server ex : 256
-    ;
+                                            ;
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
-    ;
+                                            ;
     Moving.i
     Dirty.i                                 ; To signal that drawing need a refresh
-    ;
+                                            ;
     MainDrawingThread.i
     List TilesThreads.TileThread()
     ;
@@ -263,7 +263,7 @@ Module PBMap
       ClosePreferences()
     EndIf
     curl_global_init(#CURL_GLOBAL_WIN32);
-    ;- Main drawing thread launching
+                                        ;- Main drawing thread launching
     PBMap\MainDrawingThread = CreateThread(@DrawingThread(), @PBMap\Drawing)
     If PBMap\MainDrawingThread = 0
       Error("MapGadget : can't create main drawing thread.")
@@ -310,10 +310,10 @@ Module PBMap
   
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
-      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
       PBMap\Gadget = Gadget
-      CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf 
   EndProcedure
   
@@ -371,7 +371,7 @@ Module PBMap
     x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     latRad = PBMap\TargetLocation\Latitude*#PI/180;
-    ; get y value
+                                                  ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
@@ -852,10 +852,10 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
-   
+  
   Procedure Event(Event.l)
     Protected Gadget.i
-    Protected MouseX.i, MouseY.i
+    Protected MouseX.i, MouseY.i, OldPx.d, OldPy.d, OldMx.d, OldMy.d
     Protected Marker.Position
     Protected *Drawing.DrawingParameters
     If IsGadget(PBMap\Gadget) And GadgetType(PBMap\Gadget) = #PB_GadgetType_Canvas 
@@ -866,7 +866,37 @@ Module PBMap
             Case PBMap\Gadget
               Select EventType()
                 Case #PB_EventType_MouseWheel
-                  SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta),#PB_Relative)
+                  ;Absolute zoom (centered on the center of the map)
+                  ; SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta),#PB_Relative)
+                  ;Relative zoom (centered on the center of the mouse)
+                  OldPx = PBMap\Position\x : OldPy = PBMap\Position\y
+                  OldMx = OldPx + GadgetWidth(PBMap\Gadget) / 2 - GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+                  OldMy = OldPy + GadgetHeight(PBMap\Gadget) / 2 - GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+                  PBMap\Zoom = PBMap\Zoom + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta)
+                  If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
+                  If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
+                  ;-*** Fill parameters and signal the drawing thread
+                  LockMutex(PBMap\Drawing\Mutex)
+                  LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
+                  ;Convert X, Y in tile.decimal into real pixels
+                  PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
+                  PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize
+                  MouseX = PBMap\Position\x + GadgetWidth(PBMap\Gadget) / 2 - GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+                  MouseY = PBMap\Position\y + GadgetHeight(PBMap\Gadget) / 2 - GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)                 
+                  PBMap\Position\x = (OldPx * MouseX) / OldMx
+                  PBMap\Position\y = (OldPy * MouseY) / OldMy
+                  ;PBMap tile position in tile.decimal
+                  PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+                  PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+                  PBMap\Drawing\PassNb = 1
+                  XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+                  UnlockMutex(PBMap\Drawing\Mutex)
+                  ;Start drawing
+                  SignalSemaphore(PBMap\Drawing\Semaphore)
+                  ;If CallBackLocation send Location to function
+                  If PBMap\CallBackLocation > 0
+                    CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+                  EndIf      
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
                   MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -906,15 +936,16 @@ Module PBMap
                       PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
                       PBMap\Drawing\PassNb = 1
                       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-                      ;If CallBackLocation send Location to function
-                      If PBMap\CallBackLocation > 0
-                        CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
-                      EndIf 
+                      
                       UnlockMutex(PBMap\Drawing\Mutex)
                     EndIf
                     ;Start drawing
                     SignalSemaphore(PBMap\Drawing\Semaphore)
                     ;- ***                   
+                    ;If CallBackLocation send Location to function
+                    If PBMap\CallBackLocation > 0
+                      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+                    EndIf 
                     PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
                     PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
                   EndIf 
@@ -931,12 +962,7 @@ Module PBMap
                     XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
                     UnlockMutex(PBMap\Drawing\Mutex)
                   EndIf
-                Case #PB_EventType_MouseWheel
-                  MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
-                  MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-                  PBMap\Position\x
-                  Pow(2, PBMap::GetZoom() + 8)
-                    GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta)
+                  
               EndSelect
           EndSelect
       EndSelect
@@ -1025,7 +1051,7 @@ CompilerIf #PB_Compiler_IsMainFile
     
     LoadFont(0, "Wingdings", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
-        
+    
     TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
     ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
@@ -1088,8 +1114,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 1088
-; FirstLine = 1031
+; CursorPosition = 869
+; FirstLine = 858
 ; Folding = ---------
 ; EnableUnicode
+; EnableThread
 ; EnableXP
