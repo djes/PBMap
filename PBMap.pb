@@ -27,7 +27,7 @@ DeclareModule PBMap
   ;-Show debug infos
   Global Verbose = #False
   ;-Proxy ON/OFF
-  Global Proxy = #True
+  Global Proxy = #False
   Declare InitPBMap()
   Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
@@ -1114,8 +1114,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 869
-; FirstLine = 858
+; CursorPosition = 28
+; FirstLine = 19
 ; Folding = ---------
 ; EnableUnicode
 ; EnableThread
