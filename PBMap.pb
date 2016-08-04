@@ -29,6 +29,7 @@ DeclareModule PBMap
   ;-Proxy ON/OFF
   Global Proxy = #False
   Declare InitPBMap()
+  Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
@@ -841,7 +842,7 @@ Module PBMap
   EndProcedure
   
   Procedure RefreshMapGadget()
-    SignalSemaphore(OSM\Drawing\Semaphore)
+    SignalSemaphore(PBMap\Drawing\Semaphore)
   EndProcedure
   
   Procedure Event(Event.l)
@@ -856,6 +857,8 @@ Module PBMap
           Select Gadget
             Case PBMap\Gadget
               Select EventType()
+                Case #PB_EventType_MouseWheel
+                  SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta),#PB_Relative)
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
                   MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -1065,8 +1068,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x86)
-; CursorPosition = 272
-; FirstLine = 224
+; CursorPosition = 860
+; FirstLine = 847
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
