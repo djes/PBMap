@@ -29,13 +29,15 @@ DeclareModule PBMap
   ;-Proxy ON/OFF
   Global Proxy = #False
   Declare InitPBMap()
+  Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
   Declare DrawingThread(Null)
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare ZoomToArea()
-  Declare SetCallBackLocation(*CallBackLocation)
+  Declare SetCallBackLocation(CallBackLocation.i)
+  Declare SetCallBackMainPointer(CallBackMainPointer.i)
   Declare LoadGpxFile(file.s);  
   Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
   Declare Quit()
@@ -121,6 +123,7 @@ Module PBMap
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
     ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
+    CallBackMainPointer.i                   ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
     ;
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
@@ -265,6 +268,13 @@ Module PBMap
     If PBMap\MainDrawingThread = 0
       Error("MapGadget : can't create main drawing thread.")
     EndIf
+  EndProcedure
+  
+  Procedure SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
+    PBMap\ServerURL = ServerURL
+    PBMap\ZoomMin = ZoomMin
+    PBMap\ZoomMax = ZoomMax
+    PBMap\TileSize = TileSize
   EndProcedure
   
   Procedure Quit()
@@ -693,7 +703,12 @@ Module PBMap
       DrawTiles(@Drawing)
       DrawTrack(@Drawing)
       DrawMarker(@Drawing)
-      Pointer(Drawing\CenterX, Drawing\CenterY, #Red)
+      ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
+      If PBMap\CallBackMainPointer > 0
+        CallFunctionFast(PBMap\CallBackMainPointer, Drawing\CenterX, Drawing\CenterY)
+      Else 
+        Pointer(Drawing\CenterX, Drawing\CenterY, #Red)
+      EndIf 
       StopVectorDrawing()
       ;Redraw
       ; If something was not correctly drawn, redraw after a while
@@ -809,6 +824,10 @@ Module PBMap
     PBMap\CallBackLocation = CallBackLocation
   EndProcedure
   
+  Procedure SetCallBackMainPointer(CallBackMainPointer.i)
+    PBMap\CallBackMainPointer = CallBackMainPointer
+  EndProcedure
+  
   Procedure.d GetLatitude()
     Protected Value.d
     LockMutex(PBMap\Drawing\Mutex)
@@ -833,6 +852,7 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
+   
   Procedure Event(Event.l)
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
@@ -845,6 +865,8 @@ Module PBMap
           Select Gadget
             Case PBMap\Gadget
               Select EventType()
+                Case #PB_EventType_MouseWheel
+                  SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta),#PB_Relative)
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
                   MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -974,6 +996,11 @@ CompilerIf #PB_Compiler_IsMainFile
     FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
   EndProcedure
   
+  Procedure MainPointer(x.i, y.i)
+    VectorSourceColor(RGBA(255, 255,255, 255)):AddPathCircle(x, y,32):StrokePath(1)
+    VectorSourceColor(RGBA(0,0,0, 255)):AddPathCircle(x, y,29):StrokePath(2)
+  EndProcedure
+  
   Procedure ResizeAll()
     ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
     ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -1021,6 +1048,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::InitPBMap()
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackLocation(@UpdateLocation())
+    PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetLocation(49.04599, 2.03347, 17)
     PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
@@ -1060,9 +1088,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 914
-; FirstLine = 880
-; Folding = --------
+; CursorPosition = 1088
+; FirstLine = 1031
+; Folding = ---------
 ; EnableUnicode
-; EnableThread
 ; EnableXP
