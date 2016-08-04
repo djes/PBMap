@@ -908,7 +908,13 @@ Module PBMap
                     MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
                     XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
                     UnlockMutex(PBMap\Drawing\Mutex)
-                  EndIf 
+                  EndIf
+                Case #PB_EventType_MouseWheel
+                  MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+                  MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+                  PBMap\Position\x
+                  Pow(2, PBMap::GetZoom() + 8)
+                    GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta)
               EndSelect
           EndSelect
       EndSelect
@@ -1039,10 +1045,10 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Button_5
               PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              PBMap::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
-              PBMap::ZoomToArea() ; <-To center the view, and to viex all the track
+              PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "*.gpx", 0))
+              PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #Gdt_AddMarker
-              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255))
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1054,7 +1060,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 11
+; CursorPosition = 914
+; FirstLine = 880
 ; Folding = --------
 ; EnableUnicode
 ; EnableThread
