@@ -101,7 +101,7 @@ Module PBMap
   
   Structure ImgMemCach
     nImage.i
-    Usage.i
+    Location.Location
   EndStructure
   
   Structure TileMemCach
@@ -478,6 +478,7 @@ Module PBMap
     Protected nImage.i = -1
     Protected key.s = "Z" + RSet(Str(*Tile\PBMapZoom), 4, "0") + "X" + RSet(Str(*Tile\PBMapTileX), 8, "0") + "Y" + RSet(Str(*Tile\PBMapTileY), 8, "0")
     Protected CacheFile.s = PBMap\HDDCachePath + "PBMap_" + Str(*Tile\PBMapZoom) + "_" + Str(*Tile\PBMapTileX) + "_" + Str(*Tile\PBMapTileY) + ".png"
+    Protected Tile.position
     ;Adding the image to the cache if possible
     AddMapElement(PBMap\MemCache\Images(), key)
     nImage = GetTileFromHDD(CacheFile)
@@ -486,6 +487,9 @@ Module PBMap
     EndIf
     If nImage <> -1
       PBMap\MemCache\Images(key)\nImage = nImage
+      Tile\x=*Tile\PBMapTileX
+      Tile\y=*Tile\PBMapTiley
+      XY2LatLon(@Tile,@PBMap\MemCache\Images(key)\Location)
       MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
       MyDebug("With the following key : " + key)  
     Else
@@ -579,6 +583,25 @@ Module PBMap
         DeleteElement(PBMap\TilesThreads())
       EndIf         
     Next
+    ;-****Clean Mem Cache
+    ForEach PBMap\MemCache\Images()
+      ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+      Protected MaxNbTile.l
+      If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
+        MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+      Else
+        MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
+      EndIf
+      Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+      Protected Limit.d=Scale*(MaxNbTile)*1.5
+      Protected Distance.d=HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
+      Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
+      If Distance>Limit
+        Debug "delete"
+        DeleteMapElement(PBMap\MemCache\Images())
+      EndIf 
+    Next
+    
   EndProcedure
   
   Procedure Pointer(x.i, y.i, color.l = 0)
@@ -717,6 +740,18 @@ Module PBMap
       Else 
         Pointer(Drawing\CenterX, Drawing\CenterY, RGBA($FF, 0, 0, $FF))
       EndIf 
+      ;TODO Add Option and function to display Scale on Map
+      ;Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+      ;VectorFont(FontID(PBMap\Font), 30)
+      ;VectorSourceColor(RGBA(0, 0, 0, 80))
+      ;MovePathCursor(50,50)
+      ;DrawVectorText(StrD(Scale))
+      
+      ;- Display How Many Image in Cache
+      VectorFont(FontID(PBMap\Font), 30)
+      VectorSourceColor(RGBA(0, 0, 0, 80))
+      MovePathCursor(50,50)
+      DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
       StopVectorDrawing()
       ;Redraw
       ; If something was not correctly drawn, redraw after a while
@@ -1131,11 +1166,10 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::Quit()
   EndIf
 CompilerEndIf
-
-; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 1120
-; FirstLine = 1077
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 1132
+; FirstLine = 1123
 ; Folding = ---------
-; EnableUnicode
 ; EnableThread
 ; EnableXP
+; EnableUnicode
