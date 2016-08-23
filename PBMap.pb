@@ -26,7 +26,6 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   ;-Show debug infos
   Global Verbose = #False
-  ;-Proxy ON/OFF
   Global Proxy = #False
   Declare InitPBMap()
   Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
@@ -102,7 +101,7 @@ Module PBMap
   
   Structure ImgMemCach
     nImage.i
-    Usage.i
+    Location.Location
   EndStructure
   
   Structure TileMemCach
@@ -115,37 +114,43 @@ Module PBMap
     CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
   
+  Structure Option
+    WheelMouseRelative.i
+  EndStructure
+  
   ;-PBMap Structure
   Structure PBMap
     Gadget.i                                ; Canvas Gadget Id 
     Font.i                                  ; Font to uses when write on the map 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
-    ;
+                                            ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                   ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    ;
+                                            ;
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
-    ;
+                                            ;
     ServerURL.s                             ; Web URL ex: http://tile.openstreetmap.org/
     ZoomMin.i                               ; Min Zoom supported by server
     ZoomMax.i                               ; Max Zoom supported by server
     Zoom.i                                  ; Current zoom
     TileSize.i                              ; Tile size downloaded on the server ex : 256
-    ;
+                                            ;
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
-    ;
-    Moving.i
+                                            ;
+    Moving.i                                ;
     Dirty.i                                 ; To signal that drawing need a refresh
-    ;
-    MainDrawingThread.i
-    List TilesThreads.TileThread()
-    ;
+                                            ;
+    MainDrawingThread.i                     ;
+    List TilesThreads.TileThread()          ;
+                                            ;
     List track.Location()                   ; To display a GPX track
     List Marker.Marker()                    ; To diplay marker
-    EditMarkerIndex.l
+    EditMarkerIndex.l                       ;
+                                            ;
+    Options.option                          ;
   EndStructure
   
   Global PBMap.PBMap, Null.i
@@ -163,7 +168,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;- *** CURL specific ***
+  ;- *** CURL specific
   ; (program has To be compiled in console format for curl debug infos)
   
   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
@@ -239,30 +244,33 @@ Module PBMap
     PBMap\Drawing\Semaphore = CreateSemaphore()
     PBMap\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
-    ;- Proxy details
+    ;-Options
+    PBMap\Options\WheelMouseRelative = #True
+    ;-Preferences
     ;Use this to create and customize your preferences file for the first time
-    ;     Result = CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
-    ;     If Proxy
-    ;       PreferenceGroup("PROXY")
-    ;       WritePreferenceString("ProxyURL", "myproxy.fr")
-    ;       WritePreferenceString("ProxyPort", "myproxyport")
-    ;       WritePreferenceString("ProxyUser", "myproxyname")     
-    ;     EndIf
-    ;     If Result 
-    ;       ClosePreferences()    
-    ;     EndIf
-    Result = OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
+    ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
+    ;     ;Or this to modify
+    ;     ;OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
+    ;     ;Or this 
+    ;     ;RunProgram("notepad.exe",  GetHomeDirectory() + "PBMap.prefs", GetHomeDirectory())
+    ;     PreferenceGroup("PROXY")
+    ;     WritePreferenceInteger("Proxy", #True)
+    ;     WritePreferenceString("ProxyURL", "myproxy.fr")
+    ;     WritePreferenceString("ProxyPort", "myproxyport")
+    ;     WritePreferenceString("ProxyUser", "myproxyname")       
+    ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
+    ;     ClosePreferences()
+    OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
+    PreferenceGroup("PROXY")       
+    Proxy = ReadPreferenceInteger("Proxy", #False)
     If Proxy
-      PreferenceGroup("PROXY")       
       Global ProxyURL$  = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
       Global ProxyPort$ = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
       Global ProxyUser$ = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-      Global ProxyPassword$ = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "")
+      Global ProxyPassword$ = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
     EndIf
-    If Result
-      ClosePreferences()
-    EndIf
-    curl_global_init(#CURL_GLOBAL_WIN32);
+    ClosePreferences()
+    curl_global_init(#CURL_GLOBAL_WIN32)
     ;- Main drawing thread launching
     PBMap\MainDrawingThread = CreateThread(@DrawingThread(), @PBMap\Drawing)
     If PBMap\MainDrawingThread = 0
@@ -310,10 +318,10 @@ Module PBMap
   
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
-      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
       PBMap\Gadget = Gadget
-      CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf 
   EndProcedure
   
@@ -371,7 +379,7 @@ Module PBMap
     x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     latRad = PBMap\TargetLocation\Latitude*#PI/180;
-    ; get y value
+                                                  ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
@@ -470,6 +478,7 @@ Module PBMap
     Protected nImage.i = -1
     Protected key.s = "Z" + RSet(Str(*Tile\PBMapZoom), 4, "0") + "X" + RSet(Str(*Tile\PBMapTileX), 8, "0") + "Y" + RSet(Str(*Tile\PBMapTileY), 8, "0")
     Protected CacheFile.s = PBMap\HDDCachePath + "PBMap_" + Str(*Tile\PBMapZoom) + "_" + Str(*Tile\PBMapTileX) + "_" + Str(*Tile\PBMapTileY) + ".png"
+    Protected Tile.position
     ;Adding the image to the cache if possible
     AddMapElement(PBMap\MemCache\Images(), key)
     nImage = GetTileFromHDD(CacheFile)
@@ -478,6 +487,9 @@ Module PBMap
     EndIf
     If nImage <> -1
       PBMap\MemCache\Images(key)\nImage = nImage
+      Tile\x=*Tile\PBMapTileX
+      Tile\y=*Tile\PBMapTiley
+      XY2LatLon(@Tile,@PBMap\MemCache\Images(key)\Location)
       MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
       MyDebug("With the following key : " + key)  
     Else
@@ -571,20 +583,39 @@ Module PBMap
         DeleteElement(PBMap\TilesThreads())
       EndIf         
     Next
+    ;-****Clean Mem Cache
+    ForEach PBMap\MemCache\Images()
+      ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+      Protected MaxNbTile.l
+      If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
+        MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+      Else
+        MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
+      EndIf
+      Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+      Protected Limit.d=Scale*(MaxNbTile)*1.5
+      Protected Distance.d=HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
+      Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
+      If Distance>Limit
+        Debug "delete"
+        DeleteMapElement(PBMap\MemCache\Images())
+      EndIf 
+    Next
+    
   EndProcedure
   
-  Procedure Pointer(x.i, y.i, color.l = #Red)
-    color=RGBA(255, 0, 0, 255)
+  Procedure Pointer(x.i, y.i, color.l = 0)
     VectorSourceColor(color)
     MovePathCursor(x, y)
-    AddPathLine(-8,-16,#PB_Path_Relative)
-    AddPathCircle(8,0,8,180,0,#PB_Path_Relative)
-    AddPathLine(-8,16,#PB_Path_Relative)
+    AddPathLine(-8, -16, #PB_Path_Relative)
+    AddPathCircle(8, 0, 8, 180, 0, #PB_Path_Relative)
+    AddPathLine(-8, 16, #PB_Path_Relative)
     ;FillPath(#PB_Path_Preserve) 
     ;ClipPath(#PB_Path_Preserve)
-    AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
+    AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
     VectorSourceColor(color)
-    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
+    FillPath(#PB_Path_Preserve):VectorSourceColor(color);RGBA(0, 0, 0, 255)) 
+    StrokePath(1)
   EndProcedure
   
   Procedure TrackPointer(x.i, y.i,dist.l)
@@ -627,7 +658,7 @@ Module PBMap
       StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
       ;Draw Distance
       ForEach PBMap\track()
-        ;-Test Distance
+        ;Distance test
         If ListIndex(PBMap\track())=0
           Location\Latitude=PBMap\track()\Latitude
           Location\Longitude=PBMap\track()\Longitude 
@@ -707,8 +738,20 @@ Module PBMap
       If PBMap\CallBackMainPointer > 0
         CallFunctionFast(PBMap\CallBackMainPointer, Drawing\CenterX, Drawing\CenterY)
       Else 
-        Pointer(Drawing\CenterX, Drawing\CenterY, #Red)
+        Pointer(Drawing\CenterX, Drawing\CenterY, RGBA($FF, 0, 0, $FF))
       EndIf 
+      ;TODO Add Option and function to display Scale on Map
+      ;Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+      ;VectorFont(FontID(PBMap\Font), 30)
+      ;VectorSourceColor(RGBA(0, 0, 0, 80))
+      ;MovePathCursor(50,50)
+      ;DrawVectorText(StrD(Scale))
+      
+      ;- Display How Many Image in Cache
+      VectorFont(FontID(PBMap\Font), 30)
+      VectorSourceColor(RGBA(0, 0, 0, 80))
+      MovePathCursor(50,50)
+      DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
       StopVectorDrawing()
       ;Redraw
       ; If something was not correctly drawn, redraw after a while
@@ -818,7 +861,43 @@ Module PBMap
     If PBMap\CallBackLocation > 0
       CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
     EndIf 
-  EndProcedure
+  EndProcedure  
+  
+  ;Zoom on x, y position relative to the canvas gadget
+  Procedure SetZoomOnPosition(x, y, zoom)
+    Protected MouseX.d, MouseY.d
+    Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d
+    ;Fast and dirty code
+    OldPx = PBMap\Position\x : OldPy = PBMap\Position\y
+    OldMx = OldPx + GadgetWidth(PBMap\Gadget) / 2 - x
+    OldMy = OldPy + GadgetHeight(PBMap\Gadget) / 2 - y
+    PBMap\Zoom = PBMap\Zoom + zoom
+    If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
+    If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
+    ;Centered Zoom
+    LockMutex(PBMap\Drawing\Mutex)
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
+    ;Convert X, Y in tile.decimal into real pixels
+    PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
+    PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize
+    MouseX = PBMap\Position\x + GadgetWidth(PBMap\Gadget) / 2 - x
+    MouseY = PBMap\Position\y + GadgetHeight(PBMap\Gadget) / 2 - y               
+    ;Cross-multiply to get the new center
+    PBMap\Position\x = (OldPx * MouseX) / OldMx
+    PBMap\Position\y = (OldPy * MouseY) / OldMy
+    ;PBMap tile position in tile.decimal
+    PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+    PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+    PBMap\Drawing\PassNb = 1
+    XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+    UnlockMutex(PBMap\Drawing\Mutex)
+    ;Start drawing
+    SignalSemaphore(PBMap\Drawing\Semaphore)
+    ;If CallBackLocation send Location to function
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+    EndIf      
+  EndProcedure  
   
   Procedure SetCallBackLocation(CallBackLocation.i)
     PBMap\CallBackLocation = CallBackLocation
@@ -852,12 +931,11 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
-   
+  
   Procedure Event(Event.l)
     Protected Gadget.i
     Protected MouseX.i, MouseY.i
     Protected Marker.Position
-    Protected *Drawing.DrawingParameters
     If IsGadget(PBMap\Gadget) And GadgetType(PBMap\Gadget) = #PB_GadgetType_Canvas 
       Select Event
         Case #PB_Event_Gadget ;{
@@ -866,7 +944,13 @@ Module PBMap
             Case PBMap\Gadget
               Select EventType()
                 Case #PB_EventType_MouseWheel
-                  SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta),#PB_Relative)
+                  If PBMap\Options\WheelMouseRelative
+                    ;Relative zoom (centered on the mouse)
+                    SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+                  Else
+                    ;Absolute zoom (centered on the center of the map)
+                    SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
+                  EndIf 
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
                   MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -884,11 +968,12 @@ Module PBMap
                   PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
                   PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
                 Case #PB_EventType_MouseMove
+                  ;If a move has been initiated by a left click
                   If PBMap\MoveStartingPoint\x <> - 1
                     MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
                     PBMap\Moving = #True
-                    ;move Marker
+                    ;If it's marker move
                     If PBMap\EditMarkerIndex > -1
                       SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
                       LatLon2XY(@PBMap\Marker()\Location, @Marker)
@@ -899,38 +984,39 @@ Module PBMap
                       ;New move values
                       PBMap\Position\x - MouseX
                       PBMap\Position\y - MouseY
-                      ;-*** Fill parameters and signal the drawing thread
+                      ;Fill parameters and signal the drawing thread
                       LockMutex(PBMap\Drawing\Mutex)
                       ;PBMap tile position in tile.decimal
                       PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
                       PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
                       PBMap\Drawing\PassNb = 1
                       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-                      ;If CallBackLocation send Location to function
-                      If PBMap\CallBackLocation > 0
-                        CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
-                      EndIf 
                       UnlockMutex(PBMap\Drawing\Mutex)
                     EndIf
                     ;Start drawing
                     SignalSemaphore(PBMap\Drawing\Semaphore)
-                    ;- ***                   
+                    ;If CallBackLocation send Location to function
+                    If PBMap\CallBackLocation > 0
+                      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+                    EndIf 
                     PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
                     PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
                   EndIf 
                 Case #PB_EventType_LeftButtonUp
                   PBMap\Moving = #False
                   PBMap\MoveStartingPoint\x = - 1
+                  ;Stop marker move
                   If PBMap\EditMarkerIndex > -1
                     PBMap\EditMarkerIndex = -1
-                  Else ;Move Map
+                  Else 
+                    ;Stop map move
                     LockMutex(PBMap\Drawing\Mutex)                  
                     PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
                     PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
                     MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
                     XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
                     UnlockMutex(PBMap\Drawing\Mutex)
-                  EndIf 
+                  EndIf
               EndSelect
           EndSelect
       EndSelect
@@ -1019,7 +1105,7 @@ CompilerIf #PB_Compiler_IsMainFile
     
     LoadFont(0, "Wingdings", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
-        
+    
     TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
     ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
@@ -1067,10 +1153,10 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Button_5
               PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              PBMap::LoadGpxFile(OpenFileRequester("Choisissez un fichier à charger", "", "*.gpx", 0))
-              PBMap::ZoomToArea() ; <-To center the view, and to viex all the track
+              PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "*.gpx", 0))
+              PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #Gdt_AddMarker
-              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255))
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1080,10 +1166,9 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::Quit()
   EndIf
 CompilerEndIf
-
-; IDE Options = PureBasic 5.50 (Windows - x86)
-; CursorPosition = 994
-; FirstLine = 969
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 1167
+; FirstLine = 1123
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
