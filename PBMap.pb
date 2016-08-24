@@ -102,6 +102,7 @@ Module PBMap
   Structure ImgMemCach
     nImage.i
     Location.Location
+    Mutex.i
   EndStructure
   
   Structure TileMemCach
@@ -481,23 +482,26 @@ Module PBMap
     Protected Tile.position
     ;Adding the image to the cache if possible
     AddMapElement(PBMap\MemCache\Images(), key)
+    PBMap\MemCache\Images(key)\Mutex = CreateMutex()
+    LockMutex(PBMap\MemCache\Images(key)\Mutex)
     nImage = GetTileFromHDD(CacheFile)
     If nImage = -1
       nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, CacheFile)
+      If nImage = -1
+        MyDebug("Error GetImageThread procedure, image not loaded - " + key)    
+        *Tile\nImage = -1
+        ProcedureReturn
+      EndIf
     EndIf
-    If nImage <> -1
-      PBMap\MemCache\Images(key)\nImage = nImage
-      Tile\x=*Tile\PBMapTileX
-      Tile\y=*Tile\PBMapTiley
-      XY2LatLon(@Tile,@PBMap\MemCache\Images(key)\Location)
-      MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
-      MyDebug("With the following key : " + key)  
-    Else
-      MyDebug("Error GetImageThread procedure, image not loaded - " + key)
-      nImage = -1
-    EndIf
+    PBMap\MemCache\Images(key)\nImage = nImage
+    Tile\x=*Tile\PBMapTileX
+    Tile\y=*Tile\PBMapTiley
+    XY2LatLon(@Tile,@PBMap\MemCache\Images(key)\Location)
+    MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
+    MyDebug("With the following key : " + key)  
     ;Define this tile image nb
     *Tile\nImage = nImage
+    UnlockMutex(PBMap\MemCache\Images(key)\Mutex)
   EndProcedure
   
   Procedure DrawTile(*Tile.Tile)
@@ -583,23 +587,30 @@ Module PBMap
         DeleteElement(PBMap\TilesThreads())
       EndIf         
     Next
-    ;-****Clean Mem Cache
+    ;-**** Clean Mem Cache
+    ;TODO in development, by now there's many cache problem as the loading thread could be perturbed
+    ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+    Protected MaxNbTile.l
+    If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
+      MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+    Else
+      MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
+    EndIf
+    Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+    Protected Limit.d=Scale*(MaxNbTile)*1.5
+    Debug "Cache cleaning"
     ForEach PBMap\MemCache\Images()
-      ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
-      Protected MaxNbTile.l
-      If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
-        MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
-      Else
-        MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
-      EndIf
-      Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
-      Protected Limit.d=Scale*(MaxNbTile)*1.5
-      Protected Distance.d=HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
-      Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
-      If Distance>Limit
-        Debug "delete"
-        DeleteMapElement(PBMap\MemCache\Images())
-      EndIf 
+        Protected Distance.d = HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
+        Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
+        If Distance>Limit And IsImage(PBMap\MemCache\Images()\nImage) 
+          LockMutex(PBMap\MemCache\Images()\Mutex)          
+          Debug "delete"
+          Debug PBMap\MemCache\Images()
+          FreeImage(PBMap\MemCache\Images()\nImage)
+          UnlockMutex(PBMap\MemCache\Images()\Mutex)
+          FreeMutex(PBMap\MemCache\Images()\Mutex)
+          DeleteMapElement(PBMap\MemCache\Images())
+        EndIf
     Next
     
   EndProcedure
@@ -984,7 +995,7 @@ Module PBMap
                       ;New move values
                       PBMap\Position\x - MouseX
                       PBMap\Position\y - MouseY
-                      ;Fill parameters and signal the drawing thread
+                      ;Fill parameters and send a signal to the drawing thread
                       LockMutex(PBMap\Drawing\Mutex)
                       ;PBMap tile position in tile.decimal
                       PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
@@ -992,9 +1003,9 @@ Module PBMap
                       PBMap\Drawing\PassNb = 1
                       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
                       UnlockMutex(PBMap\Drawing\Mutex)
+                      ;Start drawing
+                      SignalSemaphore(PBMap\Drawing\Semaphore)                    
                     EndIf
-                    ;Start drawing
-                    SignalSemaphore(PBMap\Drawing\Semaphore)
                     ;If CallBackLocation send Location to function
                     If PBMap\CallBackLocation > 0
                       CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
@@ -1167,8 +1178,9 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1132
-; FirstLine = 1123
+; ExecutableFormat = Console
+; CursorPosition = 595
+; FirstLine = 581
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
