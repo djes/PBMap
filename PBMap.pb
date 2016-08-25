@@ -26,7 +26,7 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   ;-Show debug infos
   Global Verbose = #True
-  Global MyDebugLevel = 1
+  Global MyDebugLevel = 3
   Global Proxy = #False
   Declare InitPBMap()
   Declare SetMapServer(ServerURL.s="http://tile.openstreetmap.org/",TileSize.l=256,ZoomMin.l=0,ZoomMax.l=18)
@@ -103,8 +103,8 @@ Module PBMap
   
   Structure ImgMemCach
     nImage.i
-    Location.Location
-    Mutex.i
+    ;Location.Location
+    ;Mutex.i
   EndStructure
   
   Structure TileMemCach
@@ -184,8 +184,8 @@ Module PBMap
   Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
     Protected *Buffer, curl.i, Timeout.i, res.i
     Protected FileHandle.i
-    MyDebug("ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$)
-    MyDebug(" to file : " + DestFileName$)
+    MyDebug("ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$, 3)
+    MyDebug(" to file : " + DestFileName$, 3)
     FileHandle = CreateFile(#PB_Any, DestFileName$)
     If FileHandle And Len(URL$)
       curl  = curl_easy_init()
@@ -218,11 +218,11 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
         res = curl_easy_perform(curl)
         If res <> #CURLE_OK
-          MyDebug("CURL problem")
+          MyDebug("CURL problem", 3)
         EndIf
         curl_easy_cleanup(curl)
       Else
-        MyDebug("Can't init CURL")
+        MyDebug("Can't init CURL", 3)
       EndIf
       CloseFile(FileHandle)
       ProcedureReturn FileSize(DestFileName$)
@@ -245,7 +245,7 @@ Module PBMap
     PBMap\Dirty = #False
     PBMap\Drawing\Mutex = CreateMutex()
     PBMap\Drawing\Semaphore = CreateSemaphore()
-    PBMap\EditMarkerIndex = -1                      ;<- You must initialize with No Marker selected
+    PBMap\EditMarkerIndex = -1                      ;Initialised with "no marker selected"
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     ;-Options
     PBMap\Options\WheelMouseRelative = #True
@@ -289,10 +289,12 @@ Module PBMap
   EndProcedure
   
   Procedure Quit()
-    ;kill main drawing thread (nicer than KillThread(PBMap\MainDrawingThread))
+    ;Ask main drawing thread to stop and wait for it (nicer than KillThread(PBMap\MainDrawingThread))
     LockMutex(PBMap\Drawing\Mutex)
     PBMap\Drawing\End = #True
-    UnlockMutex(PBMap\Drawing\Mutex)
+    ;KillThread(PBMap\MainDrawingThread)
+    UnlockMutex(PBMap\Drawing\Mutex)    
+    Repeat : Until Not IsThread(PBMap\MainDrawingThread)
     ;wait for loading threads to finish nicely
     ResetList(PBMap\TilesThreads()) 
     While NextElement(PBMap\TilesThreads())
@@ -302,7 +304,7 @@ Module PBMap
         ResetList( PBMap\TilesThreads()) 
       EndIf
     Wend
-    curl_global_cleanup()  
+    curl_global_cleanup()
   EndProcedure
   
   Macro Min(a,b)
@@ -547,7 +549,7 @@ Module PBMap
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
           With *NewTile
-            ;Keep a track of tiles and eventually threads associated (to free memory)
+            ;Keep a track of tiles, and eventually associated threads, to free memory
             AddElement(PBMap\TilesThreads())
             PBMap\TilesThreads()\Tile = *NewTile
             ;New tile parameters
@@ -556,12 +558,12 @@ Module PBMap
             \PBMapTileX = tx + x
             \PBMapTileY = ty + y
             \PBMapZoom  = PBMap\Zoom
-            \key = "Z" + RSet(Str(\PBMapZoom), 4, "0") + "X" + RSet(Str(\PBMapTileX), 8, "0") + "Y" + RSet(Str(\PBMapTileY), 8, "0")
+            \key = "Z" + RSet(Str(\PBMapZoom), 4, "0") + "X" + RSet(Str(\PBMapTileX), 8, "0") + "Y" + RSet(Str(\PBMapTileY), 8, "0")  ;Unique identifier
             ;Check if the image exists
             \nImage = GetTileFromMem(\key)
             If \nImage = -1
               ;If not, load it in the background        
-              If AddMapElement(PBMap\MemCache\Images(), \key) ;Add the image to the cache *only* in this loop
+              If AddMapElement(PBMap\MemCache\Images(), \key) ;Add the image to the cache, once in this loop
                 \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
                 PBMap\TilesThreads()\GetImageThread = \GetImageThread
                 MyDebug(" Creating get image thread nb " + Str(\GetImageThread), 2)
@@ -583,7 +585,7 @@ Module PBMap
         EndIf 
       Next
     Next
-    ;Free tile memory
+            ;Free tile memory
     ;TODO : get out this proc from drawtiles in a special "free ressources" task
     ForEach PBMap\TilesThreads()
       ;Check if there's no more loading thread
@@ -617,7 +619,7 @@ Module PBMap
 ;           DeleteMapElement(PBMap\MemCache\Images())
 ;         EndIf
 ;     Next
-    
+  
   EndProcedure
   
   Procedure DrawPointer(*Drawing.DrawingParameters)
@@ -771,7 +773,9 @@ Module PBMap
       VectorSourceColor(RGBA(0, 0, 0, 80))
       MovePathCursor(50,50)
       DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
-      StopVectorDrawing()
+      MovePathCursor(50,60)
+      DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
+      StopVectorDrawing()      
       ;Redraw
       ; If something was not correctly drawn, redraw after a while
       LockMutex(*SharedDrawing\Mutex)      ;Be sure that we're not modifying variables while moving (seems not useful, but it is, especially to clean the semaphore)
@@ -784,7 +788,7 @@ Module PBMap
         Repeat : Until TrySemaphore(*SharedDrawing\Semaphore) = 0
       EndIf
       UnlockMutex(*SharedDrawing\Mutex)      
-    Until Drawing\End    
+    Until Drawing\End
   EndProcedure
   
   Procedure Refresh()
@@ -1187,8 +1191,6 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
 ; ExecutableFormat = Console
-; CursorPosition = 445
-; FirstLine = 442
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
