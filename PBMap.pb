@@ -25,7 +25,7 @@ UsePNGImageEncoder()
 
 DeclareModule PBMap
   ;-Show debug infos
-  Global Verbose = #false
+  Global Verbose = #False
   Global MyDebugLevel = 3
   Global Proxy = #False
   Declare InitPBMap()
@@ -156,7 +156,9 @@ Module PBMap
     Options.option                          ;
   EndStructure
   
+  ;-Global variables
   Global PBMap.PBMap, Null.i
+  Global LoadMutexTest = CreateMutex()
   
   ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
@@ -168,6 +170,7 @@ Module PBMap
   Procedure MyDebug(msg.s, DbgLevel = 0)
     If Verbose And MyDebugLevel >= DbgLevel
       PrintN(msg)
+      ;Debug msg  
     EndIf
   EndProcedure
   
@@ -289,21 +292,33 @@ Module PBMap
   EndProcedure
   
   Procedure Quit()
-    ;Ask main drawing thread to stop and wait for it (nicer than KillThread(PBMap\MainDrawingThread))
+    Protected TimeCounter.q
+    ;Ask main drawing thread to stop and wait for it for 2 seconds
     LockMutex(PBMap\Drawing\Mutex)
     PBMap\Drawing\End = #True
-    UnlockMutex(PBMap\Drawing\Mutex)    
-    Repeat : Until Not IsThread(PBMap\MainDrawingThread)
-    ;Wait for loading threads to finish nicely
+    UnlockMutex(PBMap\Drawing\Mutex)
+    TimeCounter = ElapsedMilliseconds()
+    Repeat
+      Delay(100)
+      If ElapsedMilliseconds() - TimeCounter > 2000
+        ;Should not occur
+        KillThread(PBMap\MainDrawingThread)
+      EndIf
+    Until Not IsThread(PBMap\MainDrawingThread)
+    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+    TimeCounter = ElapsedMilliseconds()
     Repeat
       ResetList(PBMap\TilesThreads()) 
       While NextElement(PBMap\TilesThreads())
         If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
           FreeMemory(PBMap\TilesThreads()\Tile)
           DeleteElement(PBMap\TilesThreads())
+        ElseIf ElapsedMilliseconds() - TimeCounter > 2000
+          ;Should not occur
+          KillThread(PBMap\TilesThreads()\GetImageThread)
         EndIf
       Wend
-      Delay(20)
+      Delay(10)
     Until ListSize(PBMap\TilesThreads()) = 0 
     curl_global_cleanup()
   EndProcedure
@@ -434,15 +449,22 @@ Module PBMap
   EndProcedure
   
   Procedure.i GetTileFromHDD(CacheFile.s)
-    Protected nImage.i       
+    Protected nImage.i
+    Debug  "Loading image " + CacheFile + " ; Size : " + Str(FileSize(CacheFile))     
     If FileSize(CacheFile) > 0
       nImage = LoadImage(#PB_Any, CacheFile)
       If IsImage(nImage)
-        MyDebug("Loadimage " + CacheFile + " -> Success !", 3)
+        Debug "Success loading " + CacheFile + " as nImage " + Str(nImage)
+        MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
+      Else
+        Debug "Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !"
+        MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
       EndIf
+    Else
+      Debug "Failed loading " + CacheFile + " -> Size = 0"
+      MyDebug("Failed loading " + CacheFile + " -> Size = 0", 3)
     EndIf
-    MyDebug("Loadimage " + CacheFile + " -> Failed !", 3)
     ProcedureReturn -1
   EndProcedure
   
@@ -485,7 +507,9 @@ Module PBMap
     Protected Tile.position
 ;     PBMap\MemCache\Images(*Tile\key)\Mutex = CreateMutex()
 ;     LockMutex(PBMap\MemCache\Images(*Tile\key)\Mutex)
+;    LockMutex(LoadMutexTest)
     nImage = GetTileFromHDD(CacheFile)
+;    UnlockMutex(LoadMutexTest)    
     If nImage = -1
       nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, CacheFile)
       If nImage = -1
@@ -502,7 +526,7 @@ Module PBMap
     MyDebug("With the following key : " + *Tile\key, 3)  
     ;Define this tile image nb
     *Tile\nImage = nImage
-;     UnlockMutex(PBMap\MemCache\Images(key)\Mutex)
+    ;     UnlockMutex(PBMap\MemCache\Images(key)\Mutex)
   EndProcedure
   
   Procedure DrawTile(*Tile.Tile)
@@ -570,6 +594,7 @@ Module PBMap
                 MyDebug(" Creating get image thread nb " + Str(\GetImageThread), 2)
               Else
                 MyDebug(" Can't add a new image to the map list", 2)
+                CallDebugger
               EndIf
             EndIf
             If IsImage(\nImage)   
@@ -774,7 +799,7 @@ Module PBMap
       VectorSourceColor(RGBA(0, 0, 0, 80))
       MovePathCursor(50,50)
       DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
-      MovePathCursor(50,60)
+      MovePathCursor(50,80)
       DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
       StopVectorDrawing()      
       ;Redraw
@@ -1191,9 +1216,8 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; ExecutableFormat = Console
-; CursorPosition = 305
-; FirstLine = 278
+; CursorPosition = 450
+; FirstLine = 444
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
