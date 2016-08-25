@@ -25,7 +25,7 @@ UsePNGImageEncoder()
 
 DeclareModule PBMap
   ;-Show debug infos
-  Global Verbose = #True
+  Global Verbose = #false
   Global MyDebugLevel = 3
   Global Proxy = #False
   Declare InitPBMap()
@@ -292,18 +292,19 @@ Module PBMap
     ;Ask main drawing thread to stop and wait for it (nicer than KillThread(PBMap\MainDrawingThread))
     LockMutex(PBMap\Drawing\Mutex)
     PBMap\Drawing\End = #True
-    ;KillThread(PBMap\MainDrawingThread)
     UnlockMutex(PBMap\Drawing\Mutex)    
     Repeat : Until Not IsThread(PBMap\MainDrawingThread)
-    ;wait for loading threads to finish nicely
-    ResetList(PBMap\TilesThreads()) 
-    While NextElement(PBMap\TilesThreads())
-      If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
-        FreeMemory(PBMap\TilesThreads()\Tile)
-        DeleteElement(PBMap\TilesThreads())
-        ResetList( PBMap\TilesThreads()) 
-      EndIf
-    Wend
+    ;Wait for loading threads to finish nicely
+    Repeat
+      ResetList(PBMap\TilesThreads()) 
+      While NextElement(PBMap\TilesThreads())
+        If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
+          FreeMemory(PBMap\TilesThreads()\Tile)
+          DeleteElement(PBMap\TilesThreads())
+        EndIf
+      Wend
+      Delay(20)
+    Until ListSize(PBMap\TilesThreads()) = 0 
     curl_global_cleanup()
   EndProcedure
   
@@ -1191,6 +1192,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
 ; ExecutableFormat = Console
+; CursorPosition = 305
+; FirstLine = 278
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
