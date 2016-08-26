@@ -28,7 +28,7 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   #Red = 255
   ;-Show debug infos  
-  Global Verbose = 1
+  Global Verbose = 0
   Global MyDebugLevel = 3
   ;-Proxy ON/OFF  
   Global Proxy = #False
@@ -36,7 +36,7 @@ DeclareModule PBMap
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
-  Declare DrawingThread()
+  Declare Drawing()
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare ZoomToArea()
   Declare SetCallBackLocation(*CallBackLocation)
@@ -241,6 +241,25 @@ Module PBMap
   EndProcedure
   ;- ***
   
+  Procedure LoadingImageCreation()
+    Protected Text$ = "Loading"
+    PBmap\ImgLoading = CreateImage(#PB_Any, 256, 256) 
+    If  PBmap\ImgLoading
+      StartVectorDrawing(ImageVectorOutput(PBMap\Imgloading)) 
+      BeginVectorLayer()
+      VectorSourceColor(RGBA(255, 255, 255, 128))
+      AddPathBox(0, 0, 256, 256)
+      FillPath()
+      MovePathCursor(0, 0)
+      VectorFont(FontID(PBMap\Font), 256 / 20)
+      VectorSourceColor(RGBA(150, 150, 150, 255))
+      MovePathCursor(0 + (256 - VectorTextWidth(Text$)) / 2, 0 + (256 - VectorTextHeight(Text$)) / 2)
+      DrawVectorText(Text$)
+      EndVectorLayer()
+      StopVectorDrawing() 
+    EndIf
+  EndProcedure  
+  
   Procedure InitPBMap(window)
     Protected Result.i
     If Verbose
@@ -260,7 +279,6 @@ Module PBMap
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     PBMap\Window = window
     PBMap\Options\WheelMouseRelative = #True
-    ;-Options
     ;-Preferences
     ;Use this to create and customize your preferences file for the first time
     ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
@@ -285,41 +303,12 @@ Module PBMap
       Global ProxyPassword$ = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
     EndIf
     ClosePreferences()
-    curl_global_init(#CURL_GLOBAL_WIN32);
-    ;- Main drawing thread launching
-    ;PBMap\MainDrawingThread = CreateThread(@DrawingThread(), @PBMap\Drawing)
-    ;If PBMap\MainDrawingThread = 0
-    ;  Error("MapGadget : can't create main drawing thread.")
-    Protected Text$ = "Loading"
-    PBmap\ImgLoading = CreateImage(#PB_Any,256,256) 
-    If  PBmap\ImgLoading
-      StartVectorDrawing(ImageVectorOutput(PBMap\Imgloading)) 
-      BeginVectorLayer()
-      VectorSourceColor(RGBA(255, 255, 255, 128))
-      AddPathBox(0, 0, 256, 256)
-      FillPath()
-      MovePathCursor(0, 0)
-      VectorFont(FontID(PBMap\Font), 256 / 20)
-      VectorSourceColor(RGBA(150, 150, 150, 255))
-      MovePathCursor(0 + (256 - VectorTextWidth(Text$)) / 2, 0 + (256 - VectorTextHeight(Text$)) / 2)
-      DrawVectorText(Text$)
-      EndVectorLayer()
-      StopVectorDrawing() 
-    EndIf
-    
+    curl_global_init(#CURL_GLOBAL_WIN32)
+    LoadingImageCreation()
   EndProcedure
   
   Procedure Quit()
     PBMap\Drawing\End = #True
-;     ;wait for loading threads to finish nicely
-;     ResetList(PBMap\TilesThreads()) 
-;     While NextElement(PBMap\TilesThreads())
-;       If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
-;         FreeMemory(PBMap\TilesThreads()\Tile)
-;         DeleteElement(PBMap\TilesThreads())
-;         ResetList( PBMap\TilesThreads()) 
-;       EndIf
-;     Wend
     ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
@@ -472,19 +461,6 @@ Module PBMap
     ProcedureReturn -1
   EndProcedure
   
-  ;   Procedure.i GetTileFromMem(Zoom.i, XTile.i, YTile.i)
-;     Protected key.s = "Z" + RSet(Str(Zoom), 4, "0") + "X" + RSet(Str(XTile), 8, "0") + "Y" + RSet(Str(YTile), 8, "0")   
-;     MyDebug("Check if we have this image in memory")
-;     If FindMapElement(PBMap\MemCache\Images(), key)
-;       MyDebug("Key : " + key + " found !")
-;       ProcedureReturn PBMap\MemCache\Images()\nImage
-;     Else
-;       Protected CacheFile.s = PBMap\HDDCachePath + "PBMap_" + Str(Zoom) + "_" + Str(XTile) + "_" + Str(YTile) + ".png"
-;       MyDebug("Key : " + key + " Try HDD!")
-;       ProcedureReturn GetTileFromHDD(CacheFile.s)
-;     EndIf
-;   EndProcedure
-  
   Procedure.i GetLocalTile(key.s, CacheFile.s)
     MyDebug("Check if we have this image in memory", 3)
     If FindMapElement(PBMap\MemCache\Images(), key)
@@ -534,10 +510,7 @@ Module PBMap
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    ;nImage = GetTileFromHDD(CacheFile)
-    ;If nImage = -1
     nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile)
-    ;EndIf
     If nImage <> -1
       LockMutex(PBMap\TileThreadMutex)
       PBMap\MemCache\Images(*Tile\key)\nImage = nImage
@@ -550,7 +523,7 @@ Module PBMap
     EndIf
     ;Define this tile image nb
     *Tile\nImage = nImage
-    PostEvent(#PB_Event_Gadget,PBMap\window,PBmap\Gadget,#PB_MAP_REDRAW,*tile)
+    PostEvent(#PB_Event_Gadget, PBMap\window,PBmap\Gadget, #PB_MAP_REDRAW, *Tile)
   EndProcedure
   
   Procedure DrawTile(*Tile.Tile)
@@ -577,7 +550,6 @@ Module PBMap
     Protected ty = Int(*Drawing\Position\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
-
     Protected px, py, img, key.s, CacheFile.s
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
@@ -614,8 +586,6 @@ Module PBMap
                \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
                PBMap\TilesThreads()\GetImageThread = \GetImageThread
                myDebug(" Creating get image thread nb " + Str(\GetImageThread))
-               ; DrawLoading(*NewTile)
-               ;*Drawing\Dirty = #True ;Signals that this image is missing so we should have to redraw
              EndWith  
            Else
              MyDebug(" Error, can't create a new tile")
@@ -625,7 +595,7 @@ Module PBMap
        Next
      Next
             ;Free tile memory
-    ;TODO : get out this proc from drawtiles in a special "free ressources" task
+    ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
     ForEach PBMap\TilesThreads()
       ;Check if there's no more loading thread
       If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
@@ -636,19 +606,6 @@ Module PBMap
     ;EnableDebugger 
   EndProcedure
   
-;   Procedure Pointer(x.i, y.i, color.l = #Red)
-;     color=RGBA(255, 0, 0, 255)
-;     VectorSourceColor(color)
-;     MovePathCursor(x, y)
-;     AddPathLine(-8,-16,#PB_Path_Relative)
-;     AddPathCircle(8,0,8,180,0,#PB_Path_Relative)
-;     AddPathLine(-8,16,#PB_Path_Relative)
-;     ;FillPath(#PB_Path_Preserve) 
-;     ;ClipPath(#PB_Path_Preserve)
-;     AddPathCircle(0,-16,5,0,360,#PB_Path_Relative)
-;     VectorSourceColor(color)
-;     FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
-;  EndProcedure
 ;     ;-**** Clean Mem Cache
 ;     ;TODO in development, by now there's many cache problem as the loading thread could be perturbed
 ;     ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
@@ -674,7 +631,6 @@ Module PBMap
 ;           DeleteMapElement(PBMap\MemCache\Images())
 ;         EndIf
 ;     Next
-  
   
   Procedure DrawPointer(*Drawing.DrawingParameters)
     If PBMap\CallBackMainPointer > 0
@@ -729,7 +685,6 @@ Module PBMap
     Protected km.f, memKm.i
     If ListSize(PBMap\track())>0
       ;Trace Track
-     ; LockMutex(PBMap\Drawing\Mutex)
       ForEach PBMap\track()
         If *Drawing\TargetLocation\Latitude<>0 And  *Drawing\TargetLocation\Longitude<>0
           GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
@@ -763,7 +718,6 @@ Module PBMap
           EndIf 
         EndIf
       Next
-     ; UnlockMutex(PBMap\Drawing\Mutex)  
     EndIf
   EndProcedure
   
@@ -793,63 +747,37 @@ Module PBMap
     Next
   EndProcedure
   
-  ;-*** Main drawing thread
-  ; always running, waiting for a semaphore to start refreshing
-  Procedure DrawingThread();*SharedDrawing.DrawingParameters)
+  ;-*** Main drawing
+  Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected Px.d, Py.d
-    ;Repeat
-     ; WaitSemaphore(*SharedDrawing\Semaphore)
-     ; MyDebug("--------- Main drawing thread ------------")
-      ;Creates a copy of the structure to work with to avoid multiple mutex locks
-     ; LockMutex(*SharedDrawing\Mutex)
-     ; CopyStructure(*SharedDrawing, @Drawing, DrawingParameters)    
-     ; UnlockMutex(*SharedDrawing\Mutex)
-      ;Precalc some values
-      *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
-      *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
-      ;Pixel shift, aka position in the tile
-      Px = *Drawing\Position\x : Py = *Drawing\Position\y
-      *Drawing\DeltaX = Px * PBMap\TileSize - (Int(Px) * PBMap\TileSize) ;Don't forget the Int() !
-      *Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
-      *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
-      *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
-      ;Drawing\Dirty = #False
-      ;Main drawing stuff
-      StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-      DrawTiles(*Drawing)
-      DrawTrack(*Drawing)
-      DrawMarker(*Drawing)
-      DrawPointer(*Drawing)
-      ;DrawTrack(*Drawing)
-      ;DrawMarker(*Drawing)
-      ;Pointer(*Drawing\CenterX, *Drawing\CenterY, #Red)
-      ;- Display how many images in cache
-      VectorFont(FontID(PBMap\Font), 30)
-      VectorSourceColor(RGBA(0, 0, 0, 80))
-      MovePathCursor(50,50)
-      DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
-      MovePathCursor(50,80)
-      DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
-      StopVectorDrawing()    
-      ;Redraw
-      ; If something was not correctly drawn, redraw after a while
-     ; LockMutex(*SharedDrawing\Mutex)      ;Be sure that we're not modifying variables while moving (seems not useful, but it is, especially to clean the semaphore)
-     ; If Drawing\Dirty
-     ;   MyDebug("Something was dirty ! We try again to redraw")
-     ;   Drawing\PassNb + 1
-     ;   SignalSemaphore(*SharedDrawing\Semaphore)
-     ; Else
-     ;   ;Clean the semaphore to avoid multiple unuseful redraws
-     ;   Repeat : Until TrySemaphore(*SharedDrawing\Semaphore) = 0
-     ; EndIf
-      ;UnlockMutex(*SharedDrawing\Mutex)      
-    ;Until Drawing\End    
+    ;Precalc some values
+    *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
+    *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
+    ;Pixel shift, aka position in the tile
+    Px = *Drawing\Position\x : Py = *Drawing\Position\y
+    *Drawing\DeltaX = Px * PBMap\TileSize - (Int(Px) * PBMap\TileSize) ;Don't forget the Int() !
+    *Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
+    *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
+    *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
+    ;Main drawing stuff
+    StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+    DrawTiles(*Drawing)
+    DrawTrack(*Drawing)
+    DrawMarker(*Drawing)
+    DrawPointer(*Drawing)
+    ;- Display how many images in cache
+    VectorFont(FontID(PBMap\Font), 30)
+    VectorSourceColor(RGBA(0, 0, 0, 80))
+    MovePathCursor(50,50)
+    DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
+    MovePathCursor(50,80)
+    DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
+    StopVectorDrawing()    
   EndProcedure
   
   Procedure Refresh()
-    DrawingThread()
-    ;SignalSemaphore(PBMap\Drawing\Semaphore)
+    Drawing()
   EndProcedure
   
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15, Mode.i = #PB_Absolute)
@@ -870,10 +798,7 @@ Module PBMap
     PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
     PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize 
     PBMap\Drawing\PassNb = 1
-    ;Start drawing
-    ;SignalSemaphore(PBMap\Drawing\Semaphore)
-    DrawingThread()
-    ;***
+    Drawing()
     If PBMap\CallBackLocation > 0
       CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
     EndIf 
@@ -934,12 +859,8 @@ Module PBMap
     ;Convert X, Y in tile.decimal into real pixels
     PBMap\Position\X = PBMap\Drawing\Position\x * PBMap\TileSize
     PBMap\Position\Y = PBMap\Drawing\Position\y * PBMap\TileSize 
-    ;*** Creates a drawing thread and fill parameters
-    ;PBMap\Drawing\PassNb = 1
-    ;Start drawing
-    ;SignalSemaphore(PBMap\Drawing\Semaphore)
-    DrawingThread()
-    ;***
+    ;First drawing
+    Drawing()
     If PBMap\CallBackLocation > 0
       CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
     EndIf 
@@ -955,25 +876,19 @@ Module PBMap
   
   Procedure.d GetLatitude()
     Protected Value.d
-   ; LockMutex(PBMap\Drawing\Mutex)
     Value = PBMap\TargetLocation\Latitude
-   ; UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value
   EndProcedure
   
   Procedure.d GetLongitude()
     Protected Value.d
-   ; LockMutex(PBMap\Drawing\Mutex)
     Value = PBMap\TargetLocation\Longitude
-   ; UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value 
   EndProcedure
   
   Procedure.i GetZoom()
     Protected Value.d
-   ; LockMutex(PBMap\Drawing\Mutex)
     Value = PBMap\Zoom
-   ; UnlockMutex(PBMap\Drawing\Mutex)
     ProcedureReturn Value
   EndProcedure
   
@@ -1010,7 +925,7 @@ Module PBMap
                     MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
                     MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
                     PBMap\Moving = #True
-                    ;move Marker
+                    ;Move marker
                     If PBMap\EditMarkerIndex > -1
                       SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
                       LatLon2XY(@PBMap\Marker()\Location, @Marker)
@@ -1021,29 +936,19 @@ Module PBMap
                       ;New move values
                       PBMap\Position\x - MouseX
                       PBMap\Position\y - MouseY
-
-                      ;-*** Fill parameters and signal the drawing thread
-                     ; LockMutex(PBMap\Drawing\Mutex)
-
                       ;PBMap tile position in tile.decimal
                       PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
                       PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
                       PBMap\Drawing\PassNb = 1
                       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-
                       ;If CallBackLocation send Location to function
                       If PBMap\CallBackLocation > 0
                         CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
                       EndIf 
-                     ; UnlockMutex(PBMap\Drawing\Mutex)
                     EndIf
-                    ;Start drawing
-                    ;SignalSemaphore(PBMap\Drawing\Semaphore)
-                     DrawingThread()  
-                    ;- ***                   
+                    Drawing()  
                     PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
                     PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-                    ; DrawingThread()  
                   EndIf 
                 Case #PB_EventType_LeftButtonUp
                   PBMap\Moving = #False
@@ -1051,16 +956,14 @@ Module PBMap
                   If PBMap\EditMarkerIndex > -1
                     PBMap\EditMarkerIndex = -1
                   Else ;Move Map
-                    ;LockMutex(PBMap\Drawing\Mutex)                  
                     PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
                     PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
                     MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
                     XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-                   ; UnlockMutex(PBMap\Drawing\Mutex)
-                    DrawingThread() 
+                    Drawing() 
                   EndIf
                 Case #PB_MAP_REDRAW  
-                 DrawingThread() 
+                 Drawing() 
               EndSelect
           EndSelect
       EndSelect
@@ -1140,7 +1043,6 @@ CompilerIf #PB_Compiler_IsMainFile
   EndProcedure
   
   ;- MAIN TEST
-  OpenConsole() 
   If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     
     LoadFont(0, "Arial", 12)
@@ -1210,10 +1112,10 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; ExecutableFormat = Console
-; CursorPosition = 333
-; FirstLine = 331
+; CursorPosition = 272
+; FirstLine = 262
 ; Folding = ---------
 ; EnableUnicode
 ; EnableThread
 ; EnableXP
+; DisableDebugger
