@@ -33,6 +33,7 @@ DeclareModule PBMap
   ;-Proxy ON/OFF  
   Global Proxy = #False
   Declare InitPBMap(window)
+  Declare SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
@@ -40,6 +41,7 @@ DeclareModule PBMap
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare ZoomToArea()
   Declare SetCallBackLocation(*CallBackLocation)
+  Declare SetCallBackMainPointer(CallBackMainPointer.i)
   Declare LoadGpxFile(file.s);  
   Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
   Declare Quit()
@@ -87,13 +89,11 @@ Module PBMap
     PBMapTileX.i
     PBMapTileY.i
     PBMapZoom.i
-    Mutex.i
     TargetLocation.Location
     CenterX.i
     CenterY.i
     DeltaX.i
     DeltaY.i
-    Semaphore.i
     Dirty.i
     PassNB.i
     End.i
@@ -273,8 +273,6 @@ Module PBMap
     PBMap\TileSize = 256
     PBMap\Dirty = #False
     PBMap\TileThreadMutex = CreateMutex()
-    PBMap\Drawing\Mutex = CreateMutex()
-    PBMap\Drawing\Semaphore = CreateSemaphore()
     PBMap\EditMarkerIndex = -1                      ;Initialised with "no marker selected"
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     PBMap\Window = window
@@ -305,6 +303,13 @@ Module PBMap
     ClosePreferences()
     curl_global_init(#CURL_GLOBAL_WIN32)
     LoadingImageCreation()
+  EndProcedure
+  
+  Procedure SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
+    PBMap\ServerURL = ServerURL
+    PBMap\ZoomMin = ZoomMin
+    PBMap\ZoomMax = ZoomMax
+    PBMap\TileSize = TileSize
   EndProcedure
   
   Procedure Quit()
@@ -343,10 +348,10 @@ Module PBMap
   
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
-      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
       PBMap\Gadget = Gadget
-      CanvasGadget(PBMap\Gadget, X, Y, Width, Height)
+      CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf 
   EndProcedure
   
@@ -874,6 +879,40 @@ Module PBMap
     PBMap\CallBackMainPointer = CallBackMainPointer
   EndProcedure
   
+   ;Zoom on x, y position relative to the canvas gadget
+  Procedure SetZoomOnPosition(x, y, zoom)
+    Protected MouseX.d, MouseY.d
+    Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d
+    ;Fast and dirty code
+    OldPx = PBMap\Position\x : OldPy = PBMap\Position\y
+    OldMx = OldPx + GadgetWidth(PBMap\Gadget) / 2 - x
+    OldMy = OldPy + GadgetHeight(PBMap\Gadget) / 2 - y
+    PBMap\Zoom = PBMap\Zoom + zoom
+    If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
+    If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
+    ;Centered Zoom
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
+    ;Convert X, Y in tile.decimal into real pixels
+    PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
+    PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize
+    MouseX = PBMap\Position\x + GadgetWidth(PBMap\Gadget) / 2 - x
+    MouseY = PBMap\Position\y + GadgetHeight(PBMap\Gadget) / 2 - y               
+    ;Cross-multiply to get the new center
+    PBMap\Position\x = (OldPx * MouseX) / OldMx
+    PBMap\Position\y = (OldPy * MouseY) / OldMy
+    ;PBMap tile position in tile.decimal
+    PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+    PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+    PBMap\Drawing\PassNb = 1
+    XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+    ;Start drawing
+    Drawing()
+    ;If CallBackLocation send Location to function
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+    EndIf      
+  EndProcedure  
+  
   Procedure.d GetLatitude()
     Protected Value.d
     Value = PBMap\TargetLocation\Latitude
@@ -903,7 +942,15 @@ Module PBMap
           Gadget = EventGadget()
           Select Gadget
             Case PBMap\Gadget
-              Select EventType()
+              Select EventType()    
+                Case #PB_EventType_MouseWheel
+                  If PBMap\Options\WheelMouseRelative
+                    ;Relative zoom (centered on the mouse)
+                    SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+                  Else
+                    ;Absolute zoom (centered on the center of the map)
+                    SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
+                  EndIf 
                 Case #PB_EventType_LeftButtonDown
                   ;Check if we select a marker
                   MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -1023,6 +1070,11 @@ CompilerIf #PB_Compiler_IsMainFile
     FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
   EndProcedure
   
+  Procedure MainPointer(x.i, y.i)
+    VectorSourceColor(RGBA(255, 255,255, 255)) : AddPathCircle(x, y,32) : StrokePath(1)
+    VectorSourceColor(RGBA(0, 0, 0, 255)) : AddPathCircle(x, y, 29):StrokePath(2)
+  EndProcedure
+  
   Procedure ResizeAll()
     ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
     ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -1069,6 +1121,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
+    PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetCallBackLocation(@UpdateLocation())
     PBMap::SetLocation(-36.8485,174.7633,10)
     ;PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
@@ -1094,10 +1147,10 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Button_5
               PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              PBMap::LoadGpxFile(OpenFileRequester("Choisissez un fichier � charger", "", "*.gpx", 0))
-              PBMap::ZoomToArea() ; <-To center the view, and to viex all the track
+              PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "*.gpx", 0))
+              PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #Gdt_AddMarker
-              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)),ValD(GetGadgetText(#String_1)),RGBA(Random(255),Random(255),Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255))
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1112,8 +1165,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 272
-; FirstLine = 262
+; CursorPosition = 362
+; FirstLine = 339
 ; Folding = ---------
 ; EnableUnicode
 ; EnableThread
