@@ -1072,10 +1072,6 @@ Module PBMap
   EndProcedure
   
 ;   Procedure Event_MouseWheel()
-;     Protected MouseX.i, MouseY.i
-;     Protected Marker.Position
-;     Protected *Drawing.DrawingParameters
-;     
 ;     If PBMap\Options\WheelMouseRelative
 ;       ;Relative zoom (centered on the mouse)
 ;       SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
@@ -1083,12 +1079,10 @@ Module PBMap
 ;       ;Absolute zoom (centered on the center of the map)
 ;       SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
 ;     EndIf 
-;     
 ;   EndProcedure
+  
 ;   Procedure Event_LeftButtonDown()
-;     Protected MouseX.i, MouseY.i
 ;     Protected Marker.Position
-;     Protected *Drawing.DrawingParameters
 ;     
 ;     ;Check if we select a marker
 ;     MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -1105,13 +1099,11 @@ Module PBMap
 ;     ;Mem cursor Coord
 ;     PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
 ;     PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
-;     
-;     
 ;   EndProcedure
+  
 ;   Procedure Event_MouseMove()
 ;     Protected MouseX.i, MouseY.i
 ;     Protected Marker.Position
-;     Protected *Drawing.DrawingParameters
 ;     If PBMap\MoveStartingPoint\x <> - 1
 ;       MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
 ;       MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
@@ -1141,13 +1133,11 @@ Module PBMap
 ;       PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
 ;       PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
 ;     EndIf 
-;     
 ;   EndProcedure
+  
 ;   Procedure Event_LeftButtonUp()
 ;     Protected MouseX.i, MouseY.i
 ;     Protected Marker.Position
-;     Protected *Drawing.DrawingParameters
-;     
 ;     PBMap\Moving = #False
 ;     PBMap\MoveStartingPoint\x = - 1
 ;     If PBMap\EditMarkerIndex > -1
@@ -1159,7 +1149,6 @@ Module PBMap
 ;       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
 ;       Drawing() 
 ;     EndIf
-;     
 ;   EndProcedure  
 ;   
 ;   Procedure Event_Redraw()
@@ -1336,8 +1325,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1183
-; FirstLine = 1033
+; CursorPosition = 1197
+; FirstLine = 1154
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
