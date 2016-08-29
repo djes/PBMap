@@ -2,7 +2,7 @@
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
-; Author:            Thyphoon And Djes
+; Author:            Thyphoon, Djes And Idle
 ; Date:              Mai 17, 2016
 ; License:           Free, unrestricted, credit appreciated 
 ;                    but not required.
@@ -12,7 +12,7 @@
 ;                    (see also Proxy Details)
 ;************************************************************** 
 
-#Red = 255
+;#Red = 255
 
 CompilerIf #PB_Compiler_Thread = #False
   MessageRequester("Warning !!","You must enable ThreadSafe support in compiler options",#PB_MessageRequester_Ok )
@@ -28,10 +28,14 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   #Red = 255
   ;-Show debug infos  
-  Global Verbose = 0
+  Global Verbose = 1
   Global MyDebugLevel = 3
   ;-Proxy ON/OFF  
   Global Proxy = #False
+  
+  #SCALE_NAUTICAL = 1 
+  #SCALE_KM = 0 
+  
   Declare InitPBMap(window)
   Declare SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
@@ -42,6 +46,7 @@ DeclareModule PBMap
   Declare ZoomToArea()
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
+  Declare SetMapScaleUnit(ScaleUnit=PBMAP::#SCALE_KM) 
   Declare LoadGpxFile(file.s);  
   Declare AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
   Declare Quit()
@@ -50,6 +55,7 @@ DeclareModule PBMap
   Declare.d GetLatitude()
   Declare.d GetLongitude()
   Declare.i GetZoom()
+    
 EndDeclareModule
 
 Module PBMap 
@@ -81,6 +87,7 @@ Module PBMap
     key.s
     CacheFile.s
     GetImageThread.i
+    layer.i
   EndStructure
   
   Structure DrawingParameters
@@ -111,7 +118,7 @@ Module PBMap
   EndStructure
   
   Structure TileMemCach
-    Map Images.ImgMemCach()
+    Map Images.ImgMemCach(4096)
   EndStructure
   
   Structure Marker
@@ -122,6 +129,7 @@ Module PBMap
   
   Structure Option
     WheelMouseRelative.i
+    ScaleUnit.i                             ; Scale unit to use for measurements 
   EndStructure
   
   ;-PBMap Structure
@@ -138,7 +146,9 @@ Module PBMap
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
     ;
-    ServerURL.s                             ; Web URL ex: http://tile.openstreetmap.org/
+    Array ServerURL.s(0)                    ; Web URL ex: http://tile.openstreetmap.org/     
+    NumberOfMapLayers.i                     ; The number of map tile layers;           
+    
     ZoomMin.i                               ; Min Zoom supported by server
     ZoomMax.i                               ; Max Zoom supported by server
     Zoom.i                                  ; Current zoom
@@ -266,7 +276,6 @@ Module PBMap
       OpenConsole()
     EndIf
     PBMap\HDDCachePath = GetTemporaryDirectory()
-    PBMap\ServerURL = "http://tile.openstreetmap.org/"
     PBMap\ZoomMin = 0
     PBMap\ZoomMax = 18
     PBMap\MoveStartingPoint\x = - 1
@@ -277,6 +286,8 @@ Module PBMap
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     PBMap\Window = window
     PBMap\Options\WheelMouseRelative = #True
+    SetMapServer("http://tile.openstreetmap.org/")
+        
     ;-Preferences
     ;Use this to create and customize your preferences file for the first time
     ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
@@ -306,11 +317,14 @@ Module PBMap
   EndProcedure
   
   Procedure SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
-    PBMap\ServerURL = ServerURL
+    PBMAP\NumberOfMapLayers + 1 
+    ReDim PBMap\ServerURL(PBMAP\NumberOfMapLayers)
+    PBMap\ServerURL(PBMAP\NumberOfMapLayers-1) = ServerURL
     PBMap\ZoomMin = ZoomMin
     PBMap\ZoomMax = ZoomMax
     PBMap\TileSize = TileSize
   EndProcedure
+   
   
   Procedure Quit()
     PBMap\Drawing\End = #True
@@ -448,40 +462,46 @@ Module PBMap
   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
-    Debug  "Loading image " + CacheFile + " ; Size : " + Str(FileSize(CacheFile))     
+   ; Debug  "Loading image " + CacheFile + " ; Size : " + Str(FileSize(CacheFile))     
     If FileSize(CacheFile) > 0
       nImage = LoadImage(#PB_Any, CacheFile)
       If IsImage(nImage)
-        Debug "Success loading " + CacheFile + " as nImage " + Str(nImage)
+        ;Debug "Success loading " + CacheFile + " as nImage " + Str(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
       Else
-        Debug "Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !"
+       ; Debug "Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !"
         MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
       EndIf
     Else
-      Debug "Failed loading " + CacheFile + " -> Size <= 0"
+     ; Debug "Failed loading " + CacheFile + " -> Size <= 0"
       MyDebug("Failed loading " + CacheFile + " -> Size <= 0", 3)
     EndIf
     ProcedureReturn -1
   EndProcedure
   
   Procedure.i GetLocalTile(key.s, CacheFile.s)
+    Protected timg
     MyDebug("Check if we have this image in memory", 3)
     If FindMapElement(PBMap\MemCache\Images(), key)
       MyDebug("Key : " + key + " found !", 3)
       ProcedureReturn PBMap\MemCache\Images()\nImage
     Else
       MyDebug("Key : " + key + " Try HDD!")
-      ProcedureReturn GetTileFromHDD(CacheFile.s)
+      timg = GetTileFromHDD(CacheFile.s) 
+      If timg <> -1 
+       AddMapElement(PBMap\MemCache\Images(),key)
+       PBMap\MemCache\Images()\nImage = timg  
+      EndIf  
+      ProcedureReturn timg 
     EndIf
   EndProcedure
 
-  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s)
+  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s,layer.i)
     Protected *Buffer
     Protected nImage.i = -1
-    Protected FileHandle.i
-    Protected TileURL.s = PBMap\ServerURL + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
+    Protected FileHandle.i,timg 
+    Protected TileURL.s = PBMap\ServerURL(layer) + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
     MyDebug("Check if we have this image on Web", 3)
     If Proxy
       FileHandle = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
@@ -496,17 +516,26 @@ Module PBMap
         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
         If IsImage(nImage)
           MyDebug("Load from web " + TileURL + " as Tile nb " + nImage, 3)
-          Debug "url: " + TileURL 
-          Debug "cache file: " + CacheFile 
-          SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
-          FreeMemory(*Buffer)
+         ; Debug "url: " + TileURL 
+         ; Debug "cache file: " + CacheFile 
+         ; timg = LoadImage(#PB_Any,CacheFile)
+         ; If timg 
+         ;   StartDrawing(ImageOutput(timg)) 
+         ;   DrawImage(ImageID(nimage)) 
+         ;   StopDrawing() 
+         ;   SaveImage(timg, CacheFile, #PB_ImagePlugin_PNG)    
+         ;   FreeImage(timg)  
+         ; Else 
+            SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
+            FreeMemory(*Buffer)
+         ; EndIf   
         Else
           MyDebug("Can't catch image " + TileURL, 3)
           nImage = -1
           ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
         EndIf
       Else
-        Debug("ReceiveHTTPMemory's buffer is empty")
+       ; Debug("ReceiveHTTPMemory's buffer is empty")
         MyDebug("ReceiveHTTPMemory's buffer is empty", 3)
       EndIf
     EndIf
@@ -515,20 +544,20 @@ Module PBMap
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile)
+    nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile,*tile\layer)
     If nImage <> -1
       LockMutex(PBMap\TileThreadMutex)
       PBMap\MemCache\Images(*Tile\key)\nImage = nImage
       UnlockMutex(PBMap\TileThreadMutex)
       MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
       MyDebug("With the following key : " + *Tile\key)  
-    Else
+      *Tile\nImage = nImage
+      PostEvent(#PB_Event_Gadget, PBMap\window,PBmap\Gadget, #PB_MAP_REDRAW, *Tile)
+   Else
       MyDebug("Error GetImageThread procedure, image not loaded - " + *Tile\key)
-      nImage = -1
-    EndIf
-    ;Define this tile image nb
-    *Tile\nImage = nImage
-    PostEvent(#PB_Event_Gadget, PBMap\window,PBmap\Gadget, #PB_MAP_REDRAW, *Tile)
+      ;nImage = -1
+   EndIf
+   
   EndProcedure
   
   Procedure DrawTile(*Tile.Tile)
@@ -548,42 +577,52 @@ Module PBMap
     MyDebug("  at coords " + Str(x) + "," + Str(y))
   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters)
+  Procedure DrawTiles(*Drawing.DrawingParameters,layer.i,alpha.i=255)
     ;DisableDebugger
-    Protected x.i, y.i
+    Protected x.i, y.i,kq.q
     Protected tx = Int(*Drawing\Position\x)  ;Don't forget the Int() !
     Protected ty = Int(*Drawing\Position\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
-    Protected px, py, img, key.s, CacheFile.s
+    Protected px, py, img, tilex,tiley, key.s, CacheFile.s
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
          px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
          py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
-         CacheFile = PBMap\HDDCachePath + "PBMap_" + Str(PBMap\Zoom) + "_" + Str(tx + x) + "_" + Str(ty + y) + ".png"
-         key = "Z" + RSet(Str(PBMap\Zoom), 4, "0") + "X" + RSet(Str(tx + x), 8, "0") + "Y" + RSet(Str(ty + y), 8, "0")  ;Unique identifier
+         tilex = ((tx+x) % (1<< PBMap\Zoom))
+         tiley = ty+y 
+         kq = layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
+         key = Str(kq)
+         CacheFile = PBMap\HDDCachePath + key + ".png"
+               
+         
          img = GetLocalTile(key, CacheFile)
          If img <> -1  
            MovePathCursor(px, py)
-           DrawVectorImage(ImageID(img))
+           DrawVectorImage(ImageID(img),alpha)
          Else 
            MovePathCursor(px, py)
-           DrawVectorImage(ImageID(PBMap\ImgLoading))
+           DrawVectorImage(ImageID(PBMap\ImgLoading),alpha)
            Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
            If *NewTile
              With *NewTile
                ;Keep a track of tiles (especially to free memory)
+               ;TODO : not sure if it really needs a mutex here, i'm still trying to find where the white tile issue is coming from
+               ;a tile download is either getting clobbered or timing out or getting kicked and it results in a corrupted png file on linux   
+               LockMutex(PBMap\TileThreadMutex)    
                AddElement(PBMap\TilesThreads())
                PBMap\TilesThreads()\Tile = *NewTile
+               UnlockMutex(PBMap\TileThreadMutex)
                ;New tile parameters
-               \Position\x = px ;*Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
-               \Position\y = py ;*Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
-               \PBMapTileX = tx + x
-               \PBMapTileY = ty + y
+               \Position\x = px 
+               \Position\y = py 
+               \PBMapTileX = tilex 
+               \PBMapTileY = tiley
                \PBMapZoom  = PBMap\Zoom
                \key = key
                \CacheFile = CacheFile
+               \layer = layer
                LockMutex(PBMap\TileThreadMutex)
                AddMapElement(PBMap\MemCache\Images(), \key) ;Add the image to the cache, once in this loop
                PBMap\MemCache\Images()\nImage = PBMap\ImgLoading
@@ -596,9 +635,13 @@ Module PBMap
              MyDebug(" Error, can't create a new tile")
              Break 2
            EndIf   
-         EndIf 
+         EndIf
+           
        Next
-     Next
+                 
+     Next 
+     
+     
             ;Free tile memory
     ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
     ForEach PBMap\TilesThreads()
@@ -656,15 +699,29 @@ Module PBMap
     EndIf  
   EndProcedure
   
-  Procedure DrawScale(*Drawing.DrawingParameters)
+  Procedure DrawScale(*Drawing.DrawingParameters,x,y,alpha=80)
     ;TODO Add Option and function to display Scale on Map
-    Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
-    VectorFont(FontID(PBMap\Font), 30)
-    VectorSourceColor(RGBA(0, 0, 0, 80))
-    MovePathCursor(50,50)
-    DrawVectorText(StrD(Scale))
+    Protected sunit.s 
+    Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom) / 2
+    
+    Select PBMap\Options\ScaleUnit 
+      Case #SCALE_Nautical
+        Scale * 0.539957 
+        sunit = " Nm"
+      Case #SCALE_KM; 
+        sunit = " Km"
+    EndSelect     
+    
+    VectorFont(FontID(PBMap\Font), 10)
+    VectorSourceColor(RGBA(0, 0, 0,alpha))
+    MovePathCursor(x,y)
+    DrawVectorText(StrD(Scale,3)+sunit)
+    MovePathCursor(x,y+12) 
+    AddPathLine(x+128,y+10)
+    StrokePath(1)
+    
   EndProcedure
-        
+          
   Procedure TrackPointer(x.i, y.i,dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
@@ -755,7 +812,7 @@ Module PBMap
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
-    Protected Px.d, Py.d
+    Protected Px.d, Py.d,a
     ;Precalc some values
     *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
     *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
@@ -767,7 +824,11 @@ Module PBMap
     *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
     ;Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-    DrawTiles(*Drawing)
+    ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
+    ;such as for openseamap tiles which are overlaid. not that efficent from here though.
+    For a = 0 To PBMap\NumberOfMapLayers-1
+      DrawTiles(*Drawing,a) 
+    Next   
     DrawTrack(*Drawing)
     DrawMarker(*Drawing)
     DrawPointer(*Drawing)
@@ -778,6 +839,10 @@ Module PBMap
     DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
     MovePathCursor(50,80)
     DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
+    
+    ;If PBMap\Options\ShowScale
+     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
+    ;EndIf 
     StopVectorDrawing()    
   EndProcedure
   
@@ -854,7 +919,7 @@ Module PBMap
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
     Select mode
       Case #PB_Relative
-        PBMap\Zoom = PBMap\Zoom + zoom
+        PBMap\Zoom = PBMap\Zoom + zoom  
       Case #PB_Absolute
         PBMap\Zoom = zoom
     EndSelect
@@ -879,6 +944,11 @@ Module PBMap
     PBMap\CallBackMainPointer = CallBackMainPointer
   EndProcedure
   
+  Procedure SetMapScaleUnit(ScaleUnit.i = PBMAP::#SCALE_KM)
+    PBMap\Options\ScaleUnit = ScaleUnit
+    Drawing()
+  EndProcedure   
+    
    ;Zoom on x, y position relative to the canvas gadget
   Procedure SetZoomOnPosition(x, y, zoom)
     Protected MouseX.d, MouseY.d
@@ -1094,6 +1164,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::Refresh()
   EndProcedure
   
+  OpenConsole()
   ;- MAIN TEST
   If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     
@@ -1123,7 +1194,9 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetCallBackLocation(@UpdateLocation())
-    PBMap::SetLocation(-36.8485,174.7633,10)
+    PBMap::SetLocation(-36.81148,175.08634,12)
+    PBMap::SetMapServer("http://t1.openseamap.org/seamark/") ;add a special osm overlay map 
+    PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
     ;PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
     Repeat
@@ -1163,12 +1236,11 @@ CompilerIf #PB_Compiler_IsMainFile
   CloseConsole()
   
 CompilerEndIf
-
-; IDE Options = PureBasic 5.42 LTS (Windows - x86)
-; CursorPosition = 362
-; FirstLine = 339
-; Folding = ---------
-; EnableUnicode
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 1219
+; FirstLine = 1193
+; Folding = ----------
 ; EnableThread
 ; EnableXP
 ; DisableDebugger
+; EnableUnicode
