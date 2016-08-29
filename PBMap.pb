@@ -30,8 +30,8 @@ DeclareModule PBMap
   ;-Show debug infos  
   Global Verbose = 1
   Global MyDebugLevel = 3
-  ;-Proxy ON/OFF  
-  Global Proxy = #True
+  ;-Proxy ON/OFF
+  Global Proxy = #False
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -449,16 +449,16 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure LoadErrorHandler()
-    MessageRequester("Error", "")
-  EndProcedure
+;   Procedure LoadErrorHandler()
+;     MessageRequester("Error", "")
+;   EndProcedure
   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
     If FileSize(CacheFile) > 0
-      OnErrorCall(@LoadErrorHandler())
+     ; OnErrorCall(@LoadErrorHandler())
       nImage = LoadImage(#PB_Any, CacheFile)
-      OnErrorDefault()
+     ; OnErrorDefault()
       If IsImage(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
@@ -991,7 +991,6 @@ Module PBMap
   EndProcedure
   
   Procedure Events()
-;    Protected Gadget.i
     Protected MouseX.i, MouseY.i
     Protected Marker.Position
     Protected *Drawing.DrawingParameters
@@ -1063,10 +1062,116 @@ Module PBMap
           XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
           Drawing() 
         EndIf
-      Case #PB_MAP_REDRAW  
-        Drawing() 
+      Case #PB_MAP_REDRAW 
+        Debug "Redraw"
+        Drawing()
+       Case #PB_MAP_RETRY
+         Debug "Reload"
+         Drawing()     
     EndSelect
   EndProcedure
+  
+;   Procedure Event_MouseWheel()
+;     Protected MouseX.i, MouseY.i
+;     Protected Marker.Position
+;     Protected *Drawing.DrawingParameters
+;     
+;     If PBMap\Options\WheelMouseRelative
+;       ;Relative zoom (centered on the mouse)
+;       SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+;     Else
+;       ;Absolute zoom (centered on the center of the map)
+;       SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
+;     EndIf 
+;     
+;   EndProcedure
+;   Procedure Event_LeftButtonDown()
+;     Protected MouseX.i, MouseY.i
+;     Protected Marker.Position
+;     Protected *Drawing.DrawingParameters
+;     
+;     ;Check if we select a marker
+;     MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+;     MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+;     ForEach PBMap\Marker()                   
+;       LatLon2XY(@PBMap\Marker()\Location, @Marker)                   
+;       Marker\x * PBMap\TileSize
+;       Marker\y * PBMap\TileSize 
+;       If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
+;         PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
+;         Break
+;       EndIf
+;     Next
+;     ;Mem cursor Coord
+;     PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+;     PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
+;     
+;     
+;   EndProcedure
+;   Procedure Event_MouseMove()
+;     Protected MouseX.i, MouseY.i
+;     Protected Marker.Position
+;     Protected *Drawing.DrawingParameters
+;     If PBMap\MoveStartingPoint\x <> - 1
+;       MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
+;       MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
+;       PBMap\Moving = #True
+;       ;Move marker
+;       If PBMap\EditMarkerIndex > -1
+;         SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
+;         LatLon2XY(@PBMap\Marker()\Location, @Marker)
+;         Marker\x + MouseX / PBMap\TileSize
+;         Marker\y + MouseY / PBMap\TileSize
+;         XY2LatLon(@Marker, @PBMap\Marker()\Location)                      
+;       Else
+;         ;New move values
+;         PBMap\Position\x - MouseX
+;         PBMap\Position\y - MouseY
+;         ;PBMap tile position in tile.decimal
+;         PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+;         PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+;         PBMap\Drawing\PassNb = 1
+;         XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+;         ;If CallBackLocation send Location to function
+;         If PBMap\CallBackLocation > 0
+;           CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+;         EndIf 
+;       EndIf
+;       Drawing()  
+;       PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+;       PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+;     EndIf 
+;     
+;   EndProcedure
+;   Procedure Event_LeftButtonUp()
+;     Protected MouseX.i, MouseY.i
+;     Protected Marker.Position
+;     Protected *Drawing.DrawingParameters
+;     
+;     PBMap\Moving = #False
+;     PBMap\MoveStartingPoint\x = - 1
+;     If PBMap\EditMarkerIndex > -1
+;       PBMap\EditMarkerIndex = -1
+;     Else ;Move Map
+;       PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+;       PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+;       MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
+;       XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+;       Drawing() 
+;     EndIf
+;     
+;   EndProcedure  
+;   
+;   Procedure Event_Redraw()
+;     Debug "Redraw"    
+;     Drawing()
+;   EndProcedure;   
+  
+;  Procedure Event_Retry()
+;     Debug "Reload"    
+;     Delay(2000)
+;     Drawing()
+;   EndProcedure
     
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
@@ -1076,6 +1181,13 @@ Module PBMap
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf 
     BindGadgetEvent(PBMap\Gadget, @Events())    
+    ;BindGadgetEvent(PBMap\Gadget, @Event_MouseWheel(), #PB_EventType_MouseWheel)    
+    ;BindGadgetEvent(PBMap\Gadget, @Event_LeftButtonDown(), #PB_EventType_LeftButtonDown)    
+    ;BindGadgetEvent(PBMap\Gadget, @Event_MouseMove(), #PB_EventType_MouseMove)    
+    ;BindGadgetEvent(PBMap\Gadget, @Event_LeftButtonUp(), #PB_EventType_LeftButtonUp)    
+    ;BindGadgetEvent(PBMap\Gadget, Event_Redraw(), #PB_MAP_REDRAW)    
+    ;BindGadgetEvent(PBMap\Gadget, @Event_Retry(), #PB_MAP_RETRY)    
+  
   EndProcedure
   
 EndModule
@@ -1224,9 +1336,9 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 452
-; FirstLine = 442
-; Folding = ----------
+; CursorPosition = 1183
+; FirstLine = 1033
+; Folding = ---------
 ; EnableThread
 ; EnableXP
 ; EnableUnicode
