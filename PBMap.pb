@@ -842,10 +842,10 @@ Module PBMap
     ;EndIf 
     StopVectorDrawing()
     ;If there was a problem while drawing, redraw
-    If PBMap\Dirty  
-      PBMap\Redraw = #True
-      ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
-    EndIf
+;     If PBMap\Dirty  
+;       PBMap\Redraw = #True
+;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
+;     EndIf
   EndProcedure
   
   Procedure Refresh()
@@ -1083,7 +1083,7 @@ Module PBMap
   EndProcedure
   
   Procedure TimerEvents()
-    If EventTimer() = PBMap\Timer And PBMap\Redraw
+    If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
       Drawing()
     EndIf     
   EndProcedure 
@@ -1246,8 +1246,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 603
-; FirstLine = 563
+; CursorPosition = 840
+; FirstLine = 819
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
