@@ -1,4 +1,4 @@
-;************************************************************** 
+;;************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
@@ -87,10 +87,19 @@ Module PBMap
     GetImageThread.i
     RetryNb.i
     Layer.i
+<<<<<<< HEAD
+=======
+  EndStructure
+  
+   Structure TileBounds 
+    NorthWest.Position
+    SouthEast.Position 
+>>>>>>> refs/remotes/origin/idle
   EndStructure
   
   Structure DrawingParameters
     Position.Position
+    Bounds.TileBounds 
     Canvas.i
     PBMapTileX.i
     PBMapTileY.i
@@ -158,6 +167,10 @@ Module PBMap
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
                                             ;
+<<<<<<< HEAD
+=======
+    OnStage.i
+>>>>>>> refs/remotes/origin/idle
     Redraw.i
     Moving.i
     Dirty.i                                 ; To signal that drawing need a refresh
@@ -176,7 +189,10 @@ Module PBMap
   
   #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
   #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
+<<<<<<< HEAD
   #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+=======
+>>>>>>> refs/remotes/origin/idle
   
   ;-Global variables
   Global PBMap.PBMap, Null.i
@@ -343,9 +359,12 @@ Module PBMap
               ;Should not occur
               KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
             EndIf
+<<<<<<< HEAD
           Else
             FreeMemory(PBMap\MemCache\Images()\Tile)
             PBMap\MemCache\Images()\Tile = 0
+=======
+>>>>>>> refs/remotes/origin/idle
           EndIf
         Else
           DeleteMapElement(PBMap\MemCache\Images())
@@ -512,7 +531,11 @@ Module PBMap
           ;   SaveImage(timg, CacheFile, #PB_ImagePlugin_PNG)    
           ;   FreeImage(timg)  
           ; Else 
+<<<<<<< HEAD
           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
+=======
+          If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG,0,32)
+>>>>>>> refs/remotes/origin/idle
             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
           Else
             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
@@ -536,19 +559,39 @@ Module PBMap
     Repeat
       nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile, *Tile\Layer)
       If nImage <> -1
+<<<<<<< HEAD
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
+=======
+        LockMutex(PBMap\TileThreadMutex)
+        PBMap\MemCache\Images(*Tile\key)\nImage = nImage
+        UnlockMutex(PBMap\TileThreadMutex)
+        MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
+        PBMap\Dirty = #True
+>>>>>>> refs/remotes/origin/idle
         *Tile\RetryNb = 0
         ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW, *Tile) ;If image is loaded from web, redraw
       Else 
         MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
+<<<<<<< HEAD
         Delay(1000)
+=======
+        Delay(5000)
+>>>>>>> refs/remotes/origin/idle
         *Tile\RetryNb - 1
         ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_RETRY, *Tile) ;If image is not loaded, retry    
       EndIf
     Until *Tile\RetryNb <= 0
+<<<<<<< HEAD
     *Tile\nImage = nImage
     *Tile\RetryNb = -2 ;End of the thread    
     PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
+=======
+    ;End of the thread
+    LockMutex(PBMap\TileThreadMutex)
+    FreeMemory(PBMap\MemCache\Images(*Tile\key)\Tile)
+    PBMap\MemCache\Images(*Tile\key)\Tile = 0
+    UnlockMutex(PBMap\TileThreadMutex)    
+>>>>>>> refs/remotes/origin/idle
   EndProcedure
   
   Procedure.i GetTile(key.s, CacheFile.s, px.i, py.i, tilex.i, tiley.i, Layer.i)
@@ -564,6 +607,7 @@ Module PBMap
       AddMapElement(PBMap\MemCache\Images(), key)
       MyDebug("Key : " + key + " added in memory cache!", 3)
       PBMap\MemCache\Images()\nImage = -1
+<<<<<<< HEAD
     EndIf
     If PBMap\MemCache\Images()\Tile = 0 ;Check if a loading thread is not running
       MyDebug("Trying to load from HDD " + CacheFile, 3)
@@ -574,6 +618,19 @@ Module PBMap
         ProcedureReturn timg
       EndIf
       MyDebug("Key : " + key + " not found on HDD", 3)
+=======
+      ;UnlockMutex(PBMap\TileThreadMutex)
+    EndIf
+    If PBMap\MemCache\Images()\Tile = 0 ;Check if a loading thread is not running
+      MyDebug("Trying to load from HDD " + CacheFile)
+      timg = GetTileFromHDD(CacheFile.s)
+      If timg <> -1
+        MyDebug("Key : " + key + " found on HDD")
+        PBMap\MemCache\Images()\nImage = timg  
+        ProcedureReturn timg
+      EndIf
+      MyDebug("Key : " + key + " not found on HDD")
+>>>>>>> refs/remotes/origin/idle
       ;Launch a new thread
       Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
       If *NewTile
@@ -589,6 +646,7 @@ Module PBMap
           \CacheFile = CacheFile
           \Layer = Layer
           \RetryNb = 5
+<<<<<<< HEAD
           \nImage = -1
           MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
           \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
@@ -600,6 +658,35 @@ Module PBMap
     ProcedureReturn timg 
   EndProcedure
   
+=======
+          \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
+          myDebug(" Creating get image thread nb " + Str(\GetImageThread))
+        EndWith  
+      Else
+        MyDebug(" Error, can't create a new tile loading thread")
+      EndIf   
+    EndIf 
+    ProcedureReturn timg 
+  EndProcedure
+  
+  ;   Procedure DrawTile(*Tile.Tile)
+  ;     Protected x = *Tile\Position\x 
+  ;     Protected y = *Tile\Position\y 
+  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
+  ;     MyDebug("  at coords " + Str(x) + "," + Str(y), 2)
+  ;     MovePathCursor(x, y)
+  ;     DrawVectorImage(ImageID(*Tile\nImage))
+  ;   EndProcedure
+  ;   
+  ;   Procedure DrawLoading(*Tile.Tile)
+  ;     Protected x = *Tile\Position\x 
+  ;     Protected y = *Tile\Position\y 
+  ;     Protected Text$ = "Loading"
+  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
+  ;     MyDebug("  at coords " + Str(x) + "," + Str(y))
+  ;   EndProcedure
+  
+>>>>>>> refs/remotes/origin/idle
   Procedure DrawTiles(*Drawing.DrawingParameters, Layer.i, alpha.i=255)
     ;DisableDebugger
     Protected x.i, y.i,kq.q
@@ -609,6 +696,12 @@ Module PBMap
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
     MyDebug("Drawing tiles")
+    
+    *Drawing\Bounds\NorthWest\x = tx-nx-1 
+    *Drawing\Bounds\NorthWest\y = ty-ny-1 
+    *Drawing\Bounds\SouthEast\x = tx+nx+1 
+    *Drawing\Bounds\SouthEast\y = ty+ny+1 
+       
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         ;          If PBMap\Moving  ;If drawing was threaded, this would exit the loop when the user is moving
@@ -616,7 +709,11 @@ Module PBMap
         ;          EndIf
         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
+<<<<<<< HEAD
         tilex = ((tx+x) % (1<<PBMap\Zoom))
+=======
+        tilex = ((tx+x) % (1<< PBMap\Zoom))
+>>>>>>> refs/remotes/origin/idle
         tiley = ty+y 
         kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
         key = Str(kq)
@@ -633,6 +730,19 @@ Module PBMap
       Next
     Next 
     
+<<<<<<< HEAD
+=======
+    ;     ;Free tile memory
+    ;     ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
+    ;     ForEach PBMap\TilesThreads()
+    ;       ;Check if there's no more loading thread
+    ;       If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
+    ;         FreeMemory(PBMap\TilesThreads()\Tile)
+    ;         DeleteElement(PBMap\TilesThreads())
+    ;       EndIf         
+    ;     Next
+    
+>>>>>>> refs/remotes/origin/idle
   EndProcedure
   
   ;     ;-**** Clean Mem Cache
@@ -702,6 +812,44 @@ Module PBMap
     StrokePath(1)
   EndProcedure
   
+<<<<<<< HEAD
+=======
+   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
+    Protected nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
+    Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
+       
+    ;VectorFont(FontID(PBMap\Font), 10)
+    VectorSourceColor(RGBA(0, 0, 0,Alpha))
+    
+    ;GetMapRegionDegrees(@Degrees1,@degrees2)
+    
+    XY2LatLon(*Drawing\Bounds\NorthWest,@Degrees1)
+    XY2LatLon(*Drawing\Bounds\SouthEast,@Degrees2)
+       
+    ny = Round(Degrees1\Latitude,#PB_Round_Up)+1
+    ny1 = Round(degrees2\Latitude,#PB_Round_Down)-1 
+    nx = Round(Degrees1\Longitude,#PB_Round_Down)-1
+    nx1 = Round(degrees2\Longitude,#PB_Round_Up) +1
+       
+    For y = ny1 To ny  
+      Degrees1\Latitude = y 
+      degrees2\Latitude = y + 1
+      For x = nx To nx1
+        Degrees1\Longitude =x
+        Degrees2\Longitude =x+ 1
+         GetPixelCoordFromLocation(@Degrees1,@pos1)
+         MovePathCursor(pos1\x,pos1\y) 
+         AddPathLine(pos2\x,pos1\y) 
+         MovePathCursor(pos1\x,pos1\y)
+         AddPathLine(pos1\x,pos2\y) 
+      Next      
+    Next 
+    StrokePath(1)  
+   
+  EndProcedure   
+  
+  
+>>>>>>> refs/remotes/origin/idle
   Procedure TrackPointer(x.i, y.i,dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
@@ -793,6 +941,10 @@ Module PBMap
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected Px.d, Py.d,a
+<<<<<<< HEAD
+=======
+    PBMap\OnStage = #True
+>>>>>>> refs/remotes/origin/idle
     PBMap\Dirty = #False
     PBMap\Redraw = #False
     ;Precalc some values
@@ -823,7 +975,11 @@ Module PBMap
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
       If PBMap\MemCache\Images()\Tile <> 0
+<<<<<<< HEAD
         If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+=======
+        If PBMap\MemCache\Images()\Tile\GetImageThread <> 0
+>>>>>>> refs/remotes/origin/idle
           ThreadCounter + 1
         EndIf
       EndIf
@@ -831,6 +987,10 @@ Module PBMap
     DrawVectorText(Str(ThreadCounter))
     ;If PBMap\Options\ShowScale
     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
+<<<<<<< HEAD
+=======
+     DrawDegrees(*Drawing,192)
+>>>>>>> refs/remotes/origin/idle
     ;EndIf 
     StopVectorDrawing()
     ;If there was a problem while drawing, redraw
@@ -838,6 +998,10 @@ Module PBMap
     ;       PBMap\Redraw = #True
     ;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
     ;     EndIf
+<<<<<<< HEAD
+=======
+    PBMap\OnStage = #False
+>>>>>>> refs/remotes/origin/idle
   EndProcedure
   
   Procedure Refresh()
@@ -997,7 +1161,11 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
+<<<<<<< HEAD
     Protected Marker.Position, *Tile.Tile
+=======
+    Protected Marker.Position
+>>>>>>> refs/remotes/origin/idle
     PBMap\Moving = #False
     Select EventType()    
       Case #PB_EventType_MouseWheel
@@ -1071,6 +1239,7 @@ Module PBMap
       Case #PB_MAP_RETRY
         Debug "Reload"
         PBMap\Redraw = #True
+<<<<<<< HEAD
       Case #PB_MAP_TILE_CLEANUP
         *Tile = EventData() 
         ;If PBMap\MemCache\Images(*Tile\key)\Tile\RetryNb = -2 ;Check the end of the thread
@@ -1080,11 +1249,17 @@ Module PBMap
         PBMap\MemCache\Images(*Tile\key)\Tile = 0
         PBMap\Redraw = #True
         ;EndIf
+=======
+>>>>>>> refs/remotes/origin/idle
     EndSelect
   EndProcedure
   
   Procedure TimerEvents()
+<<<<<<< HEAD
     If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
+=======
+    If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty) And PBMap\OnStage = #False
+>>>>>>> refs/remotes/origin/idle
       Drawing()
     EndIf    
   EndProcedure 
@@ -1247,8 +1422,13 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
+<<<<<<< HEAD
 ; CursorPosition = 600
 ; FirstLine = 680
+=======
+; CursorPosition = 1290
+; FirstLine = 1275
+>>>>>>> refs/remotes/origin/idle
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
