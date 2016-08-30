@@ -1,4 +1,4 @@
-;************************************************************** 
+;;************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
@@ -30,7 +30,7 @@ DeclareModule PBMap
   ;-Show debug infos  
   Global Verbose = 1
   Global MyDebugLevel = 3
-  ;-Proxy ON/OFF  
+  ;-Proxy ON/OFF
   Global Proxy = #False
   
   #SCALE_NAUTICAL = 1 
@@ -39,7 +39,6 @@ DeclareModule PBMap
   Declare InitPBMap(window)
   Declare SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
-  Declare Event(Event.l)
   Declare SetLocation(latitude.d, longitude.d, zoom = 15, mode.i = #PB_Absolute)
   Declare Drawing()
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
@@ -55,7 +54,6 @@ DeclareModule PBMap
   Declare.d GetLatitude()
   Declare.d GetLongitude()
   Declare.i GetZoom()
-    
 EndDeclareModule
 
 Module PBMap 
@@ -87,11 +85,18 @@ Module PBMap
     key.s
     CacheFile.s
     GetImageThread.i
-    layer.i
+    RetryNb.i
+    Layer.i
+  EndStructure
+  
+   Structure TileBounds 
+    NorthWest.Position
+    SouthEast.Position 
   EndStructure
   
   Structure DrawingParameters
     Position.Position
+    Bounds.TileBounds 
     Canvas.i
     PBMapTileX.i
     PBMapTileY.i
@@ -113,6 +118,7 @@ Module PBMap
   
   Structure ImgMemCach
     nImage.i
+    *Tile.Tile 
     ;Location.Location
     ;Mutex.i
   EndStructure
@@ -137,15 +143,16 @@ Module PBMap
     Window.i                                ; Parent Window
     Gadget.i                                ; Canvas Gadget Id 
     Font.i                                  ; Font to uses when write on the map 
+    Timer.i 
     TargetLocation.Location                 ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
-    ;
+                                            ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                   ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    ;
+                                            ;
     Position.PixelPosition                  ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
-    ;
+                                            ;
     Array ServerURL.s(0)                    ; Web URL ex: http://tile.openstreetmap.org/     
     NumberOfMapLayers.i                     ; The number of map tile layers;           
     
@@ -153,15 +160,17 @@ Module PBMap
     ZoomMax.i                               ; Max Zoom supported by server
     Zoom.i                                  ; Current zoom
     TileSize.i                              ; Tile size downloaded on the server ex : 256
-    ;
+                                            ;
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
-    ;
+                                            ;
+    OnStage.i
+    Redraw.i
     Moving.i
     Dirty.i                                 ; To signal that drawing need a refresh
-    ;
+                                            ;
     MainDrawingThread.i
-    List TilesThreads.TileThread()
+    ;List TilesThreads.TileThread()
     TileThreadMutex.i;                      ;Mutex to protect resources  
     List track.Location()                   ; To display a GPX track
     List Marker.Marker()                    ; To diplay marker
@@ -173,6 +182,7 @@ Module PBMap
   EndStructure
   
   #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
+  #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
   
   ;-Global variables
   Global PBMap.PBMap, Null.i
@@ -204,8 +214,8 @@ Module PBMap
   Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
     Protected *Buffer, curl.i, Timeout.i, res.i
     Protected FileHandle.i
-    MyDebug("ReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + ProxyPort$ + ProxyUser$, 3)
-    MyDebug(" to file : " + DestFileName$, 3)
+    MyDebug("CurlReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + " " + ProxyPort$ + " " + ProxyUser$, 4)
+    MyDebug(" to file : " + DestFileName$, 4)
     FileHandle = CreateFile(#PB_Any, DestFileName$)
     If FileHandle And Len(URL$)
       curl  = curl_easy_init()
@@ -238,11 +248,11 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
         res = curl_easy_perform(curl)
         If res <> #CURLE_OK
-          MyDebug("CURL problem", 3)
+          MyDebug("CURL problem", 4)
         EndIf
         curl_easy_cleanup(curl)
       Else
-        MyDebug("Can't init CURL", 3)
+        MyDebug("Can't init CURL", 4)
       EndIf
       CloseFile(FileHandle)
       ProcedureReturn FileSize(DestFileName$)
@@ -270,7 +280,7 @@ Module PBMap
     EndIf
   EndProcedure  
   
-  Procedure InitPBMap(window)
+  Procedure InitPBMap(Window)
     Protected Result.i
     If Verbose
       OpenConsole()
@@ -284,10 +294,11 @@ Module PBMap
     PBMap\TileThreadMutex = CreateMutex()
     PBMap\EditMarkerIndex = -1                      ;Initialised with "no marker selected"
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
-    PBMap\Window = window
+    PBMap\Window = Window
+    PBMap\Timer = 1
     PBMap\Options\WheelMouseRelative = #True
     SetMapServer("http://tile.openstreetmap.org/")
-        
+    
     ;-Preferences
     ;Use this to create and customize your preferences file for the first time
     ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
@@ -324,25 +335,27 @@ Module PBMap
     PBMap\ZoomMax = ZoomMax
     PBMap\TileSize = TileSize
   EndProcedure
-   
   
   Procedure Quit()
     PBMap\Drawing\End = #True
     ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
-      ResetList(PBMap\TilesThreads()) 
-      While NextElement(PBMap\TilesThreads())
-        If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
-          FreeMemory(PBMap\TilesThreads()\Tile)
-          DeleteElement(PBMap\TilesThreads())
-        ElseIf ElapsedMilliseconds() - TimeCounter > 2000
-          ;Should not occur
-          KillThread(PBMap\TilesThreads()\GetImageThread)
+      ForEach PBMap\MemCache\Images()
+        If PBMap\MemCache\Images()\Tile <> 0         
+          If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            PBMap\MemCache\Images()\Tile\RetryNb = 0
+            If ElapsedMilliseconds() - TimeCounter > 2000
+              ;Should not occur
+              KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            EndIf
+          EndIf
+        Else
+          DeleteMapElement(PBMap\MemCache\Images())
         EndIf
-      Wend
+      Next
       Delay(10)
-    Until ListSize(PBMap\TilesThreads()) = 0 
+    Until MapSize(PBMap\MemCache\Images()) = 0 
     curl_global_cleanup()
   EndProcedure
   
@@ -358,15 +371,6 @@ Module PBMap
     Protected Result.d
     Result = Sqr( (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
     ProcedureReturn Result
-  EndProcedure
-  
-  Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
-    If Gadget = #PB_Any
-      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
-    Else
-      PBMap\Gadget = Gadget
-      CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
-    EndIf 
   EndProcedure
   
   ;*** Converts coords to tile.decimal
@@ -423,7 +427,7 @@ Module PBMap
     x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     latRad = PBMap\TargetLocation\Latitude*#PI/180;
-    ; get y value
+                                                  ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
@@ -460,83 +464,71 @@ Module PBMap
     EndIf
   EndProcedure
   
+  ;   Procedure LoadErrorHandler()
+  ;     MessageRequester("Error", "")
+  ;   EndProcedure
+  
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
-   ; Debug  "Loading image " + CacheFile + " ; Size : " + Str(FileSize(CacheFile))     
     If FileSize(CacheFile) > 0
+      ; OnErrorCall(@LoadErrorHandler())
       nImage = LoadImage(#PB_Any, CacheFile)
+      ; OnErrorDefault()
       If IsImage(nImage)
-        ;Debug "Success loading " + CacheFile + " as nImage " + Str(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
       Else
-       ; Debug "Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !"
+        MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
         MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
       EndIf
     Else
-     ; Debug "Failed loading " + CacheFile + " -> Size <= 0"
       MyDebug("Failed loading " + CacheFile + " -> Size <= 0", 3)
     EndIf
     ProcedureReturn -1
   EndProcedure
   
-  Procedure.i GetLocalTile(key.s, CacheFile.s)
-    Protected timg
-    MyDebug("Check if we have this image in memory", 3)
-    If FindMapElement(PBMap\MemCache\Images(), key)
-      MyDebug("Key : " + key + " found !", 3)
-      ProcedureReturn PBMap\MemCache\Images()\nImage
-    Else
-      MyDebug("Key : " + key + " Try HDD!")
-      timg = GetTileFromHDD(CacheFile.s) 
-      If timg <> -1 
-       AddMapElement(PBMap\MemCache\Images(),key)
-       PBMap\MemCache\Images()\nImage = timg  
-      EndIf  
-      ProcedureReturn timg 
-    EndIf
-  EndProcedure
-
-  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s,layer.i)
+  Procedure.i GetTileFromWeb(Zoom.i, XTile.i, YTile.i, CacheFile.s, Layer.i)
     Protected *Buffer
     Protected nImage.i = -1
-    Protected FileHandle.i,timg 
-    Protected TileURL.s = PBMap\ServerURL(layer) + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
-    MyDebug("Check if we have this image on Web", 3)
+    Protected FileSize.i, timg 
+    Protected TileURL.s = PBMap\ServerURL(Layer) + Str(Zoom) + "/" + Str(XTile) + "/" + Str(YTile) + ".png"   
     If Proxy
-      FileHandle = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
-      If FileHandle
+      FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile, ProxyURL$, ProxyPort$, ProxyUser$, ProxyPassword$)
+      If FileSize > 0
+        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
         nImage = GetTileFromHDD(CacheFile)
       Else
-        MyDebug("File " + TileURL + " not correctly received with Curl and proxy", 3)
+        MyDebug("Problem loading from web " + TileURL, 3)
       EndIf
     Else
       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
       If *Buffer
         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
         If IsImage(nImage)
-          MyDebug("Load from web " + TileURL + " as Tile nb " + nImage, 3)
-         ; Debug "url: " + TileURL 
-         ; Debug "cache file: " + CacheFile 
-         ; timg = LoadImage(#PB_Any,CacheFile)
-         ; If timg 
-         ;   StartDrawing(ImageOutput(timg)) 
-         ;   DrawImage(ImageID(nimage)) 
-         ;   StopDrawing() 
-         ;   SaveImage(timg, CacheFile, #PB_ImagePlugin_PNG)    
-         ;   FreeImage(timg)  
-         ; Else 
-            SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG)
-            FreeMemory(*Buffer)
-         ; EndIf   
+          ; Debug "url: " + TileURL 
+          ; Debug "cache file: " + CacheFile 
+          ; timg = LoadImage(#PB_Any,CacheFile)
+          ; If timg 
+          ;   StartDrawing(ImageOutput(timg)) 
+          ;   DrawImage(ImageID(nimage)) 
+          ;   StopDrawing() 
+          ;   SaveImage(timg, CacheFile, #PB_ImagePlugin_PNG)    
+          ;   FreeImage(timg)  
+          ; Else 
+          If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG,0,32)
+            MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+          Else
+            MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
+          EndIf
+          FreeMemory(*Buffer)
+          ; EndIf   
         Else
-          MyDebug("Can't catch image " + TileURL, 3)
+          MyDebug("Can't catch image loaded from web " + TileURL, 3)
           nImage = -1
           ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
         EndIf
       Else
-       ; Debug("ReceiveHTTPMemory's buffer is empty")
-        MyDebug("ReceiveHTTPMemory's buffer is empty", 3)
+        MyDebug(" Problem loading from web " + TileURL, 3)
       EndIf
     EndIf
     ProcedureReturn nImage
@@ -544,141 +536,172 @@ Module PBMap
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile,*tile\layer)
-    If nImage <> -1
-      LockMutex(PBMap\TileThreadMutex)
-      PBMap\MemCache\Images(*Tile\key)\nImage = nImage
-      UnlockMutex(PBMap\TileThreadMutex)
-      MyDebug("Image nb " + Str(nImage) + " successfully added to mem cache")   
-      MyDebug("With the following key : " + *Tile\key)  
-      *Tile\nImage = nImage
-      PostEvent(#PB_Event_Gadget, PBMap\window,PBmap\Gadget, #PB_MAP_REDRAW, *Tile)
-   Else
-      MyDebug("Error GetImageThread procedure, image not loaded - " + *Tile\key)
-      ;nImage = -1
-   EndIf
-   
+    Repeat
+      nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile, *Tile\Layer)
+      If nImage <> -1
+        LockMutex(PBMap\TileThreadMutex)
+        PBMap\MemCache\Images(*Tile\key)\nImage = nImage
+        UnlockMutex(PBMap\TileThreadMutex)
+        MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
+        PBMap\Dirty = #True
+        *Tile\RetryNb = 0
+        ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW, *Tile) ;If image is loaded from web, redraw
+      Else 
+        MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
+        Delay(5000)
+        *Tile\RetryNb - 1
+        ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_RETRY, *Tile) ;If image is not loaded, retry    
+      EndIf
+    Until *Tile\RetryNb <= 0
+    ;End of the thread
+    LockMutex(PBMap\TileThreadMutex)
+    FreeMemory(PBMap\MemCache\Images(*Tile\key)\Tile)
+    PBMap\MemCache\Images(*Tile\key)\Tile = 0
+    UnlockMutex(PBMap\TileThreadMutex)    
   EndProcedure
   
-  Procedure DrawTile(*Tile.Tile)
-    Protected x = *Tile\Position\x 
-    Protected y = *Tile\Position\y 
-    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
-    MyDebug("  at coords " + Str(x) + "," + Str(y), 2)
-    MovePathCursor(x, y)
-    DrawVectorImage(ImageID(*Tile\nImage))
+  Procedure.i GetTile(key.s, CacheFile.s, px.i, py.i, tilex.i, tiley.i, Layer.i)
+    Protected timg = -1
+    If FindMapElement(PBMap\MemCache\Images(), key)
+      MyDebug("Key : " + key + " found in memory cache!", 3)
+      timg = PBMap\MemCache\Images()\nImage
+      If timg <> -1        
+        MyDebug("Image : " + timg + " found in memory cache!", 3)
+        ProcedureReturn timg
+      EndIf
+    Else
+      AddMapElement(PBMap\MemCache\Images(), key)
+      MyDebug("Key : " + key + " added in memory cache!", 3)
+      PBMap\MemCache\Images()\nImage = -1
+      ;UnlockMutex(PBMap\TileThreadMutex)
+    EndIf
+    If PBMap\MemCache\Images()\Tile = 0 ;Check if a loading thread is not running
+      MyDebug("Trying to load from HDD " + CacheFile)
+      timg = GetTileFromHDD(CacheFile.s)
+      If timg <> -1
+        MyDebug("Key : " + key + " found on HDD")
+        PBMap\MemCache\Images()\nImage = timg  
+        ProcedureReturn timg
+      EndIf
+      MyDebug("Key : " + key + " not found on HDD")
+      ;Launch a new thread
+      Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
+      If *NewTile
+        With *NewTile
+          PBMap\MemCache\Images()\Tile = *NewTile
+          ;New tile parameters
+          \Position\x = px 
+          \Position\y = py 
+          \PBMapTileX = tilex 
+          \PBMapTileY = tiley
+          \PBMapZoom  = PBMap\Zoom
+          \key = key
+          \CacheFile = CacheFile
+          \Layer = Layer
+          \RetryNb = 5
+          \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
+          myDebug(" Creating get image thread nb " + Str(\GetImageThread))
+        EndWith  
+      Else
+        MyDebug(" Error, can't create a new tile loading thread")
+      EndIf   
+    EndIf 
+    ProcedureReturn timg 
   EndProcedure
   
-  Procedure DrawLoading(*Tile.Tile)
-    Protected x = *Tile\Position\x 
-    Protected y = *Tile\Position\y 
-    Protected Text$ = "Loading"
-    MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
-    MyDebug("  at coords " + Str(x) + "," + Str(y))
-  EndProcedure
+  ;   Procedure DrawTile(*Tile.Tile)
+  ;     Protected x = *Tile\Position\x 
+  ;     Protected y = *Tile\Position\y 
+  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
+  ;     MyDebug("  at coords " + Str(x) + "," + Str(y), 2)
+  ;     MovePathCursor(x, y)
+  ;     DrawVectorImage(ImageID(*Tile\nImage))
+  ;   EndProcedure
+  ;   
+  ;   Procedure DrawLoading(*Tile.Tile)
+  ;     Protected x = *Tile\Position\x 
+  ;     Protected y = *Tile\Position\y 
+  ;     Protected Text$ = "Loading"
+  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
+  ;     MyDebug("  at coords " + Str(x) + "," + Str(y))
+  ;   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters,layer.i,alpha.i=255)
+  Procedure DrawTiles(*Drawing.DrawingParameters, Layer.i, alpha.i=255)
     ;DisableDebugger
     Protected x.i, y.i,kq.q
-    Protected tx = Int(*Drawing\Position\x)  ;Don't forget the Int() !
+    Protected tx = Int(*Drawing\Position\x)          ;Don't forget the Int() !
     Protected ty = Int(*Drawing\Position\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
     MyDebug("Drawing tiles")
+    
+    *Drawing\Bounds\NorthWest\x = tx-nx-1 
+    *Drawing\Bounds\NorthWest\y = ty-ny-1 
+    *Drawing\Bounds\SouthEast\x = tx+nx+1 
+    *Drawing\Bounds\SouthEast\y = ty+ny+1 
+       
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
-         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
-         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
-         tilex = ((tx+x) % (1<< PBMap\Zoom))
-         tiley = ty+y 
-         kq = layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
-         key = Str(kq)
-         CacheFile = PBMap\HDDCachePath + key + ".png"
-               
-         
-         img = GetLocalTile(key, CacheFile)
-         If img <> -1  
-           MovePathCursor(px, py)
-           DrawVectorImage(ImageID(img),alpha)
-         Else 
-           MovePathCursor(px, py)
-           DrawVectorImage(ImageID(PBMap\ImgLoading),alpha)
-           Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
-           If *NewTile
-             With *NewTile
-               ;Keep a track of tiles (especially to free memory)
-               ;TODO : not sure if it really needs a mutex here, i'm still trying to find where the white tile issue is coming from
-               ;a tile download is either getting clobbered or timing out or getting kicked and it results in a corrupted png file on linux   
-               LockMutex(PBMap\TileThreadMutex)    
-               AddElement(PBMap\TilesThreads())
-               PBMap\TilesThreads()\Tile = *NewTile
-               UnlockMutex(PBMap\TileThreadMutex)
-               ;New tile parameters
-               \Position\x = px 
-               \Position\y = py 
-               \PBMapTileX = tilex 
-               \PBMapTileY = tiley
-               \PBMapZoom  = PBMap\Zoom
-               \key = key
-               \CacheFile = CacheFile
-               \layer = layer
-               LockMutex(PBMap\TileThreadMutex)
-               AddMapElement(PBMap\MemCache\Images(), \key) ;Add the image to the cache, once in this loop
-               PBMap\MemCache\Images()\nImage = PBMap\ImgLoading
-               UnlockMutex(PBMap\TileThreadMutex)
-               \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-               PBMap\TilesThreads()\GetImageThread = \GetImageThread
-               myDebug(" Creating get image thread nb " + Str(\GetImageThread))
-             EndWith  
-           Else
-             MyDebug(" Error, can't create a new tile")
-             Break 2
-           EndIf   
-         EndIf
-           
-       Next
-                 
-     Next 
-     
-     
-            ;Free tile memory
-    ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
-    ForEach PBMap\TilesThreads()
-      ;Check if there's no more loading thread
-      If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
-        FreeMemory(PBMap\TilesThreads()\Tile)
-        DeleteElement(PBMap\TilesThreads())
-      EndIf         
-    Next
-    ;EnableDebugger 
+        ;          If PBMap\Moving  ;If drawing was threaded, this would exit the loop when the user is moving
+        ;            Break 2
+        ;          EndIf
+        px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
+        py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
+        tilex = ((tx+x) % (1<< PBMap\Zoom))
+        tiley = ty+y 
+        kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
+        key = Str(kq)
+        CacheFile = PBMap\HDDCachePath + key + ".png"
+        
+        img = GetTile(key, CacheFile, px, py, tilex, tiley, Layer)
+        If img <> -1  
+          MovePathCursor(px, py)
+          DrawVectorImage(ImageID(img), alpha)
+        Else 
+          MovePathCursor(px, py)
+          DrawVectorImage(ImageID(PBMap\ImgLoading), alpha)
+        EndIf
+      Next
+    Next 
+    
+    ;     ;Free tile memory
+    ;     ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
+    ;     ForEach PBMap\TilesThreads()
+    ;       ;Check if there's no more loading thread
+    ;       If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
+    ;         FreeMemory(PBMap\TilesThreads()\Tile)
+    ;         DeleteElement(PBMap\TilesThreads())
+    ;       EndIf         
+    ;     Next
+    
   EndProcedure
   
-;     ;-**** Clean Mem Cache
-;     ;TODO in development, by now there's many cache problem as the loading thread could be perturbed
-;     ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
-;     Protected MaxNbTile.l
-;     If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
-;       MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
-;     Else
-;       MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
-;     EndIf
-;     Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
-;     Protected Limit.d=Scale*(MaxNbTile)*1.5
-;     Debug "Cache cleaning"
-;     ForEach PBMap\MemCache\Images()
-;         Protected Distance.d = HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
-;         Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
-;         If Distance>Limit And IsImage(PBMap\MemCache\Images()\nImage) 
-;           LockMutex(PBMap\MemCache\Images()\Mutex)          
-;           Debug "delete"
-;           Debug PBMap\MemCache\Images()
-;           FreeImage(PBMap\MemCache\Images()\nImage)
-;           UnlockMutex(PBMap\MemCache\Images()\Mutex)
-;           FreeMutex(PBMap\MemCache\Images()\Mutex)
-;           DeleteMapElement(PBMap\MemCache\Images())
-;         EndIf
-;     Next
+  ;     ;-**** Clean Mem Cache
+  ;     ;TODO in development, by now there's many cache problem as the loading thread could be perturbed
+  ;     ;GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+  ;     Protected MaxNbTile.l
+  ;     If GadgetWidth(PBMap\Gadget)>GadgetHeight(PBMap\Gadget)
+  ;       MaxNbTile=GadgetWidth(PBMap\Gadget)/PBMap\TileSize
+  ;     Else
+  ;       MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
+  ;     EndIf
+  ;     Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+  ;     Protected Limit.d=Scale*(MaxNbTile)*1.5
+  ;     Debug "Cache cleaning"
+  ;     ForEach PBMap\MemCache\Images()
+  ;         Protected Distance.d = HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
+  ;         Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
+  ;         If Distance>Limit And IsImage(PBMap\MemCache\Images()\nImage) 
+  ;           LockMutex(PBMap\MemCache\Images()\Mutex)          
+  ;           Debug "delete"
+  ;           Debug PBMap\MemCache\Images()
+  ;           FreeImage(PBMap\MemCache\Images()\nImage)
+  ;           UnlockMutex(PBMap\MemCache\Images()\Mutex)
+  ;           FreeMutex(PBMap\MemCache\Images()\Mutex)
+  ;           DeleteMapElement(PBMap\MemCache\Images())
+  ;         EndIf
+  ;     Next
   
   Procedure DrawPointer(*Drawing.DrawingParameters)
     If PBMap\CallBackMainPointer > 0
@@ -719,9 +742,43 @@ Module PBMap
     MovePathCursor(x,y+12) 
     AddPathLine(x+128,y+10)
     StrokePath(1)
-    
   EndProcedure
-          
+  
+   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
+    Protected nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
+    Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
+       
+    ;VectorFont(FontID(PBMap\Font), 10)
+    VectorSourceColor(RGBA(0, 0, 0,Alpha))
+    
+    ;GetMapRegionDegrees(@Degrees1,@degrees2)
+    
+    XY2LatLon(*Drawing\Bounds\NorthWest,@Degrees1)
+    XY2LatLon(*Drawing\Bounds\SouthEast,@Degrees2)
+       
+    ny = Round(Degrees1\Latitude,#PB_Round_Up)+1
+    ny1 = Round(degrees2\Latitude,#PB_Round_Down)-1 
+    nx = Round(Degrees1\Longitude,#PB_Round_Down)-1
+    nx1 = Round(degrees2\Longitude,#PB_Round_Up) +1
+       
+    For y = ny1 To ny  
+      Degrees1\Latitude = y 
+      degrees2\Latitude = y + 1
+      For x = nx To nx1
+        Degrees1\Longitude =x
+        Degrees2\Longitude =x+ 1
+         GetPixelCoordFromLocation(@Degrees1,@pos1)
+         MovePathCursor(pos1\x,pos1\y) 
+         AddPathLine(pos2\x,pos1\y) 
+         MovePathCursor(pos1\x,pos1\y)
+         AddPathLine(pos1\x,pos2\y) 
+      Next      
+    Next 
+    StrokePath(1)  
+   
+  EndProcedure   
+  
+  
   Procedure TrackPointer(x.i, y.i,dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
@@ -813,6 +870,9 @@ Module PBMap
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected Px.d, Py.d,a
+    PBMap\OnStage = #True
+    PBMap\Dirty = #False
+    PBMap\Redraw = #False
     ;Precalc some values
     *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
     *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
@@ -826,8 +886,8 @@ Module PBMap
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ;such as for openseamap tiles which are overlaid. not that efficent from here though.
-    For a = 0 To PBMap\NumberOfMapLayers-1
-      DrawTiles(*Drawing,a) 
+    For a = 0 To PBMap\NumberOfMapLayers - 1
+      DrawTiles(*Drawing, a) 
     Next   
     DrawTrack(*Drawing)
     DrawMarker(*Drawing)
@@ -838,12 +898,26 @@ Module PBMap
     MovePathCursor(50,50)
     DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
     MovePathCursor(50,80)
-    DrawVectorText(Str(ListSize(PBMap\TilesThreads())))
-    
+    Protected ThreadCounter = 0
+    ForEach PBMap\MemCache\Images()
+      If PBMap\MemCache\Images()\Tile <> 0
+        If PBMap\MemCache\Images()\Tile\GetImageThread <> 0
+          ThreadCounter + 1
+        EndIf
+      EndIf
+    Next
+    DrawVectorText(Str(ThreadCounter))
     ;If PBMap\Options\ShowScale
-     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
+    DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
+     DrawDegrees(*Drawing,192)
     ;EndIf 
-    StopVectorDrawing()    
+    StopVectorDrawing()
+    ;If there was a problem while drawing, redraw
+    ;     If PBMap\Dirty  
+    ;       PBMap\Redraw = #True
+    ;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
+    ;     EndIf
+    PBMap\OnStage = #False
   EndProcedure
   
   Procedure Refresh()
@@ -948,8 +1022,8 @@ Module PBMap
     PBMap\Options\ScaleUnit = ScaleUnit
     Drawing()
   EndProcedure   
-    
-   ;Zoom on x, y position relative to the canvas gadget
+  
+  ;Zoom on x, y position relative to the canvas gadget
   Procedure SetZoomOnPosition(x, y, zoom)
     Protected MouseX.d, MouseY.d
     Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d
@@ -1001,95 +1075,103 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
-  Procedure Event(Event.l)
-    Protected Gadget.i
+  Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
     Protected Marker.Position
-    Protected *Drawing.DrawingParameters
-    If IsGadget(PBMap\Gadget) And GadgetType(PBMap\Gadget) = #PB_GadgetType_Canvas 
-      Select Event
-        Case #PB_Event_Gadget ;{
-          Gadget = EventGadget()
-          Select Gadget
-            Case PBMap\Gadget
-              Select EventType()    
-                Case #PB_EventType_MouseWheel
-                  If PBMap\Options\WheelMouseRelative
-                    ;Relative zoom (centered on the mouse)
-                    SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
-                  Else
-                    ;Absolute zoom (centered on the center of the map)
-                    SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
-                  EndIf 
-                Case #PB_EventType_LeftButtonDown
-                  ;Check if we select a marker
-                  MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
-                  MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-                  ForEach PBMap\Marker()                   
-                    LatLon2XY(@PBMap\Marker()\Location, @Marker)                   
-                    Marker\x * PBMap\TileSize
-                    Marker\y * PBMap\TileSize 
-                    If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
-                      PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
-                      Break
-                    EndIf
-                  Next
-                  ;Mem cursor Coord
-                  PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
-                  PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
-                Case #PB_EventType_MouseMove
-                  If PBMap\MoveStartingPoint\x <> - 1
-                    MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
-                    MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
-                    PBMap\Moving = #True
-                    ;Move marker
-                    If PBMap\EditMarkerIndex > -1
-                      SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
-                      LatLon2XY(@PBMap\Marker()\Location, @Marker)
-                      Marker\x + MouseX / PBMap\TileSize
-                      Marker\y + MouseY / PBMap\TileSize
-                      XY2LatLon(@Marker, @PBMap\Marker()\Location)                      
-                    Else
-                      ;New move values
-                      PBMap\Position\x - MouseX
-                      PBMap\Position\y - MouseY
-                      ;PBMap tile position in tile.decimal
-                      PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
-                      PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
-                      PBMap\Drawing\PassNb = 1
-                      XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-                      ;If CallBackLocation send Location to function
-                      If PBMap\CallBackLocation > 0
-                        CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
-                      EndIf 
-                    EndIf
-                    Drawing()  
-                    PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
-                    PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-                  EndIf 
-                Case #PB_EventType_LeftButtonUp
-                  PBMap\Moving = #False
-                  PBMap\MoveStartingPoint\x = - 1
-                  If PBMap\EditMarkerIndex > -1
-                    PBMap\EditMarkerIndex = -1
-                  Else ;Move Map
-                    PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
-                    PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
-                    MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
-                    XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
-                    Drawing() 
-                  EndIf
-                Case #PB_MAP_REDRAW  
-                 Drawing() 
-              EndSelect
-          EndSelect
-      EndSelect
-    Else
-      MessageRequester("Module PBMap", "You must use PBMapGadget before", #PB_MessageRequester_Ok )
-      End
-    EndIf  
-    
+    PBMap\Moving = #False
+    Select EventType()    
+      Case #PB_EventType_MouseWheel
+        If PBMap\Options\WheelMouseRelative
+          ;Relative zoom (centered on the mouse)
+          SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+        Else
+          ;Absolute zoom (centered on the center of the map)
+          SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
+        EndIf 
+      Case #PB_EventType_LeftButtonDown
+        ;Check if we select a marker
+        MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+        MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+        ForEach PBMap\Marker()                   
+          LatLon2XY(@PBMap\Marker()\Location, @Marker)                   
+          Marker\x * PBMap\TileSize
+          Marker\y * PBMap\TileSize 
+          If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
+            PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
+            Break
+          EndIf
+        Next
+        ;Mem cursor Coord
+        PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+        PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) 
+      Case #PB_EventType_MouseMove
+        PBMap\Moving = #True
+        If PBMap\MoveStartingPoint\x <> - 1
+          MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
+          MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
+          ;Move marker
+          If PBMap\EditMarkerIndex > -1
+            SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
+            LatLon2XY(@PBMap\Marker()\Location, @Marker)
+            Marker\x + MouseX / PBMap\TileSize
+            Marker\y + MouseY / PBMap\TileSize
+            XY2LatLon(@Marker, @PBMap\Marker()\Location)                      
+          Else
+            ;New move values
+            PBMap\Position\x - MouseX
+            PBMap\Position\y - MouseY
+            ;PBMap tile position in tile.decimal
+            PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+            PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+            PBMap\Drawing\PassNb = 1
+            XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+            ;If CallBackLocation send Location to function
+            If PBMap\CallBackLocation > 0
+              CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+            EndIf 
+          EndIf
+          PBMap\Redraw = #True
+          PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
+          PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+        EndIf 
+      Case #PB_EventType_LeftButtonUp
+        PBMap\MoveStartingPoint\x = - 1
+        If PBMap\EditMarkerIndex > -1
+          PBMap\EditMarkerIndex = -1
+        Else ;Move Map
+          PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
+          PBMap\Drawing\Position\y = PBMap\Position\y / PBMap\TileSize
+          MyDebug("PBMap\Drawing\Position\x " + Str(PBMap\Drawing\Position\x) + " ; PBMap\Drawing\Position\y " + Str(PBMap\Drawing\Position\y) )
+          XY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation)
+          PBMap\Redraw = #True
+        EndIf
+      Case #PB_MAP_REDRAW
+        Debug "Redraw"
+        PBMap\Redraw = #True
+      Case #PB_MAP_RETRY
+        Debug "Reload"
+        PBMap\Redraw = #True
+    EndSelect
   EndProcedure
+  
+  Procedure TimerEvents()
+    If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty) And PBMap\OnStage = #False
+      Drawing()
+    EndIf    
+  EndProcedure 
+  
+  Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+    If Gadget = #PB_Any
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
+    Else
+      PBMap\Gadget = Gadget
+      CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
+    EndIf 
+    BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
+    AddWindowTimer(PBMap\Window, PBMap\Timer, 20)
+    BindEvent(#PB_Event_Timer, @TimerEvents())
+  EndProcedure
+  
 EndModule
 
 ;-Exemple
@@ -1170,12 +1252,12 @@ CompilerIf #PB_Compiler_IsMainFile
     
     LoadFont(0, "Arial", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
-        
+    
     TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
-    ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($E7))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
-    ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($E8))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
-    ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($E9))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
-    ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($EA))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
+    ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
+    ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
+    ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
+    ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
     TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
     ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
     ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
@@ -1201,7 +1283,6 @@ CompilerIf #PB_Compiler_IsMainFile
     
     Repeat
       Event = WaitWindowEvent()
-      PBMap::Event(Event)
       Select Event
         Case #PB_Event_CloseWindow : Quit = 1
         Case #PB_Event_Gadget ;{
@@ -1232,14 +1313,14 @@ CompilerIf #PB_Compiler_IsMainFile
     
     PBMap::Quit()
   EndIf
- 
+  
   CloseConsole()
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1219
-; FirstLine = 1193
-; Folding = ----------
+; CursorPosition = 1290
+; FirstLine = 1275
+; Folding = ---------
 ; EnableThread
 ; EnableXP
 ; DisableDebugger
