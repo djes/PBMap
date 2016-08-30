@@ -158,7 +158,6 @@ Module PBMap
     HDDCachePath.S                          ; Path where to load and save tiles downloaded from server
     MemCache.TileMemCach                    ; Images in memory cache
                                             ;
-    OnStage.i
     Redraw.i
     Moving.i
     Dirty.i                                 ; To signal that drawing need a refresh
@@ -177,6 +176,7 @@ Module PBMap
   
   #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
   #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
+  #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
   
   ;-Global variables
   Global PBMap.PBMap, Null.i
@@ -343,6 +343,9 @@ Module PBMap
               ;Should not occur
               KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
             EndIf
+          Else
+            FreeMemory(PBMap\MemCache\Images()\Tile)
+            PBMap\MemCache\Images()\Tile = 0
           EndIf
         Else
           DeleteMapElement(PBMap\MemCache\Images())
@@ -533,25 +536,19 @@ Module PBMap
     Repeat
       nImage = GetTileFromWeb(*Tile\PBMapZoom, *Tile\PBMapTileX, *Tile\PBMapTileY, *Tile\CacheFile, *Tile\Layer)
       If nImage <> -1
-        LockMutex(PBMap\TileThreadMutex)
-        PBMap\MemCache\Images(*Tile\key)\nImage = nImage
-        UnlockMutex(PBMap\TileThreadMutex)
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
-        PBMap\Dirty = #True
         *Tile\RetryNb = 0
         ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW, *Tile) ;If image is loaded from web, redraw
       Else 
         MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
-        Delay(5000)
+        Delay(1000)
         *Tile\RetryNb - 1
         ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_RETRY, *Tile) ;If image is not loaded, retry    
       EndIf
     Until *Tile\RetryNb <= 0
-    ;End of the thread
-    LockMutex(PBMap\TileThreadMutex)
-    FreeMemory(PBMap\MemCache\Images(*Tile\key)\Tile)
-    PBMap\MemCache\Images(*Tile\key)\Tile = 0
-    UnlockMutex(PBMap\TileThreadMutex)    
+    *Tile\nImage = nImage
+    *Tile\RetryNb = -2 ;End of the thread    
+    PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
   EndProcedure
   
   Procedure.i GetTile(key.s, CacheFile.s, px.i, py.i, tilex.i, tiley.i, Layer.i)
@@ -567,17 +564,16 @@ Module PBMap
       AddMapElement(PBMap\MemCache\Images(), key)
       MyDebug("Key : " + key + " added in memory cache!", 3)
       PBMap\MemCache\Images()\nImage = -1
-      ;UnlockMutex(PBMap\TileThreadMutex)
     EndIf
     If PBMap\MemCache\Images()\Tile = 0 ;Check if a loading thread is not running
-      MyDebug("Trying to load from HDD " + CacheFile)
+      MyDebug("Trying to load from HDD " + CacheFile, 3)
       timg = GetTileFromHDD(CacheFile.s)
       If timg <> -1
-        MyDebug("Key : " + key + " found on HDD")
+        MyDebug("Key : " + key + " found on HDD", 3)
         PBMap\MemCache\Images()\nImage = timg  
         ProcedureReturn timg
       EndIf
-      MyDebug("Key : " + key + " not found on HDD")
+      MyDebug("Key : " + key + " not found on HDD", 3)
       ;Launch a new thread
       Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
       If *NewTile
@@ -593,32 +589,16 @@ Module PBMap
           \CacheFile = CacheFile
           \Layer = Layer
           \RetryNb = 5
+          \nImage = -1
+          MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
           \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-          myDebug(" Creating get image thread nb " + Str(\GetImageThread))
         EndWith  
       Else
-        MyDebug(" Error, can't create a new tile loading thread")
-      EndIf   
-    EndIf 
+        MyDebug(" Error, can't create a new tile loading thread", 3)
+      EndIf    
+    EndIf
     ProcedureReturn timg 
   EndProcedure
-  
-  ;   Procedure DrawTile(*Tile.Tile)
-  ;     Protected x = *Tile\Position\x 
-  ;     Protected y = *Tile\Position\y 
-  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
-  ;     MyDebug("  at coords " + Str(x) + "," + Str(y), 2)
-  ;     MovePathCursor(x, y)
-  ;     DrawVectorImage(ImageID(*Tile\nImage))
-  ;   EndProcedure
-  ;   
-  ;   Procedure DrawLoading(*Tile.Tile)
-  ;     Protected x = *Tile\Position\x 
-  ;     Protected y = *Tile\Position\y 
-  ;     Protected Text$ = "Loading"
-  ;     MyDebug("  Drawing tile nb " + " X : " + Str(*Tile\PBMapTileX) + " Y : " + Str(*Tile\PBMapTileX), 2)
-  ;     MyDebug("  at coords " + Str(x) + "," + Str(y))
-  ;   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters, Layer.i, alpha.i=255)
     ;DisableDebugger
@@ -636,7 +616,7 @@ Module PBMap
         ;          EndIf
         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
-        tilex = ((tx+x) % (1<< PBMap\Zoom))
+        tilex = ((tx+x) % (1<<PBMap\Zoom))
         tiley = ty+y 
         kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
         key = Str(kq)
@@ -652,16 +632,6 @@ Module PBMap
         EndIf
       Next
     Next 
-    
-    ;     ;Free tile memory
-    ;     ;TODO : maybe get out this proc from drawtiles in a special "free ressources" task
-    ;     ForEach PBMap\TilesThreads()
-    ;       ;Check if there's no more loading thread
-    ;       If IsThread(PBMap\TilesThreads()\GetImageThread) = 0
-    ;         FreeMemory(PBMap\TilesThreads()\Tile)
-    ;         DeleteElement(PBMap\TilesThreads())
-    ;       EndIf         
-    ;     Next
     
   EndProcedure
   
@@ -823,7 +793,6 @@ Module PBMap
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected Px.d, Py.d,a
-    PBMap\OnStage = #True
     PBMap\Dirty = #False
     PBMap\Redraw = #False
     ;Precalc some values
@@ -854,7 +823,7 @@ Module PBMap
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
       If PBMap\MemCache\Images()\Tile <> 0
-        If PBMap\MemCache\Images()\Tile\GetImageThread <> 0
+        If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
           ThreadCounter + 1
         EndIf
       EndIf
@@ -869,7 +838,6 @@ Module PBMap
     ;       PBMap\Redraw = #True
     ;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
     ;     EndIf
-    PBMap\OnStage = #False
   EndProcedure
   
   Procedure Refresh()
@@ -1029,7 +997,7 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
-    Protected Marker.Position
+    Protected Marker.Position, *Tile.Tile
     PBMap\Moving = #False
     Select EventType()    
       Case #PB_EventType_MouseWheel
@@ -1103,11 +1071,20 @@ Module PBMap
       Case #PB_MAP_RETRY
         Debug "Reload"
         PBMap\Redraw = #True
+      Case #PB_MAP_TILE_CLEANUP
+        *Tile = EventData() 
+        ;If PBMap\MemCache\Images(*Tile\key)\Tile\RetryNb = -2 ;Check the end of the thread
+        Protected timg = PBMap\MemCache\Images(*Tile\key)\Tile\nImage
+        PBMap\MemCache\Images(*Tile\key)\nImage = timg
+        FreeMemory(PBMap\MemCache\Images(*Tile\key)\Tile)
+        PBMap\MemCache\Images(*Tile\key)\Tile = 0
+        PBMap\Redraw = #True
+        ;EndIf
     EndSelect
   EndProcedure
   
   Procedure TimerEvents()
-    If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty) And PBMap\OnStage = #False
+    If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
       Drawing()
     EndIf    
   EndProcedure 
@@ -1270,8 +1247,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 570
-; FirstLine = 520
+; CursorPosition = 600
+; FirstLine = 680
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
