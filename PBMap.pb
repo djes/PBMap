@@ -28,7 +28,7 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   #Red = 255
   ;-Show debug infos  
-  Global Verbose = 1
+  Global Verbose = 0
   Global MyDebugLevel = 3
   ;-Proxy ON/OFF
   Global Proxy = #False
@@ -615,12 +615,7 @@ Module PBMap
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
     MyDebug("Drawing tiles")
-    
-    *Drawing\Bounds\NorthWest\x = tx-nx-1 
-    *Drawing\Bounds\NorthWest\y = ty-ny-1 
-    *Drawing\Bounds\SouthEast\x = tx+nx+1 
-    *Drawing\Bounds\SouthEast\y = ty+ny+1 
-    
+        
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         ;          If PBMap\Moving  ;If drawing was threaded, this would exit the loop when the user is moving
@@ -714,35 +709,50 @@ Module PBMap
   EndProcedure
 
   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
-    Protected nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
+    Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
+    
+    tx = Int(*Drawing\Position\x)          ;Don't forget the Int() !
+    ty = Int(*Drawing\Position\y)
+    nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
+    ny = *Drawing\CenterY / PBMap\TileSize
+    
+    *Drawing\Bounds\NorthWest\x = tx-nx-1 
+    *Drawing\Bounds\NorthWest\y = ty-ny-1 
+    *Drawing\Bounds\SouthEast\x = tx+nx+1 
+    *Drawing\Bounds\SouthEast\y = ty+ny+1 
     
     ;VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,Alpha))
     
     ;GetMapRegionDegrees(@Degrees1,@degrees2)
     
-    XY2LatLon(*Drawing\Bounds\NorthWest,@Degrees1)
-    XY2LatLon(*Drawing\Bounds\SouthEast,@Degrees2)
+    XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
+    XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
     
-    ny = Round(Degrees1\Latitude,#PB_Round_Up)+1
-    ny1 = Round(degrees2\Latitude,#PB_Round_Down)-1 
-    nx = Round(Degrees1\Longitude,#PB_Round_Down)-1
-    nx1 = Round(degrees2\Longitude,#PB_Round_Up) +1
+    nx =  Round(Degrees1\Longitude, #PB_Round_Down)-1
+    ny =  Round(Degrees1\Latitude,  #PB_Round_Up)  +1
+    nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
+    ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
-    For y = ny1 To ny  
-      Degrees1\Latitude = y 
-      degrees2\Latitude = y + 1
-      For x = nx To nx1
-        Degrees1\Longitude =x
-        Degrees2\Longitude =x+ 1
-        GetPixelCoordFromLocation(@Degrees1,@pos1)
-        MovePathCursor(pos1\x,pos1\y) 
-        AddPathLine(pos2\x,pos1\y) 
-        MovePathCursor(pos1\x,pos1\y)
-        AddPathLine(pos1\x,pos2\y) 
+    GetPixelCoordFromLocation(@Degrees2, @pos2)
+
+    x = nx
+    For y = ny1 To ny
+      Degrees1\Longitude = x
+      Degrees1\Latitude  = y 
+      GetPixelCoordFromLocation(@Degrees1, @pos1)
+      MovePathCursor(pos1\x, pos1\y) 
+      AddPathLine(   pos2\x, pos1\y) 
+    Next       
+    y = ny
+    For x = nx To nx1
+        Degrees1\Longitude = x
+        Degrees1\Latitude  = y
+        GetPixelCoordFromLocation(@Degrees1, @pos1)
+        MovePathCursor(pos1\x, pos1\y)
+        AddPathLine(   pos1\x, pos2\y) 
       Next      
-    Next 
     StrokePath(1)  
     
   EndProcedure   
@@ -818,7 +828,7 @@ Module PBMap
   EndProcedure
   
   ; Draw all markers on the screen !
-  Procedure  DrawMarker(*Drawing.DrawingParameters)
+  Procedure  DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelPosition
     ForEach PBMap\Marker()
       If PBMap\Marker()\Location\Latitude <> 0 And PBMap\Marker()\Location\Longitude <> 0
@@ -849,6 +859,7 @@ Module PBMap
     *Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
     *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
     *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
+    
     ;Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
@@ -857,7 +868,7 @@ Module PBMap
       DrawTiles(*Drawing, a) 
     Next   
     DrawTrack(*Drawing)
-    DrawMarker(*Drawing)
+    DrawMarkers(*Drawing)
     DrawPointer(*Drawing)
     ;- Display how many images in cache
     VectorFont(FontID(PBMap\Font), 30)
@@ -874,9 +885,9 @@ Module PBMap
       EndIf
     Next
     DrawVectorText(Str(ThreadCounter))
+    DrawDegrees(*Drawing, 192)    
     ;If PBMap\Options\ShowScale
     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
-    DrawDegrees(*Drawing, 192)
     ;EndIf 
     StopVectorDrawing()
     ;If there was a problem while drawing, redraw
@@ -1118,19 +1129,19 @@ Module PBMap
         Debug "Reload"
         PBMap\Redraw = #True
       Case #PB_MAP_TILE_CLEANUP
-        *Tile = EventData() 
-        ;If PBMap\MemCache\Images(*Tile\key)\Tile\RetryNb = -2 ;Check the end of the thread
+        *Tile = EventData()
+        ;After a Web tile loading thread, clean the tile structure memory and set the image nb in the cache
+        ;avoid to have threads accessing vars (and avoid mutex), see GetImageThread()
         Protected timg = PBMap\MemCache\Images(*Tile\key)\Tile\nImage
         PBMap\MemCache\Images(*Tile\key)\nImage = timg
         FreeMemory(PBMap\MemCache\Images(*Tile\key)\Tile)
         PBMap\MemCache\Images(*Tile\key)\Tile = 0
         PBMap\Redraw = #True
-        ;EndIf
-
     EndSelect
   EndProcedure
   
   Procedure TimerEvents()
+    ;Redraw at regular intervals
     If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
       Drawing()
     EndIf    
@@ -1222,7 +1233,6 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::Refresh()
   EndProcedure
   
-  OpenConsole()
   ;- MAIN TEST
   If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     
@@ -1252,10 +1262,10 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetCallBackLocation(@UpdateLocation())
-    PBMap::SetLocation(-36.81148,175.08634,12)
+    PBMap::SetLocation(-36.81148, 175.08634,12)
     PBMap::SetMapServer("http://t1.openseamap.org/seamark/") ;add a special osm overlay map 
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
-    ;PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
+    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
     
     Repeat
       Event = WaitWindowEvent()
@@ -1289,15 +1299,12 @@ CompilerIf #PB_Compiler_IsMainFile
     
     PBMap::Quit()
   EndIf
-  
-  CloseConsole()
-  
+    
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 622
-; FirstLine = 608
+; CursorPosition = 751
+; FirstLine = 719
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
-; DisableDebugger
 ; EnableUnicode
