@@ -615,6 +615,12 @@ Module PBMap
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
     MyDebug("Drawing tiles")
+    
+    *Drawing\Bounds\NorthWest\x = tx-nx-1 
+    *Drawing\Bounds\NorthWest\y = ty-ny-1 
+    *Drawing\Bounds\SouthEast\x = tx+nx+1 
+    *Drawing\Bounds\SouthEast\y = ty+ny+1 
+    
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         ;          If PBMap\Moving  ;If drawing was threaded, this would exit the loop when the user is moving
@@ -1288,9 +1294,10 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1264
-; FirstLine = 1245
+; CursorPosition = 622
+; FirstLine = 608
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
+; DisableDebugger
 ; EnableUnicode
