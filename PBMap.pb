@@ -1,4 +1,4 @@
-;;************************************************************** 
+;************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
@@ -169,7 +169,6 @@ Module PBMap
     Dirty.i                                 ; To signal that drawing need a refresh
                                             ;
     MainDrawingThread.i
-    ;List TilesThreads.TileThread()
     TileThreadMutex.i;                      ;Mutex to protect resources  
     List track.Location()                   ; To display a GPX track
     List Marker.Marker()                    ; To diplay marker
@@ -544,12 +543,10 @@ Module PBMap
       If nImage <> -1
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
         *Tile\RetryNb = 0
-        ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW, *Tile) ;If image is loaded from web, redraw
       Else 
         MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
         Delay(1000)
         *Tile\RetryNb - 1
-        ;      PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_RETRY, *Tile) ;If image is not loaded, retry    
       EndIf
     Until *Tile\RetryNb <= 0
     *Tile\nImage = nImage
@@ -711,6 +708,7 @@ Module PBMap
   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
+<<<<<<< HEAD
     
     tx = Int(*Drawing\Position\x)          ;Don't forget the Int() !
     ty = Int(*Drawing\Position\y)
@@ -724,9 +722,25 @@ Module PBMap
     
     ;VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,Alpha))
+=======
+>>>>>>> refs/remotes/origin/idle
     
-    ;GetMapRegionDegrees(@Degrees1,@degrees2)
+    tx = *Drawing\Position\x        
+    ty = *Drawing\Position\y
+    nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
+    ny = *Drawing\CenterY / PBMap\TileSize
     
+<<<<<<< HEAD
+=======
+    *Drawing\Bounds\NorthWest\x = tx-nx-1 
+    *Drawing\Bounds\NorthWest\y = ty-ny-1 
+    *Drawing\Bounds\SouthEast\x = tx+nx+1 
+    *Drawing\Bounds\SouthEast\y = ty+ny+1 
+    
+    VectorFont(FontID(PBMap\Font), 10)
+    VectorSourceColor(RGBA(0, 0, 0,alpha))
+       
+>>>>>>> refs/remotes/origin/idle
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
     
@@ -736,15 +750,27 @@ Module PBMap
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
     GetPixelCoordFromLocation(@Degrees2, @pos2)
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> refs/remotes/origin/idle
     x = nx
     For y = ny1 To ny
       Degrees1\Longitude = x
       Degrees1\Latitude  = y 
       GetPixelCoordFromLocation(@Degrees1, @pos1)
       MovePathCursor(pos1\x, pos1\y) 
+<<<<<<< HEAD
       AddPathLine(   pos2\x, pos1\y) 
     Next       
+=======
+      AddPathLine(   pos2\x, pos1\y)
+      MovePathCursor(10,pos1\y) 
+      DrawVectorText(StrD(0-(90-Mod((y+90),180)),1))
+    Next       
+    
+>>>>>>> refs/remotes/origin/idle
     y = ny
     For x = nx To nx1
         Degrees1\Longitude = x
@@ -752,7 +778,13 @@ Module PBMap
         GetPixelCoordFromLocation(@Degrees1, @pos1)
         MovePathCursor(pos1\x, pos1\y)
         AddPathLine(   pos1\x, pos2\y) 
+<<<<<<< HEAD
       Next      
+=======
+        MovePathCursor(pos1\x,10) 
+        DrawVectorText(StrD(0-(180-Mod((x+180),360)),1))
+     Next      
+>>>>>>> refs/remotes/origin/idle
     StrokePath(1)  
     
   EndProcedure   
@@ -890,11 +922,15 @@ Module PBMap
     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
     ;EndIf 
     StopVectorDrawing()
+<<<<<<< HEAD
     ;If there was a problem while drawing, redraw
     ;     If PBMap\Dirty  
     ;       PBMap\Redraw = #True
     ;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
     ;     EndIf
+=======
+   
+>>>>>>> refs/remotes/origin/idle
   EndProcedure
   
   Procedure Refresh()
@@ -1035,15 +1071,11 @@ Module PBMap
   EndProcedure  
   
   Procedure.d GetLatitude()
-    Protected Value.d
-    Value = PBMap\TargetLocation\Latitude
-    ProcedureReturn Value
+    ProcedureReturn 0-(90-Mod((PBMap\TargetLocation\Latitude+90),180))
   EndProcedure
   
   Procedure.d GetLongitude()
-    Protected Value.d
-    Value = PBMap\TargetLocation\Longitude
-    ProcedureReturn Value 
+    ProcedureReturn 0-(180-Mod((PBMap\TargetLocation\Longitude+180),360))   
   EndProcedure
   
   Procedure.i GetZoom()
@@ -1192,8 +1224,8 @@ CompilerIf #PB_Compiler_IsMainFile
   EndStructure
   
   Procedure UpdateLocation(*Location.Location)
-    SetGadgetText(#String_0, StrD(*Location\Latitude))
-    SetGadgetText(#String_1, StrD(*Location\Longitude))
+    SetGadgetText(#String_0, StrD(0-(90-Mod((*Location\Latitude+90),180))))
+    SetGadgetText(#String_1, StrD(0-(180-Mod((*Location\Longitude+180),360))))
     ProcedureReturn 0
   EndProcedure
   
@@ -1298,12 +1330,20 @@ CompilerIf #PB_Compiler_IsMainFile
     Until Quit = #True
     
     PBMap::Quit()
+<<<<<<< HEAD
   EndIf
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
 ; CursorPosition = 751
 ; FirstLine = 719
+=======
+    EndIf
+  CompilerEndIf
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 1263
+; FirstLine = 1250
+>>>>>>> refs/remotes/origin/idle
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
