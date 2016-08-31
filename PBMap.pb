@@ -175,6 +175,7 @@ Module PBMap
     EditMarkerIndex.l
     
     ImgLoading.i                            ;Image Loading Tile
+    ImgNothing.i                            ;Image Nothing Tile
     
     Options.option                          ;    
   EndStructure
@@ -260,10 +261,11 @@ Module PBMap
   EndProcedure
   ;- ***
   
-  Procedure LoadingImageCreation()
+  Procedure TechnicalImagesCreation()
+    ;"Loading" image
     Protected Text$ = "Loading"
     PBmap\ImgLoading = CreateImage(#PB_Any, 256, 256) 
-    If  PBmap\ImgLoading
+    If PBmap\ImgLoading
       StartVectorDrawing(ImageVectorOutput(PBMap\Imgloading)) 
       BeginVectorLayer()
       VectorSourceColor(RGBA(255, 255, 255, 128))
@@ -275,6 +277,15 @@ Module PBMap
       MovePathCursor(0 + (256 - VectorTextWidth(Text$)) / 2, 0 + (256 - VectorTextHeight(Text$)) / 2)
       DrawVectorText(Text$)
       EndVectorLayer()
+      StopVectorDrawing() 
+    EndIf
+    ;"Nothing" tile
+    PBmap\ImgNothing = CreateImage(#PB_Any, 256, 256) 
+    If PBmap\ImgNothing
+      StartVectorDrawing(ImageVectorOutput(PBMap\Imgloading)) 
+      VectorSourceColor(RGBA(255, 255, 255, 128))
+      AddPathBox(0, 0, 256, 256)
+      FillPath()
       StopVectorDrawing() 
     EndIf
   EndProcedure  
@@ -323,7 +334,7 @@ Module PBMap
     EndIf
     ClosePreferences()
     curl_global_init(#CURL_GLOBAL_WIN32)
-    LoadingImageCreation()
+    TechnicalImagesCreation()
   EndProcedure
   
   Procedure SetMapServer(ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
@@ -385,8 +396,8 @@ Module PBMap
     MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude))
     MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y))
   EndProcedure
-  
-  ;*** Converts tile.decimal to coords
+   
+ ;*** Converts tile.decimal to coords
   ;Warning, structures used in parameters are not tested
   Procedure XY2LatLon(*Coords.Position, *Location.Location)
     Protected n.d = Pow(2.0, PBMap\Zoom)
@@ -611,25 +622,36 @@ Module PBMap
     Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
+    Protected tilemax = 1<<PBMap\Zoom
     MyDebug("Drawing tiles")
-        
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
-        tilex = ((tx+x) % (1<<PBMap\Zoom))
-        tiley = ty+y 
-        kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
-        key = Str(kq)
-        CacheFile = PBMap\HDDCachePath + key + ".png"
-        
-        img = GetTile(key, CacheFile, px, py, tilex, tiley, Layer)
-        If img <> -1  
-          MovePathCursor(px, py)
-          DrawVectorImage(ImageID(img), alpha)
-        Else 
-          MovePathCursor(px, py)
-          DrawVectorImage(ImageID(PBMap\ImgLoading), alpha)
+        tilex = (tx + x) % tilemax
+        Debug "tx " + Str(tx)
+        Debug "x " + Str(x)
+        Debug "tilemax " + Str(tilemax)
+        Debug "tilex " + Str(tilex)
+        tiley = ty + y 
+        If tiley >= 0 And tiley < tilemax
+          kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
+          key = Str(kq)
+          CacheFile = PBMap\HDDCachePath + key + ".png"
+          
+          img = GetTile(key, CacheFile, px, py, tilex, tiley, Layer)
+          If img <> -1  
+            MovePathCursor(px, py)
+            DrawVectorImage(ImageID(img), alpha)
+          Else 
+            MovePathCursor(px, py)
+            DrawVectorImage(ImageID(PBMap\ImgLoading), alpha)
+          EndIf
+        Else
+          If Layer = 0
+            MovePathCursor(px, py)
+            DrawVectorImage(ImageID(PBMap\ImgNothing))
+          EndIf
         EndIf
       Next
     Next 
@@ -815,6 +837,20 @@ Module PBMap
     EndIf
   EndProcedure
   
+    Procedure DrawMarker(x.i, y.i, color.l = 0)
+    VectorSourceColor(color)
+    MovePathCursor(x, y)
+    AddPathLine(-8, -16, #PB_Path_Relative)
+    AddPathCircle(8, 0, 8, 180, 0, #PB_Path_Relative)
+    AddPathLine(-8, 16, #PB_Path_Relative)
+    ;FillPath(#PB_Path_Preserve) 
+    ;ClipPath(#PB_Path_Preserve)
+    AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
+    VectorSourceColor(color)
+    FillPath(#PB_Path_Preserve):VectorSourceColor(color);RGBA(0, 0, 0, 255)) 
+    StrokePath(1)
+  EndProcedure
+  
   ; Add a Marker To the Map
   Procedure AddMarker(Latitude.d, Longitude.d, color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
@@ -822,8 +858,9 @@ Module PBMap
     PBMap\Marker()\Location\Longitude = Longitude
     PBMap\Marker()\color = color
     PBMap\Marker()\CallBackPointer = CallBackPointer
+    PBMap\Redraw = #True
   EndProcedure
-  
+    
   ; Draw all markers on the screen !
   Procedure  DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelPosition
@@ -834,9 +871,7 @@ Module PBMap
           If PBMap\Marker()\CallBackPointer > 0
             CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
           Else
-            Debug 1
-            DrawPointer(*Drawing)
-            
+            DrawMarker(Pixel\X, Pixel\Y, PBMap\Marker()\color)
           EndIf
         EndIf 
       EndIf 
@@ -1029,13 +1064,13 @@ Module PBMap
   EndProcedure  
   
   Procedure.d GetLatitude()
-    ProcedureReturn 0-(90-Mod((PBMap\TargetLocation\Latitude+90),180))
-;    ProcedureReturn PBMap\TargetLocation\Latitude
+;    ProcedureReturn 0-(90-Mod((PBMap\TargetLocation\Latitude+90),180))
+    ProcedureReturn PBMap\TargetLocation\Latitude
   EndProcedure
   
   Procedure.d GetLongitude()
-    ProcedureReturn 0-(180-Mod((PBMap\TargetLocation\Longitude+180),360))   
-;    ProcedureReturn PBMap\TargetLocation\Longitude
+;    ProcedureReturn 0-(180-Mod((PBMap\TargetLocation\Longitude+180),360))   
+    ProcedureReturn PBMap\TargetLocation\Longitude
   EndProcedure
   
   Procedure.i GetZoom()
@@ -1191,7 +1226,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
-  Procedure MyPointer(x.i, y.i)
+  Procedure MyMarker(x.i, y.i)
     Protected color.l
     color=RGBA(0, 255, 0, 255)
     VectorSourceColor(color)
@@ -1259,7 +1294,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetLocation(-36.81148, 175.08634,12)
     PBMap::SetMapServer("http://t1.openseamap.org/seamark/") ;add a special osm overlay map 
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
-    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyPointer())
+    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())
     
     Repeat
       Event = WaitWindowEvent()
@@ -1298,9 +1333,9 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 836
-; FirstLine = 821
-; Folding = ---------
+; CursorPosition = 633
+; FirstLine = 612
+; Folding = ----------
 ; EnableThread
 ; EnableXP
 ; EnableUnicode
