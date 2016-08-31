@@ -29,7 +29,7 @@ DeclareModule PBMap
   #Red = 255
   ;-Show debug infos  
   Global Verbose = 0
-  Global MyDebugLevel = 3
+  Global MyDebugLevel = 5
   ;-Proxy ON/OFF
   Global Proxy = #False
   
@@ -393,8 +393,8 @@ Module PBMap
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * ( (*Location\Longitude + 180.0) / 360.0)
     *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
-    MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude))
-    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y))
+    MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
+    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
   EndProcedure
    
  ;*** Converts tile.decimal to coords
@@ -407,8 +407,17 @@ Module PBMap
       *Location\Longitude + 360
     EndIf
     *Location\Longitude - 180.0
+
     LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
     *Location\Latitude = Degree(LatitudeRad)
+  EndProcedure
+  
+  Procedure LatLon2Pixel(*Location.Location, *Pixel.PixelPosition) 
+    ;Return the position of the coordinates relatively to the canvas center
+    Protected Pos.Position
+    LatLon2XY(*Location, @Pos)    
+    *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+    *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -429,27 +438,33 @@ Module PBMap
     ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
   EndProcedure
   
-  Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.PixelPosition) ; TODO to Optimize 
-    Protected mapWidth.l    = Pow(2, PBMap\Zoom + 8)
-    Protected mapHeight.l   = Pow(2, PBMap\Zoom + 8)
-    Protected x1.l,y1.l
-    ; get x value
-    x1 = (*Location\Longitude+180)*(mapWidth/360)
-    ; convert from degrees To radians
-    Protected latRad.d = *Location\Latitude*#PI/180;
-    Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
-    y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
-    Protected x2.l, y2.l
-    ; get x value
-    x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
-    ; convert from degrees To radians
-    latRad = PBMap\TargetLocation\Latitude*#PI/180;
-                                                  ; get y value
-    mercN = Log(Tan((#PI/4)+(latRad/2)))        
-    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
-    *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
-    *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
-  EndProcedure
+;   Procedure GetPixelCoordFromLocation(*Location.Location, *Pixel.PixelPosition) ; TODO to Optimize 
+;     Protected mapWidth.l    = Pow(2, PBMap\Zoom + 8)
+;     Protected mapHeight.l   = Pow(2, PBMap\Zoom + 8)
+;     Protected x1.l,y1.l
+;     ; get x value
+;     x1 = (*Location\Longitude+180)*(mapWidth/360)
+;     ; convert from degrees To radians
+;     Protected latRad.d = *Location\Latitude*#PI/180;
+;     Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
+;     y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
+; ;     Debug "location"
+; ;     Debug x1
+; ;     Debug y1
+;     Protected x2.l, y2.l
+;     ; get x value
+;     x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
+;     ; convert from degrees To radians
+;     latRad = PBMap\TargetLocation\Latitude*#PI/180;
+;                                                   ; get y value
+;     mercN = Log(Tan((#PI/4)+(latRad/2)))        
+;     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
+; ;     Debug "targetlocation"
+; ;     Debug x1
+; ;     Debug y1
+;     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
+;     *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
+;   EndProcedure
   
   Procedure LoadGpxFile(file.s)
     If LoadXML(0, file.s)
@@ -743,7 +758,7 @@ Module PBMap
     
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,alpha))
-       
+    
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
     
@@ -752,15 +767,14 @@ Module PBMap
     nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
-    Debug nx
-    Debug nx1
-    GetPixelCoordFromLocation(@Degrees2, @pos2)
+    LatLon2Pixel(@Degrees2, @pos2)
+    
     
     x = nx
     For y = ny1 To ny
       Degrees1\Longitude = x
       Degrees1\Latitude  = y 
-      GetPixelCoordFromLocation(@Degrees1, @pos1)
+      LatLon2Pixel(@Degrees1, @pos1)
       MovePathCursor(pos1\x, pos1\y) 
       AddPathLine(   pos2\x, pos1\y)
       MovePathCursor(10,pos1\y) 
@@ -769,14 +783,14 @@ Module PBMap
     
     y = ny
     For x = nx To nx1
-        Degrees1\Longitude = x
-        Degrees1\Latitude  = y
-        GetPixelCoordFromLocation(@Degrees1, @pos1)
-        MovePathCursor(pos1\x, pos1\y)
-        AddPathLine(   pos1\x, pos2\y) 
-        MovePathCursor(pos1\x,10) 
-        DrawVectorText(StrD(x, 1))
-     Next      
+      Degrees1\Longitude = x
+      Degrees1\Latitude  = y
+      LatLon2Pixel(@Degrees1, @pos1)
+      MovePathCursor(pos1\x, pos1\y)
+      AddPathLine(   pos1\x, pos2\y) 
+      MovePathCursor(pos1\x,10) 
+      DrawVectorText(StrD(x, 1))
+    Next      
     StrokePath(1)  
     
   EndProcedure   
@@ -808,7 +822,8 @@ Module PBMap
       ;Trace Track
       ForEach PBMap\track()
         If *Drawing\TargetLocation\Latitude<>0 And *Drawing\TargetLocation\Longitude<>0
-          GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
+          ;GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
+          LatLon2Pixel(@PBMap\track(),@Pixel)
           If ListIndex(PBMap\track())=0
             MovePathCursor(Pixel\X, Pixel\Y)
           Else
@@ -829,7 +844,8 @@ Module PBMap
           Location\Latitude=PBMap\track()\Latitude
           Location\Longitude=PBMap\track()\Longitude 
         EndIf 
-        GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
+        ;GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
+        LatLon2Pixel(@PBMap\track(),@Pixel)
         If Int(km)<>memKm
           memKm=Int(km)
           If PBMap\Zoom>10
@@ -871,7 +887,8 @@ Module PBMap
     Protected Pixel.PixelPosition
     ForEach PBMap\Marker()
       If PBMap\Marker()\Location\Latitude <> 0 And PBMap\Marker()\Location\Longitude <> 0
-        GetPixelCoordFromLocation(PBMap\Marker()\Location, @Pixel)
+        ;GetPixelCoordFromLocation(PBMap\Marker()\Location, @Pixel)
+        LatLon2Pixel(PBMap\Marker()\Location, @Pixel)
         If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
           If PBMap\Marker()\CallBackPointer > 0
             CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
@@ -1338,8 +1355,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 755
-; FirstLine = 732
+; CursorPosition = 892
+; FirstLine = 873
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
