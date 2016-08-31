@@ -402,7 +402,11 @@ Module PBMap
   Procedure XY2LatLon(*Coords.Position, *Location.Location)
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatitudeRad.d
-    *Location\Longitude  = *Coords\x / n * 360.0 - 180.0
+    *Location\Longitude  = Mod(*Coords\x / n * 360.0, 360.0)
+    If *Location\Longitude < 0
+      *Location\Longitude + 360
+    EndIf
+    *Location\Longitude - 180.0
     LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
     *Location\Latitude = Degree(LatitudeRad)
   EndProcedure
@@ -629,10 +633,9 @@ Module PBMap
         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
         tilex = (tx + x) % tilemax
-        Debug "tx " + Str(tx)
-        Debug "x " + Str(x)
-        Debug "tilemax " + Str(tilemax)
-        Debug "tilex " + Str(tilex)
+        If tilex < 0
+          tilex + tilemax
+        EndIf
         tiley = ty + y 
         If tiley >= 0 And tiley < tilemax
           kq = Layer | (pbmap\zoom << 8) | (tilex << 16) | (tiley << 36)
@@ -749,6 +752,8 @@ Module PBMap
     nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
+    Debug nx
+    Debug nx1
     GetPixelCoordFromLocation(@Degrees2, @pos2)
     
     x = nx
@@ -1333,8 +1338,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 633
-; FirstLine = 612
+; CursorPosition = 755
+; FirstLine = 732
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
