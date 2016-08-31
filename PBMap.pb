@@ -615,9 +615,6 @@ Module PBMap
         
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
-        ;          If PBMap\Moving  ;If drawing was threaded, this would exit the loop when the user is moving
-        ;            Break 2
-        ;          EndIf
         px = *Drawing\CenterX + x * PBMap\TileSize - *Drawing\DeltaX
         py = *Drawing\CenterY + y * PBMap\TileSize - *Drawing\DeltaY
         tilex = ((tx+x) % (1<<PBMap\Zoom))
@@ -708,9 +705,8 @@ Module PBMap
   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
-<<<<<<< HEAD
     
-    tx = Int(*Drawing\Position\x)          ;Don't forget the Int() !
+    tx = Int(*Drawing\Position\x)
     ty = Int(*Drawing\Position\y)
     nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     ny = *Drawing\CenterY / PBMap\TileSize
@@ -720,27 +716,9 @@ Module PBMap
     *Drawing\Bounds\SouthEast\x = tx+nx+1 
     *Drawing\Bounds\SouthEast\y = ty+ny+1 
     
-    ;VectorFont(FontID(PBMap\Font), 10)
-    VectorSourceColor(RGBA(0, 0, 0,Alpha))
-=======
->>>>>>> refs/remotes/origin/idle
-    
-    tx = *Drawing\Position\x        
-    ty = *Drawing\Position\y
-    nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
-    ny = *Drawing\CenterY / PBMap\TileSize
-    
-<<<<<<< HEAD
-=======
-    *Drawing\Bounds\NorthWest\x = tx-nx-1 
-    *Drawing\Bounds\NorthWest\y = ty-ny-1 
-    *Drawing\Bounds\SouthEast\x = tx+nx+1 
-    *Drawing\Bounds\SouthEast\y = ty+ny+1 
-    
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,alpha))
        
->>>>>>> refs/remotes/origin/idle
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
     
@@ -750,27 +728,18 @@ Module PBMap
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
     GetPixelCoordFromLocation(@Degrees2, @pos2)
-<<<<<<< HEAD
-
-=======
-        
->>>>>>> refs/remotes/origin/idle
+    
     x = nx
     For y = ny1 To ny
       Degrees1\Longitude = x
       Degrees1\Latitude  = y 
       GetPixelCoordFromLocation(@Degrees1, @pos1)
       MovePathCursor(pos1\x, pos1\y) 
-<<<<<<< HEAD
-      AddPathLine(   pos2\x, pos1\y) 
-    Next       
-=======
       AddPathLine(   pos2\x, pos1\y)
       MovePathCursor(10,pos1\y) 
-      DrawVectorText(StrD(0-(90-Mod((y+90),180)),1))
+      DrawVectorText(StrD(y, 1))
     Next       
     
->>>>>>> refs/remotes/origin/idle
     y = ny
     For x = nx To nx1
         Degrees1\Longitude = x
@@ -778,13 +747,9 @@ Module PBMap
         GetPixelCoordFromLocation(@Degrees1, @pos1)
         MovePathCursor(pos1\x, pos1\y)
         AddPathLine(   pos1\x, pos2\y) 
-<<<<<<< HEAD
-      Next      
-=======
         MovePathCursor(pos1\x,10) 
-        DrawVectorText(StrD(0-(180-Mod((x+180),360)),1))
+        DrawVectorText(StrD(x, 1))
      Next      
->>>>>>> refs/remotes/origin/idle
     StrokePath(1)  
     
   EndProcedure   
@@ -815,7 +780,7 @@ Module PBMap
     If ListSize(PBMap\track())>0
       ;Trace Track
       ForEach PBMap\track()
-        If *Drawing\TargetLocation\Latitude<>0 And  *Drawing\TargetLocation\Longitude<>0
+        If *Drawing\TargetLocation\Latitude<>0 And *Drawing\TargetLocation\Longitude<>0
           GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
           If ListIndex(PBMap\track())=0
             MovePathCursor(Pixel\X, Pixel\Y)
@@ -851,11 +816,11 @@ Module PBMap
   EndProcedure
   
   ; Add a Marker To the Map
-  Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
+  Procedure AddMarker(Latitude.d, Longitude.d, color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
-    PBMap\Marker()\Location\Latitude=Latitude
-    PBMap\Marker()\Location\Longitude=Longitude
-    PBMap\Marker()\color=color
+    PBMap\Marker()\Location\Latitude = Latitude
+    PBMap\Marker()\Location\Longitude = Longitude
+    PBMap\Marker()\color = color
     PBMap\Marker()\CallBackPointer = CallBackPointer
   EndProcedure
   
@@ -869,7 +834,9 @@ Module PBMap
           If PBMap\Marker()\CallBackPointer > 0
             CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
           Else
+            Debug 1
             DrawPointer(*Drawing)
+            
           EndIf
         EndIf 
       EndIf 
@@ -922,15 +889,6 @@ Module PBMap
     DrawScale(*Drawing,10,GadgetHeight(PBMAP\Gadget)-20,192)
     ;EndIf 
     StopVectorDrawing()
-<<<<<<< HEAD
-    ;If there was a problem while drawing, redraw
-    ;     If PBMap\Dirty  
-    ;       PBMap\Redraw = #True
-    ;       ;PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_REDRAW)
-    ;     EndIf
-=======
-   
->>>>>>> refs/remotes/origin/idle
   EndProcedure
   
   Procedure Refresh()
@@ -999,7 +957,7 @@ Module PBMap
       Protected lat.d = centerY;
       SetLocation(lat,lon, Round(zoom,#PB_Round_Down))
     Else
-      SetLocation(PBMap\TargetLocation\Latitude,PBMap\TargetLocation\Longitude, 15)
+      SetLocation(PBMap\TargetLocation\Latitude, PBMap\TargetLocation\Longitude, 15)
     EndIf
   EndProcedure
   
@@ -1072,10 +1030,12 @@ Module PBMap
   
   Procedure.d GetLatitude()
     ProcedureReturn 0-(90-Mod((PBMap\TargetLocation\Latitude+90),180))
+;    ProcedureReturn PBMap\TargetLocation\Latitude
   EndProcedure
   
   Procedure.d GetLongitude()
     ProcedureReturn 0-(180-Mod((PBMap\TargetLocation\Longitude+180),360))   
+;    ProcedureReturn PBMap\TargetLocation\Longitude
   EndProcedure
   
   Procedure.i GetZoom()
@@ -1193,7 +1153,7 @@ Module PBMap
   
 EndModule
 
-;-Exemple
+;-Example
 CompilerIf #PB_Compiler_IsMainFile 
   InitNetwork()
   
@@ -1224,8 +1184,10 @@ CompilerIf #PB_Compiler_IsMainFile
   EndStructure
   
   Procedure UpdateLocation(*Location.Location)
-    SetGadgetText(#String_0, StrD(0-(90-Mod((*Location\Latitude+90),180))))
-    SetGadgetText(#String_1, StrD(0-(180-Mod((*Location\Longitude+180),360))))
+;    SetGadgetText(#String_0, StrD(0-(90-Mod((*Location\Latitude+90),180))))
+;    SetGadgetText(#String_1, StrD(0-(180-Mod((*Location\Longitude+180),360))))
+    SetGadgetText(#String_0, StrD(*Location\Latitude))
+    SetGadgetText(#String_1, StrD(*Location\Longitude))
     ProcedureReturn 0
   EndProcedure
   
@@ -1330,20 +1292,14 @@ CompilerIf #PB_Compiler_IsMainFile
     Until Quit = #True
     
     PBMap::Quit()
-<<<<<<< HEAD
   EndIf
     
 CompilerEndIf
+
+
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 751
-; FirstLine = 719
-=======
-    EndIf
-  CompilerEndIf
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1263
-; FirstLine = 1250
->>>>>>> refs/remotes/origin/idle
+; CursorPosition = 836
+; FirstLine = 821
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
