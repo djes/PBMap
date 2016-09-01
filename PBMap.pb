@@ -1138,12 +1138,18 @@ Module PBMap
         ;Check if we select a marker
         MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
         MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+        ;Clip MouseX to the map range (in X, the map is infinite)
+        If MouseX < 0
+          MouseX + Pow(2, PBMap\Zoom) * PBMap\TileSize
+        EndIf
+        MouseX = Mod(MouseX, Pow(2, PBMap\Zoom) * PBMap\TileSize)
+;         Debug "---"
+;         Debug "mx : " + Str(MouseX)
         ForEach PBMap\Marker()                   
           LatLon2XY(@PBMap\Marker()\Location, @Marker)
-               Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) 
-
           Marker\x * PBMap\TileSize
           Marker\y * PBMap\TileSize 
+;           Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) 
           If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
             PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
             Break
@@ -1383,8 +1389,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 940
-; FirstLine = 932
+; CursorPosition = 1149
+; FirstLine = 1122
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
