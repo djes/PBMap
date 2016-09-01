@@ -391,7 +391,7 @@ Module PBMap
   Procedure LatLon2XY(*Location.Location, *Coords.Position)
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
-    *Coords\x = n * ( (*Location\Longitude + 180.0) / 360.0)
+    *Coords\x = n * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
     *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
     MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
     MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
@@ -406,17 +406,32 @@ Module PBMap
     If *Location\Longitude < 0
       *Location\Longitude + 360
     EndIf
-    *Location\Longitude - 180.0
+    *Location\Longitude  = Mod(*Location\Longitude, 360.0) - 180
     LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
     *Location\Latitude = Degree(LatitudeRad)
   EndProcedure
   
   Procedure LatLon2Pixel(*Location.Location, *Pixel.PixelPosition) 
-    ;Return the position of the coordinates relatively to the canvas center
     Protected Pos.Position
     LatLon2XY(*Location, @Pos)
+    Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(Pow(2.0, PBMap\Zoom))
     *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
     *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
+
+;     Protected Pos.Position
+;     Protected Center.Location, Pnt.Location
+;     ;Return the position of the coordinates relatively to the canvas center
+;     If Abs(PBMap\Drawing\TargetLocation\Longitude - *Location\Longitude) > 180 And Sign(PBMap\Drawing\TargetLocation\Longitude) <> Sign(*Location\Longitude)
+;       Pnt\Longitude = PBMap\Drawing\TargetLocation\Longitude - (360 - (PBMap\Drawing\TargetLocation\Longitude - *Location\Longitude))
+;       Pnt\Latitude = *Location\Latitude
+;       LatLon2XY(@Pnt, @Pos)
+;       *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+;       *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
+;     Else
+;       LatLon2XY(*Location, @Pos)
+;       *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+;       *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
+;     EndIf  
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -744,6 +759,7 @@ Module PBMap
   Procedure DrawDegrees(*Drawing.DrawingParameters,alpha=192) 
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
+    Protected realx
     
     tx = Int(*Drawing\Position\x)
     ty = Int(*Drawing\Position\y)
@@ -769,40 +785,42 @@ Module PBMap
     nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     
+    ;ensure we stay positive for the drawing
+    realx = nx
+    If nx < 0
+      nx + 360
+    EndIf
+    If nx1 < 0
+      nx1 + 360
+    EndIf
+    nx % 360
+    nx1 % 360
+    
+    Debug "---"
+    Debug nx
+    Debug nx1
+    Debug ny1
+    Debug ny
+    
     Degrees1\Longitude = nx
     Degrees1\Latitude  = ny 
     
     Degrees2\Longitude = nx1
     Degrees2\Latitude  = ny1
     
-;     Debug "lon lat center"
-;     Debug *Drawing\TargetLocation\Longitude
-;     Debug *Drawing\TargetLocation\Latitude
-;     Debug "lon lat 1"
-;     Debug Degrees1\Longitude
-;     Debug Degrees1\Latitude
-;     Debug "lon lat 2"
-;     Debug Degrees2\Longitude
-;     Debug Degrees2\Latitude
-    
     LatLon2Pixel(@Degrees1, @pos1)
-;     Debug "pos1"
-;     Debug pos1\x
-;     Debug pos1\y
-    
     LatLon2Pixel(@Degrees2, @pos2)
-;     Debug "pos2"
-;     Debug pos2\x
-;     Debug pos2\y
+    
+    Debug "---"
+    Debug pos1\x
+    Debug pos1\y
+    Debug pos2\x
+    Debug pos2\y
     
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,alpha))    
     
-    x = nx
-    If ny < ny1
-      Swap ny, ny1
-      x = nx1
-    EndIf
+    ;draw latitudes
     For y = ny1 To ny
       Degrees1\Longitude = x
       Degrees1\Latitude  = y 
@@ -812,12 +830,8 @@ Module PBMap
       MovePathCursor(10, pos1\y) 
       DrawVectorText(StrD(y, 1))
     Next       
-    
-    y = ny
-     If nx > nx1
-      Swap nx, nx1
-      y = ny1
-    EndIf
+
+    ;draw longitudes
     For x = nx To nx1
       Degrees1\Longitude = x
       Degrees1\Latitude  = y
@@ -825,7 +839,7 @@ Module PBMap
       MovePathCursor(pos1\x, pos1\y)
       AddPathLine(   pos1\x, pos2\y) 
       MovePathCursor(pos1\x,10) 
-      DrawVectorText(StrD(x, 1))
+      DrawVectorText(Str(x))
     Next      
     StrokePath(1)  
     
@@ -1105,10 +1119,8 @@ Module PBMap
     ;Centered Zoom
     LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
     ;Convert X, Y in tile.decimal into real pixels
-    PBMap\Position\x = PBMap\Drawing\Position\x * PBMap\TileSize
-    PBMap\Position\y = PBMap\Drawing\Position\y * PBMap\TileSize
-    MouseX = PBMap\Position\x + GadgetWidth(PBMap\Gadget) / 2 - x
-    MouseY = PBMap\Position\y + GadgetHeight(PBMap\Gadget) / 2 - y               
+    MouseX = PBMap\Drawing\Position\x * PBMap\TileSize + GadgetWidth(PBMap\Gadget) / 2 - x
+    MouseY = PBMap\Drawing\Position\y * PBMap\TileSize + GadgetHeight(PBMap\Gadget) / 2 - y               
     ;Cross-multiply to get the new center
     PBMap\Position\x = (OldPx * MouseX) / OldMx
     PBMap\Position\y = (OldPy * MouseY) / OldMy
@@ -1396,8 +1408,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 416
-; FirstLine = 401
+; CursorPosition = 1020
+; FirstLine = 999
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
