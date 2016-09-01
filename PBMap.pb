@@ -413,25 +413,19 @@ Module PBMap
   
   Procedure LatLon2Pixel(*Location.Location, *Pixel.PixelPosition) 
     Protected Pos.Position
+    Protected tilemax = Pow(2.0, PBMap\Zoom)
     LatLon2XY(*Location, @Pos)
-    Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(Pow(2.0, PBMap\Zoom))
-    *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+    ;check the x boundaries of the map to adjust the position
+    If PBMap\Drawing\Position\x - Pos\x > tilemax / 2
+      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x + tilemax) * PBMap\TileSize 
+    ElseIf Pos\x - PBMap\Drawing\Position\x > tilemax / 2
+      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x - tilemax) * PBMap\TileSize 
+    Else
+      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+    EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
-
-;     Protected Pos.Position
-;     Protected Center.Location, Pnt.Location
-;     ;Return the position of the coordinates relatively to the canvas center
-;     If Abs(PBMap\Drawing\TargetLocation\Longitude - *Location\Longitude) > 180 And Sign(PBMap\Drawing\TargetLocation\Longitude) <> Sign(*Location\Longitude)
-;       Pnt\Longitude = PBMap\Drawing\TargetLocation\Longitude - (360 - (PBMap\Drawing\TargetLocation\Longitude - *Location\Longitude))
-;       Pnt\Latitude = *Location\Latitude
-;       LatLon2XY(@Pnt, @Pos)
-;       *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
-;       *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
-;     Else
-;       LatLon2XY(*Location, @Pos)
-;       *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
-;       *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
-;     EndIf  
+;     Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(tilemax) +
+;           " ; XY : " + Str(*Pixel\x) + "," + Str(*Pixel\y)
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -760,31 +754,20 @@ Module PBMap
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.Location,degrees2.Location 
     Protected realx
-    
     tx = Int(*Drawing\Position\x)
     ty = Int(*Drawing\Position\y)
     nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     ny = *Drawing\CenterY / PBMap\TileSize
-    
     *Drawing\Bounds\NorthWest\x = tx-nx-1 
     *Drawing\Bounds\NorthWest\y = ty-ny-1 
     *Drawing\Bounds\SouthEast\x = tx+nx+1 
     *Drawing\Bounds\SouthEast\y = ty+ny+1 
-    
-;     Debug "bounds"
-;     Debug *Drawing\Bounds\NorthWest\x
-;     Debug *Drawing\Bounds\NorthWest\y 
-;     Debug *Drawing\Bounds\SouthEast\x 
-;     Debug *Drawing\Bounds\SouthEast\y         
-    
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
-    
     nx =  Round(Degrees1\Longitude, #PB_Round_Down)-1
     ny =  Round(Degrees1\Latitude,  #PB_Round_Up)  +1
     nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
     ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
-    
     ;ensure we stay positive for the drawing
     realx = nx
     If nx < 0
@@ -795,34 +778,17 @@ Module PBMap
     EndIf
     nx % 360
     nx1 % 360
-    
-    Debug "---"
-    Debug nx
-    Debug nx1
-    Debug ny1
-    Debug ny
-    
     Degrees1\Longitude = nx
     Degrees1\Latitude  = ny 
-    
     Degrees2\Longitude = nx1
     Degrees2\Latitude  = ny1
-    
     LatLon2Pixel(@Degrees1, @pos1)
     LatLon2Pixel(@Degrees2, @pos2)
-    
-    Debug "---"
-    Debug pos1\x
-    Debug pos1\y
-    Debug pos2\x
-    Debug pos2\y
-    
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,alpha))    
-    
     ;draw latitudes
     For y = ny1 To ny
-      Degrees1\Longitude = x
+      Degrees1\Longitude = nx
       Degrees1\Latitude  = y 
       LatLon2Pixel(@Degrees1, @pos1)
       MovePathCursor(pos1\x, pos1\y) 
@@ -830,19 +796,21 @@ Module PBMap
       MovePathCursor(10, pos1\y) 
       DrawVectorText(StrD(y, 1))
     Next       
-
     ;draw longitudes
     For x = nx To nx1
       Degrees1\Longitude = x
-      Degrees1\Latitude  = y
+      Degrees1\Latitude  = ny
       LatLon2Pixel(@Degrees1, @pos1)
       MovePathCursor(pos1\x, pos1\y)
       AddPathLine(   pos1\x, pos2\y) 
       MovePathCursor(pos1\x,10) 
-      DrawVectorText(Str(x))
+      DrawVectorText(StrD(realx, 1))
+      realx + 1
+      If realx > 180
+        realx - 360
+      EndIf
     Next      
     StrokePath(1)  
-    
   EndProcedure   
   
   Procedure TrackPointer(x.i, y.i,dist.l)
@@ -965,7 +933,6 @@ Module PBMap
     *Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
     *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
     *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
-    
     ;Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
@@ -1172,7 +1139,9 @@ Module PBMap
         MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
         MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
         ForEach PBMap\Marker()                   
-          LatLon2XY(@PBMap\Marker()\Location, @Marker)                   
+          LatLon2XY(@PBMap\Marker()\Location, @Marker)
+               Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) 
+
           Marker\x * PBMap\TileSize
           Marker\y * PBMap\TileSize 
           If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
@@ -1197,7 +1166,13 @@ Module PBMap
             XY2LatLon(@Marker, @PBMap\Marker()\Location)                      
           Else
             ;New move values
-            PBMap\Position\x - MouseX
+            ;PBMap\Position\x  - MouseX
+            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[
+            PBMap\Position\x = PBMap\Position\x - MouseX
+            If PBMap\Position\x < 0
+              PBMap\Position\x + Pow(2, PBMap\Zoom) * PBMap\TileSize
+            EndIf 
+            PBMap\Position\x = Mod(PBMap\Position\x, Pow(2, PBMap\Zoom) * PBMap\TileSize)
             PBMap\Position\y - MouseY
             ;PBMap tile position in tile.decimal
             PBMap\Drawing\Position\x = PBMap\Position\x / PBMap\TileSize
@@ -1408,8 +1383,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1020
-; FirstLine = 999
+; CursorPosition = 940
+; FirstLine = 932
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
