@@ -1047,7 +1047,7 @@ Module PBMap
     EndSelect
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
-    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing\Position)
     ;Convert X, Y in tile.decimal into real pixels
     PBMap\Position\X = PBMap\Drawing\Position\x * PBMap\TileSize
     PBMap\Position\Y = PBMap\Drawing\Position\y * PBMap\TileSize
@@ -1077,6 +1077,7 @@ Module PBMap
   Procedure SetZoomOnPosition(x, y, zoom)
     Protected MouseX.d, MouseY.d
     Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d
+    Protected MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     ;Fast and dirty code
     OldPx = PBMap\Position\x : OldPy = PBMap\Position\y
     OldMx = OldPx + GadgetWidth(PBMap\Gadget) / 2 - x
@@ -1085,11 +1086,15 @@ Module PBMap
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
     ;Centered Zoom
-    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing)
+    LatLon2XY(@PBMap\TargetLocation, @PBMap\Drawing\Position)
     ;Convert X, Y in tile.decimal into real pixels
     MouseX = PBMap\Drawing\Position\x * PBMap\TileSize + GadgetWidth(PBMap\Gadget) / 2 - x
-    MouseY = PBMap\Drawing\Position\y * PBMap\TileSize + GadgetHeight(PBMap\Gadget) / 2 - y               
+    MouseY = PBMap\Drawing\Position\y * PBMap\TileSize + GadgetHeight(PBMap\Gadget) / 2 - y
+    If MouseX > MapWidth
+      Debug "kaboum"
+    EndIf
     Debug "------"        ;TODO bug when zoom near the wrap
+    Debug "Mx : " +StrD(MouseX)
     Debug PBMap\Position\x
     ;Cross-multiply to get the new center
     PBMap\Position\x = (OldPx * MouseX) / OldMx
@@ -1386,8 +1391,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 427
-; FirstLine = 410
+; CursorPosition = 1094
+; FirstLine = 1076
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
