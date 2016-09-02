@@ -403,8 +403,7 @@ Module PBMap
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatitudeRad.d
     ;Ensures the longitude to be in the range [-180;180[
-    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0)
-    *Location\Longitude - 180
+    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
 ;    *Location\Longitude  = Mod(*Coords\x / n * 360.0, 360.0)
 ;    If *Location\Longitude < 0
 ;      *Location\Longitude + 360
@@ -782,17 +781,8 @@ Module PBMap
     ;ensure we stay positive for the drawing
     nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
     ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
-    nx1 = Mod(Mod(Round(Degrees2\Longitude, #PB_Round_Up)  +1, 360) + 360, 360) 
+    nx1 = Mod(Mod(Round(Degrees2\Longitude, #PB_Round_Up)  +1, 360) + 360, 360)
     ny1 =         Round(Degrees2\Latitude,  #PB_Round_Down)-1 
-    realx = nx
-;     If nx < 0
-;       nx + 360
-;     EndIf
-;     If nx1 < 0
-;       nx1 + 360
-;     EndIf
-;     nx % 360
-;     nx1 % 360
     Degrees1\Longitude = nx
     Degrees1\Latitude  = ny 
     Degrees2\Longitude = nx1
@@ -821,13 +811,9 @@ Module PBMap
       MovePathCursor(pos1\x, pos1\y)
       AddPathLine(   pos1\x, pos2\y) 
       MovePathCursor(pos1\x,10) 
-      DrawVectorText(StrD(realx, 1))
-      realx + 1
-      If realx > 180
-        realx - 360
-      EndIf
+      DrawVectorText(StrD(Mod(x + 180, 360) - 180, 1))
       x = (x + 1)%360
-    Until x = nx1      
+    Until x = nx1
     StrokePath(1)  
   EndProcedure   
   
@@ -1402,8 +1388,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1364
-; FirstLine = 1352
+; CursorPosition = 413
+; FirstLine = 467
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
