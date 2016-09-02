@@ -421,16 +421,16 @@ Module PBMap
     Protected px.d = Pos\x
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
     If dpx - px > tilemax / 2
-      Debug "c1"
+      ;Debug "c1"
       *Pixel\x = cx + (px - dpx + tilemax) * PBMap\TileSize 
     ElseIf px - dpx > tilemax / 2
-      Debug "c2"
+      ;Debug "c2"
       *Pixel\x = cx + (px - dpx - tilemax) * PBMap\TileSize 
     ElseIf px - dpx < 0
-       Debug "c3"
+       ;Debug "c3"
        *Pixel\x = cx - (dpx - px) * PBMap\TileSize 
     Else
-      Debug "c0"
+      ;Debug "c0"
       *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
     EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
@@ -756,7 +756,7 @@ Module PBMap
     MovePathCursor(x,y)
     DrawVectorText(StrD(Scale,3)+sunit)
     MovePathCursor(x,y+12) 
-    AddPathLine(x+128,y+10)
+    AddPathLine(x+128,y+12)
     StrokePath(1)
   EndProcedure
 
@@ -768,10 +768,10 @@ Module PBMap
     ty = Int(*Drawing\Position\y)
     nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     ny = *Drawing\CenterY / PBMap\TileSize
-    *Drawing\Bounds\NorthWest\x = tx-nx-1 
-    *Drawing\Bounds\NorthWest\y = ty-ny-1 
-    *Drawing\Bounds\SouthEast\x = tx+nx+1 
-    *Drawing\Bounds\SouthEast\y = ty+ny+1 
+    *Drawing\Bounds\NorthWest\x = tx-nx-1
+    *Drawing\Bounds\NorthWest\y = ty-ny-1
+    *Drawing\Bounds\SouthEast\x = tx+nx+2 
+    *Drawing\Bounds\SouthEast\y = ty+ny+2 
 ;    Debug "------------------"
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
@@ -922,7 +922,7 @@ Module PBMap
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
-    Protected Px.d, Py.d,a
+    Protected Px.d, Py.d,a, ts = PBMap\TileSize
     PBMap\Dirty = #False
     PBMap\Redraw = #False
     ;Precalc some values
@@ -930,8 +930,8 @@ Module PBMap
     *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
     ;Pixel shift, aka position in the tile
     Px = *Drawing\Position\x : Py = *Drawing\Position\y
-    *Drawing\DeltaX = Px * PBMap\TileSize - (Int(Px) * PBMap\TileSize) ;Don't forget the Int() !
-    *Drawing\DeltaY = Py * PBMap\TileSize - (Int(Py) * PBMap\TileSize)
+    *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
+    *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
     *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
     *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
     ;Main drawing stuff
@@ -1386,8 +1386,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1091
-; FirstLine = 1070
+; CursorPosition = 427
+; FirstLine = 410
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
