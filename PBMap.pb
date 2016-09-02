@@ -421,19 +421,16 @@ Module PBMap
     Protected px.d = Pos\x
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
     If dpx - px > tilemax / 2
-      ;Debug "c1"
+      Debug "c1"
       *Pixel\x = cx + (px - dpx + tilemax) * PBMap\TileSize 
     ElseIf px - dpx > tilemax / 2
-      ;Debug "c2"
+      Debug "c2"
       *Pixel\x = cx + (px - dpx - tilemax) * PBMap\TileSize 
-     ElseIf dpx - px < 0
-       ;Debug "c3"
-       *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
-     ElseIf px - dpx < 0
-       ;Debug "c4"
+    ElseIf px - dpx < 0
+       Debug "c3"
        *Pixel\x = cx - (dpx - px) * PBMap\TileSize 
     Else
-      ;Debug "c0"
+      Debug "c0"
       *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
     EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
@@ -1092,6 +1089,7 @@ Module PBMap
     ;Convert X, Y in tile.decimal into real pixels
     MouseX = PBMap\Drawing\Position\x * PBMap\TileSize + GadgetWidth(PBMap\Gadget) / 2 - x
     MouseY = PBMap\Drawing\Position\y * PBMap\TileSize + GadgetHeight(PBMap\Gadget) / 2 - y               
+    Debug "------"        ;TODO bug when zoom near the wrap
     Debug PBMap\Position\x
     ;Cross-multiply to get the new center
     PBMap\Position\x = (OldPx * MouseX) / OldMx
@@ -1348,7 +1346,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetCallBackLocation(@UpdateLocation())
     PBMap::SetLocation(-36.81148, 175.08634,12)
-;    PBMap::SetLocation(0, 0)
+    ;PBMap::SetLocation(0, 0)
     PBMap::SetMapServer("http://t1.openseamap.org/seamark/") ;add a special osm overlay map 
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
     PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())
@@ -1388,8 +1386,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 413
-; FirstLine = 467
+; CursorPosition = 1091
+; FirstLine = 1070
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
