@@ -1,4 +1,4 @@
-;************************************************************** 
+;;************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
@@ -28,8 +28,8 @@ UsePNGImageEncoder()
 DeclareModule PBMap
   #Red = 255
   ;-Show debug infos  
-  Global Verbose = 0
-  Global MyDebugLevel = 3
+  Global Verbose = 1
+  Global MyDebugLevel = 0; 3
   ;-Proxy ON/OFF
   Global Proxy = #False
   
@@ -381,7 +381,7 @@ Module PBMap
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * ( (*Location\Longitude + 180.0) / 360.0)
-    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
+    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
     MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude))
     MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y))
   EndProcedure
@@ -752,6 +752,7 @@ Module PBMap
         AddPathLine(   pos1\x, pos2\y) 
         MovePathCursor(pos1\x,10) 
         DrawVectorText(StrD(0-(180-Mod((x+180),360)),1))
+        
      Next      
     StrokePath(1)  
     
@@ -821,11 +822,16 @@ Module PBMap
   ; Add a Marker To the Map
   Procedure AddMarker(Latitude.d,Longitude.d,color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
-    PBMap\Marker()\Location\Latitude=Latitude
-    PBMap\Marker()\Location\Longitude=Longitude
+    PBMap\Marker()\Location\Latitude = Latitude 
+    PBMap\Marker()\Location\Longitude = Mod(Longitude+360,360)
+    
+    Debug PBMap\Marker()\Location\Longitude
+    Debug PBMap\Marker()\Location\Latitude
+     
     PBMap\Marker()\color=color
     PBMap\Marker()\CallBackPointer = CallBackPointer
-  EndProcedure
+    drawing()
+ EndProcedure
   
   ; Draw all markers on the screen !
   Procedure  DrawMarkers(*Drawing.DrawingParameters)
@@ -1282,7 +1288,7 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "*.gpx", 0))
               PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #Gdt_AddMarker
-              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255),@MyPointer())
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1293,8 +1299,8 @@ CompilerIf #PB_Compiler_IsMainFile
     EndIf
   CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1263
-; FirstLine = 1250
+; CursorPosition = 1299
+; FirstLine = 1256
 ; Folding = ---------
 ; EnableThread
 ; EnableXP
