@@ -392,7 +392,7 @@ Module PBMap
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + 1.0/Cos(LatRad)) / #PI ) / 2.0
+    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
     MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
     MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
   EndProcedure
@@ -894,7 +894,7 @@ Module PBMap
   Procedure AddMarker(Latitude.d, Longitude.d, color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
     PBMap\Marker()\Location\Latitude = Latitude
-    PBMap\Marker()\Location\Longitude = Longitude
+    PBMap\Marker()\Location\Longitude = Mod(Longitude + 360, 360)
     PBMap\Marker()\color = color
     PBMap\Marker()\CallBackPointer = CallBackPointer
     PBMap\Redraw = #True
@@ -1375,7 +1375,7 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "*.gpx", 0))
               PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #Gdt_AddMarker
-              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255),255))
+              PBMap:: AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255), 255), @MyMarker())
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1386,11 +1386,9 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
     
 CompilerEndIf
-
-
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1149
-; FirstLine = 1122
+; CursorPosition = 1353
+; FirstLine = 1344
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
