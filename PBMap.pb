@@ -402,11 +402,14 @@ Module PBMap
   Procedure XY2LatLon(*Coords.Position, *Location.Location)
     Protected n.d = Pow(2.0, PBMap\Zoom)
     Protected LatitudeRad.d
-    *Location\Longitude  = Mod(*Coords\x / n * 360.0, 360.0)
-    If *Location\Longitude < 0
-      *Location\Longitude + 360
-    EndIf
-    *Location\Longitude  = Mod(*Location\Longitude, 360.0) - 180
+    ;Ensures the longitude to be in the range [-180;180[
+    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0)
+    *Location\Longitude - 180
+;    *Location\Longitude  = Mod(*Coords\x / n * 360.0, 360.0)
+;    If *Location\Longitude < 0
+;      *Location\Longitude + 360
+;    EndIf
+;    *Location\Longitude  = Mod(*Location\Longitude, 360.0) - 180
     LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
     *Location\Latitude = Degree(LatitudeRad)
   EndProcedure
@@ -414,18 +417,29 @@ Module PBMap
   Procedure LatLon2Pixel(*Location.Location, *Pixel.PixelPosition) 
     Protected Pos.Position
     Protected tilemax = Pow(2.0, PBMap\Zoom)
+    Protected cx.d = PBMap\Drawing\CenterX, dpx.d = PBMap\Drawing\Position\x
     LatLon2XY(*Location, @Pos)
-    ;check the x boundaries of the map to adjust the position
-    If PBMap\Drawing\Position\x - Pos\x > tilemax / 2
-      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x + tilemax) * PBMap\TileSize 
-    ElseIf Pos\x - PBMap\Drawing\Position\x > tilemax / 2
-      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x - tilemax) * PBMap\TileSize 
+    Protected px.d = Pos\x
+    ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
+    If dpx - px > tilemax / 2
+      ;Debug "c1"
+      *Pixel\x = cx + (px - dpx + tilemax) * PBMap\TileSize 
+    ElseIf px - dpx > tilemax / 2
+      ;Debug "c2"
+      *Pixel\x = cx + (px - dpx - tilemax) * PBMap\TileSize 
+     ElseIf dpx - px < 0
+       ;Debug "c3"
+       *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
+     ElseIf px - dpx < 0
+       ;Debug "c4"
+       *Pixel\x = cx - (dpx - px) * PBMap\TileSize 
     Else
-      *Pixel\x = PBMap\Drawing\CenterX + (Pos\x - PBMap\Drawing\Position\x) * PBMap\TileSize 
+      ;Debug "c0"
+      *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
     EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\Position\y) * PBMap\TileSize 
-;     Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(tilemax) +
-;           " ; XY : " + Str(*Pixel\x) + "," + Str(*Pixel\y)
+     ;Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(tilemax) +
+     ;      " ; XY : " + Str(*Pixel\x) + "," + Str(*Pixel\y)
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -762,30 +776,32 @@ Module PBMap
     *Drawing\Bounds\NorthWest\y = ty-ny-1 
     *Drawing\Bounds\SouthEast\x = tx+nx+1 
     *Drawing\Bounds\SouthEast\y = ty+ny+1 
+;    Debug "------------------"
     XY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1)
     XY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2)
-    nx =  Round(Degrees1\Longitude, #PB_Round_Down)-1
-    ny =  Round(Degrees1\Latitude,  #PB_Round_Up)  +1
-    nx1 = Round(Degrees2\Longitude, #PB_Round_Up)  +1
-    ny1 = Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     ;ensure we stay positive for the drawing
+    nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
+    ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
+    nx1 = Mod(Mod(Round(Degrees2\Longitude, #PB_Round_Up)  +1, 360) + 360, 360) 
+    ny1 =         Round(Degrees2\Latitude,  #PB_Round_Down)-1 
     realx = nx
-    If nx < 0
-      nx + 360
-    EndIf
-    If nx1 < 0
-      nx1 + 360
-    EndIf
-    nx % 360
-    nx1 % 360
+;     If nx < 0
+;       nx + 360
+;     EndIf
+;     If nx1 < 0
+;       nx1 + 360
+;     EndIf
+;     nx % 360
+;     nx1 % 360
     Degrees1\Longitude = nx
     Degrees1\Latitude  = ny 
     Degrees2\Longitude = nx1
     Degrees2\Latitude  = ny1
+;    Debug "NW : " + StrD(Degrees1\Longitude) + " ; NE : " + StrD(Degrees2\Longitude)
     LatLon2Pixel(@Degrees1, @pos1)
     LatLon2Pixel(@Degrees2, @pos2)
     VectorFont(FontID(PBMap\Font), 10)
-    VectorSourceColor(RGBA(0, 0, 0,alpha))    
+    VectorSourceColor(RGBA(0, 0, 0, alpha))    
     ;draw latitudes
     For y = ny1 To ny
       Degrees1\Longitude = nx
@@ -797,7 +813,8 @@ Module PBMap
       DrawVectorText(StrD(y, 1))
     Next       
     ;draw longitudes
-    For x = nx To nx1
+    x = nx
+    Repeat
       Degrees1\Longitude = x
       Degrees1\Latitude  = ny
       LatLon2Pixel(@Degrees1, @pos1)
@@ -809,7 +826,8 @@ Module PBMap
       If realx > 180
         realx - 360
       EndIf
-    Next      
+      x = (x + 1)%360
+    Until x = nx1      
     StrokePath(1)  
   EndProcedure   
   
@@ -894,7 +912,7 @@ Module PBMap
   Procedure AddMarker(Latitude.d, Longitude.d, color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
     PBMap\Marker()\Location\Latitude = Latitude
-    PBMap\Marker()\Location\Longitude = Mod(Longitude + 360, 360)
+    PBMap\Marker()\Location\Longitude = Mod(Mod(Longitude, 360) + 360, 360)
     PBMap\Marker()\color = color
     PBMap\Marker()\CallBackPointer = CallBackPointer
     PBMap\Redraw = #True
@@ -1088,6 +1106,7 @@ Module PBMap
     ;Convert X, Y in tile.decimal into real pixels
     MouseX = PBMap\Drawing\Position\x * PBMap\TileSize + GadgetWidth(PBMap\Gadget) / 2 - x
     MouseY = PBMap\Drawing\Position\y * PBMap\TileSize + GadgetHeight(PBMap\Gadget) / 2 - y               
+    Debug PBMap\Position\x
     ;Cross-multiply to get the new center
     PBMap\Position\x = (OldPx * MouseX) / OldMx
     PBMap\Position\y = (OldPy * MouseY) / OldMy
@@ -1123,7 +1142,7 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
-    Protected Marker.Position, *Tile.Tile
+    Protected Marker.Position, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     PBMap\Moving = #False
     Select EventType()    
       Case #PB_EventType_MouseWheel
@@ -1139,12 +1158,7 @@ Module PBMap
         MouseX = PBMap\Position\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
         MouseY = PBMap\Position\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
         ;Clip MouseX to the map range (in X, the map is infinite)
-        If MouseX < 0
-          MouseX + Pow(2, PBMap\Zoom) * PBMap\TileSize
-        EndIf
-        MouseX = Mod(MouseX, Pow(2, PBMap\Zoom) * PBMap\TileSize)
-;         Debug "---"
-;         Debug "mx : " + Str(MouseX)
+        MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
         ForEach PBMap\Marker()                   
           LatLon2XY(@PBMap\Marker()\Location, @Marker)
           Marker\x * PBMap\TileSize
@@ -1173,7 +1187,7 @@ Module PBMap
           Else
             ;New move values
             ;PBMap\Position\x  - MouseX
-            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[
+            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\Position\x = PBMap\Position\x - MouseX
             If PBMap\Position\x < 0
               PBMap\Position\x + Pow(2, PBMap\Zoom) * PBMap\TileSize
@@ -1348,6 +1362,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
     PBMap::SetCallBackLocation(@UpdateLocation())
     PBMap::SetLocation(-36.81148, 175.08634,12)
+;    PBMap::SetLocation(0, 0)
     PBMap::SetMapServer("http://t1.openseamap.org/seamark/") ;add a special osm overlay map 
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
     PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())
@@ -1387,8 +1402,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1353
-; FirstLine = 1344
+; CursorPosition = 1364
+; FirstLine = 1352
 ; Folding = ----------
 ; EnableThread
 ; EnableXP
