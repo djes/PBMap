@@ -65,14 +65,14 @@ Module PBMap
     Latitude.d
   EndStructure
   
+  Structure PixelCoordinates
+    x.i
+    y.i
+  EndStructure
+  
   Structure Coordinates
     x.d
     y.d
-  EndStructure
-  
-  Structure PixelPosition
-    x.i
-    y.i
   EndStructure
   
   ;- Tile Structure
@@ -95,13 +95,13 @@ Module PBMap
   EndStructure
   
   Structure DrawingParameters
-    TilePosition.Coordinates
+    TileCoordinates.Coordinates
     Bounds.TileBounds 
     Canvas.i
     PBMapTileX.i
     PBMapTileY.i
     PBMapZoom.i
-    TargetLocation.GeographicCoordinates
+    GeographicCoordinates.GeographicCoordinates
     CenterX.i
     CenterY.i
     DeltaX.i
@@ -128,7 +128,7 @@ Module PBMap
   EndStructure
   
   Structure Marker
-    Location.GeographicCoordinates                       ; Marker latitude and longitude
+    GeographicCoordinates.GeographicCoordinates ; Marker latitude and longitude
     color.l                                 ; Marker color
     CallBackPointer.i                       ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
@@ -144,14 +144,14 @@ Module PBMap
     Gadget.i                                ; Canvas Gadget Id 
     Font.i                                  ; Font to uses when write on the map 
     Timer.i 
-    TargetLocation.GeographicCoordinates    ; Latitude and Longitude from focus point
+    GeographicCoordinates.GeographicCoordinates    ; Latitude and Longitude from focus point
     Drawing.DrawingParameters               ; Drawing parameters based on focus point
                                             ;
     CallBackLocation.i                      ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                   ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
                                             ;
-    PixelPosition.PixelPosition                  ; Actual focus point coords in pixels (global)
-    MoveStartingPoint.PixelPosition         ; Start mouse position coords when dragging the map
+    PixelCoordinates.PixelCoordinates             ; Actual focus point coords in pixels (global)
+    MoveStartingPoint.PixelCoordinates         ; Start mouse position coords when dragging the map
                                             ;
     Array ServerURL.s(0)                    ; Web URL ex: http://tile.openstreetmap.org/     
     NumberOfMapLayers.i                     ; The number of map tile layers;           
@@ -401,22 +401,22 @@ Module PBMap
   ;Warning, structures used in parameters are not tested
   Procedure TileXY2LatLon(*Coords.Coordinates, *Location.GeographicCoordinates, Zoom)
     Protected n.d = Pow(2.0, Zoom)
-    Protected LatitudeRad.d
     ;Ensures the longitude to be in the range [-180;180[
     *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
-;    *Location\Longitude  = Mod(*Coords\x / n * 360.0, 360.0)
-;    If *Location\Longitude < 0
-;      *Location\Longitude + 360
-;    EndIf
-;    *Location\Longitude  = Mod(*Location\Longitude, 360.0) - 180
-    LatitudeRad = ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n)))
-    *Location\Latitude = Degree(LatitudeRad)
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
   EndProcedure
   
-  Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelPosition, Zoom) 
+  Procedure Pixel2LatLon(*Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
+    Protected n.d = PBMap\TileSize * Pow(2.0, Zoom)
+    ;Ensures the longitude to be in the range [-180;180[
+    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+  EndProcedure
+  
+  Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected Pos.Coordinates
     Protected tilemax = Pow(2.0, Zoom)
-    Protected cx.d = PBMap\Drawing\CenterX, dpx.d = PBMap\Drawing\TilePosition\x
+    Protected cx.d = PBMap\Drawing\CenterX, dpx.d = PBMap\Drawing\TileCoordinates\x
     LatLon2TileXY(*Location, @Pos, Zoom)
     Protected px.d = Pos\x
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
@@ -433,7 +433,7 @@ Module PBMap
       ;Debug "c0"
       *Pixel\x = cx + (px - dpx) * PBMap\TileSize 
     EndIf
-    *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\TilePosition\y) * PBMap\TileSize 
+    *Pixel\y = PBMap\Drawing\CenterY + (Pos\y - PBMap\Drawing\TileCoordinates\y) * PBMap\TileSize 
      ;Debug "Longitude : " + StrD(*Location\Longitude) + " ; Pos : " + StrD(Pos\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\Position\x) + "/" + Str(tilemax) +
      ;      " ; XY : " + Str(*Pixel\x) + "," + Str(*Pixel\y)
   EndProcedure
@@ -456,7 +456,7 @@ Module PBMap
     ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
   EndProcedure
   
-   Procedure GetPixelCoordFromLocation(*Location.GeographicCoordinates, *Pixel.PixelPosition, Zoom) ; TODO to Optimize 
+   Procedure GetPixelCoordFromLocation(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) ; TODO to Optimize 
     Protected mapWidth.l    = Pow(2, Zoom + 8)
     Protected mapHeight.l   = Pow(2, Zoom + 8)
     Protected x1.l,y1.l
@@ -471,13 +471,13 @@ Module PBMap
 ;     Debug y1
     Protected x2.l, y2.l
     ; get x value
-    x2 = (PBMap\TargetLocation\Longitude+180)*(mapWidth/360)
+    x2 = (PBMap\GeographicCoordinates\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
-    latRad = PBMap\TargetLocation\Latitude*#PI/180;
+    latRad = PBMap\GeographicCoordinates\Latitude*#PI/180;
                                                   ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
-;     Debug "targetlocation"
+;     Debug "GeographicCoordinates"
 ;     Debug x1
 ;     Debug y1
     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
@@ -654,8 +654,8 @@ Module PBMap
   Procedure DrawTiles(*Drawing.DrawingParameters, Layer.i, alpha.i=255)
     ;DisableDebugger
     Protected x.i, y.i,kq.q
-    Protected tx = Int(*Drawing\TilePosition\x)          ;Don't forget the Int() !
-    Protected ty = Int(*Drawing\TilePosition\y)
+    Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
+    Protected ty = Int(*Drawing\TileCoordinates\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
     Protected px, py, img, tilex,tiley, key.s, CacheFile.s
@@ -702,11 +702,11 @@ Module PBMap
   ;     Else
   ;       MaxNbTile=GadgetHeight(PBMap\Gadget)/PBMap\TileSize
   ;     EndIf
-  ;     Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom)
+  ;     Protected Scale.d= 40075*Cos(Radian(PBMap\GeographicCoordinates\Latitude))/Pow(2,PBMap\Zoom)
   ;     Protected Limit.d=Scale*(MaxNbTile)*1.5
   ;     Debug "Cache cleaning"
   ;     ForEach PBMap\MemCache\Images()
-  ;         Protected Distance.d = HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\TargetLocation)
+  ;         Protected Distance.d = HaversineInKM(@PBMap\MemCache\Images()\Location, @PBMap\GeographicCoordinates)
   ;         Debug "Limit:"+StrD(Limit)+" Distance:"+StrD(Distance)
   ;         If Distance>Limit And IsImage(PBMap\MemCache\Images()\nImage) 
   ;           LockMutex(PBMap\MemCache\Images()\Mutex)          
@@ -741,7 +741,7 @@ Module PBMap
   Procedure DrawScale(*Drawing.DrawingParameters,x,y,alpha=80)
     ;TODO Add Option and function to display Scale on Map
     Protected sunit.s 
-    Protected Scale.d= 40075*Cos(Radian(PBMap\TargetLocation\Latitude))/Pow(2,PBMap\Zoom) / 2
+    Protected Scale.d= 40075*Cos(Radian(PBMap\GeographicCoordinates\Latitude))/Pow(2,PBMap\Zoom) / 2
     
     Select PBMap\Options\ScaleUnit 
       Case #SCALE_Nautical
@@ -762,10 +762,10 @@ Module PBMap
 
   Procedure DrawDegrees(*Drawing.DrawingParameters, alpha=192) 
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
-    Protected pos1.PixelPosition,pos2.PixelPosition,Degrees1.GeographicCoordinates,degrees2.GeographicCoordinates 
+    Protected pos1.PixelCoordinates,pos2.PixelCoordinates,Degrees1.GeographicCoordinates,degrees2.GeographicCoordinates 
     Protected realx
-    tx = Int(*Drawing\TilePosition\x)
-    ty = Int(*Drawing\TilePosition\y)
+    tx = Int(*Drawing\TileCoordinates\x)
+    ty = Int(*Drawing\TileCoordinates\y)
     nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
     ny = *Drawing\CenterY / PBMap\TileSize
     *Drawing\Bounds\NorthWest\x = tx-nx-1
@@ -834,13 +834,13 @@ Module PBMap
   EndProcedure
   
   Procedure  DrawTrack(*Drawing.DrawingParameters)
-    Protected Pixel.PixelPosition
+    Protected Pixel.PixelCoordinates
     Protected Location.GeographicCoordinates
     Protected km.f, memKm.i
     If ListSize(PBMap\track())>0
       ;Trace Track
       ForEach PBMap\track()
-        If *Drawing\TargetLocation\Latitude<>0 And *Drawing\TargetLocation\Longitude<>0
+        If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
           ;GetPixelCoordFromLocation(@PBMap\track(),@Pixel)
           LatLon2Pixel(@PBMap\track(), @Pixel, PBMap\Zoom)
           If ListIndex(PBMap\track())=0
@@ -894,8 +894,8 @@ Module PBMap
   ; Add a Marker To the Map
   Procedure AddMarker(Latitude.d, Longitude.d, color.l=-1, CallBackPointer.i = -1)
     AddElement(PBMap\Marker())
-    PBMap\Marker()\Location\Latitude = Latitude
-    PBMap\Marker()\Location\Longitude = Mod(Mod(Longitude, 360) + 360, 360)
+    PBMap\Marker()\GeographicCoordinates\Latitude = Latitude
+    PBMap\Marker()\GeographicCoordinates\Longitude = Mod(Mod(Longitude, 360) + 360, 360)
     PBMap\Marker()\color = color
     PBMap\Marker()\CallBackPointer = CallBackPointer
     PBMap\Redraw = #True
@@ -903,11 +903,11 @@ Module PBMap
     
   ; Draw all markers on the screen !
   Procedure  DrawMarkers(*Drawing.DrawingParameters)
-    Protected Pixel.PixelPosition
+    Protected Pixel.PixelCoordinates
     ForEach PBMap\Marker()
-      If PBMap\Marker()\Location\Latitude <> 0 And PBMap\Marker()\Location\Longitude <> 0
-        ;GetPixelCoordFromLocation(PBMap\Marker()\Location, @Pixel)
-        LatLon2Pixel(PBMap\Marker()\Location, @Pixel, PBMap\Zoom)
+      If PBMap\Marker()\GeographicCoordinates\Latitude <> 0 And PBMap\Marker()\GeographicCoordinates\Longitude <> 0
+        ;GetPixelCoordFromLocation(PBMap\Marker()\GeographicCoordinates, @Pixel)
+        LatLon2Pixel(PBMap\Marker()\GeographicCoordinates, @Pixel, PBMap\Zoom)
         If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
           If PBMap\Marker()\CallBackPointer > 0
             CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
@@ -928,12 +928,13 @@ Module PBMap
     ;Precalc some values
     *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
     *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
+    *Drawing\GeographicCoordinates\Latitude = PBMap\GeographicCoordinates\Latitude
+    *Drawing\GeographicCoordinates\Longitude = PBMap\GeographicCoordinates\Longitude
+    LatLon2TileXY(*Drawing\GeographicCoordinates, *Drawing\TileCoordinates, PBMap\Zoom)
     ;Pixel shift, aka position in the tile
-    Px = *Drawing\TilePosition\x : Py = *Drawing\TilePosition\y
+    Px = *Drawing\TileCoordinates\x : Py = *Drawing\TileCoordinates\y
     *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
     *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
-    *Drawing\TargetLocation\Latitude = PBMap\TargetLocation\Latitude
-    *Drawing\TargetLocation\Longitude = PBMap\TargetLocation\Longitude
     ;Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
@@ -972,27 +973,27 @@ Module PBMap
   EndProcedure
   
   Procedure.d Longitude(x)
-    Protected NewX.d = (PBMap\PixelPosition\x - GadgetWidth(PBMap\Gadget) / 2 + x) / PBMap\TileSize
+    Protected NewX.d = (PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + x) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ;double mod is to ensure the longitude to be in the range [-180;180[
     ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
   Procedure.d Latitude(y)
-    Protected NewY.d = (PBMap\PixelPosition\y - GadgetHeight(PBMap\Gadget) / 2 + y) / PBMap\TileSize
+    Protected NewY.d = (PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + y) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
   EndProcedure
   
   Procedure.d MouseLongitude()
-    Protected MouseX.d = (PBMap\PixelPosition\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
+    Protected MouseX.d = (PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ;double mod is to ensure the longitude to be in the range [-180;180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
   Procedure.d MouseLatitude()
-    Protected MouseY.d = (PBMap\PixelPosition\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)) / PBMap\TileSize
+    Protected MouseY.d = (PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * MouseY / n))))
   EndProcedure
@@ -1000,25 +1001,25 @@ Module PBMap
   Procedure SetLocation(latitude.d, longitude.d, zoom = 15, Mode.i = #PB_Absolute)
     Select Mode
       Case #PB_Absolute
-        PBMap\TargetLocation\Latitude = latitude
-        PBMap\TargetLocation\Longitude = longitude
+        PBMap\GeographicCoordinates\Latitude = latitude
+        PBMap\GeographicCoordinates\Longitude = longitude
         PBMap\Zoom = zoom
       Case #PB_Relative
-        PBMap\TargetLocation\Latitude  + latitude
-        PBMap\TargetLocation\Longitude + longitude
+        PBMap\GeographicCoordinates\Latitude  + latitude
+        PBMap\GeographicCoordinates\Longitude + longitude
         PBMap\Zoom + zoom
     EndSelect
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
-    LatLon2TileXY(@PBMap\TargetLocation, @PBMap\Drawing, PBMap\Zoom)
+    LatLon2TileXY(@PBMap\GeographicCoordinates, @PBMap\Drawing\TileCoordinates, PBMap\Zoom)
     ;Convert X, Y in tile.decimal into real pixels
-    PBMap\PixelPosition\x = PBMap\Drawing\TilePosition\x * PBMap\TileSize
-    PBMap\PixelPosition\y = PBMap\Drawing\TilePosition\y * PBMap\TileSize 
+    PBMap\PixelCoordinates\x = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
+    PBMap\PixelCoordinates\y = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize 
     PBMap\Drawing\PassNb = 1
     PBMap\Redraw = #True
     ;Drawing()
     If PBMap\CallBackLocation > 0
-      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
     EndIf 
   EndProcedure
   
@@ -1060,7 +1061,7 @@ Module PBMap
       Protected lat.d = centerY;
       SetLocation(lat,lon, Round(zoom,#PB_Round_Down))
     Else
-      SetLocation(PBMap\TargetLocation\Latitude, PBMap\TargetLocation\Longitude, 15)
+      SetLocation(PBMap\GeographicCoordinates\Latitude, PBMap\GeographicCoordinates\Longitude, 15)
     EndIf
   EndProcedure
   
@@ -1073,15 +1074,15 @@ Module PBMap
     EndSelect
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
-    LatLon2TileXY(@PBMap\TargetLocation, @PBMap\Drawing\TilePosition, PBMap\Zoom)
+    LatLon2TileXY(@PBMap\GeographicCoordinates, @PBMap\Drawing\TileCoordinates, PBMap\Zoom)
     ;Convert X, Y in tile.decimal into real pixels
-    PBMap\PixelPosition\X = PBMap\Drawing\TilePosition\x * PBMap\TileSize
-    PBMap\PixelPosition\Y = PBMap\Drawing\TilePosition\y * PBMap\TileSize
+    PBMap\PixelCoordinates\X = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
+    PBMap\PixelCoordinates\Y = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize
     ;First drawing
     PBMap\Redraw = #True
     ;Drawing()
     If PBMap\CallBackLocation > 0
-      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
     EndIf 
   EndProcedure
   
@@ -1110,7 +1111,7 @@ Module PBMap
     Protected CenterX = GadgetWidth(PBMap\Gadget) / 2, CenterY = GadgetHeight(PBMap\Gadget) / 2
 
     ;Fast and dirty code
-    OldPx = PBMap\PixelPosition\x : OldPy = PBMap\PixelPosition\y
+    OldPx = PBMap\PixelCoordinates\x : OldPy = PBMap\PixelCoordinates\y
     OldMx = OldPx + CenterX - x
     OldMy = OldPy + CenterY - y
     PBMap\Zoom = PBMap\Zoom + zoom
@@ -1119,10 +1120,10 @@ Module PBMap
     Protected MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
 
     ;Centered Zoom
-    LatLon2TileXY(@PBMap\TargetLocation, @PBMap\Drawing\TilePosition, PBMap\Zoom)
+    LatLon2TileXY(@PBMap\GeographicCoordinates, @PBMap\Drawing\TileCoordinates, PBMap\Zoom)
     ;Convert X, Y in tile.decimal into real pixels
-;     Px = PBMap\Drawing\TilePosition\x * PBMap\TileSize
-;     Py = PBMap\Drawing\TilePosition\y * PBMap\TileSize
+;     Px = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
+;     Py = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize
 ;     MouseX = Px + CenterX - x
 ;     MouseY = Py + CenterY - y
 ; 
@@ -1131,33 +1132,33 @@ Module PBMap
 ;     EndIf
 ; ;     Debug "------"        ;TODO bug when zoom near the wrap
 ; ;     Debug "Mx : " +StrD(MouseX)
-; ;     Debug PBMap\TilePosition\x
+; ;     Debug PBMap\TileCoordinates\x
 ;     ;Cross-multiply to get the new center
-;     PBMap\PixelPosition\x = (OldPx * MouseX) / OldMx
-;     PBMap\PixelPosition\y = (OldPy * MouseY) / OldMy
+;     PBMap\PixelCoordinates\x = (OldPx * MouseX) / OldMx
+;     PBMap\PixelCoordinates\y = (OldPy * MouseY) / OldMy
 ;     ;PBMap tile position in tile.decimal
-;     PBMap\Drawing\TilePosition\x = PBMap\PixelPosition\x / PBMap\TileSize
-;     PBMap\Drawing\TilePosition\y = PBMap\PixelPosition\y / PBMap\TileSize
+;     PBMap\Drawing\TileCoordinates\x = PBMap\PixelCoordinates\x / PBMap\TileSize
+;     PBMap\Drawing\TileCoordinates\y = PBMap\PixelCoordinates\y / PBMap\TileSize
 ;     PBMap\Drawing\PassNb = 1
-    ;TileXY2LatLon(@PBMap\Drawing\TilePosition, @PBMap\TargetLocation, PBMap\Zoom)
-    LatLon2Pixel(@PBMap\TargetLocation, @PBMap\PixelPosition, PBMap\Zoom)
+    ;TileXY2LatLon(@PBMap\Drawing\TileCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
+    LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
     ;Start drawing
     PBMap\Redraw = #True
     ;Drawing()
     ;If CallBackLocation send Location to function
     If PBMap\CallBackLocation > 0
-      CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
     EndIf      
   EndProcedure  
   
   Procedure.d GetLatitude()
-;    ProcedureReturn 0-(90-Mod((PBMap\TargetLocation\Latitude+90),180))
-    ProcedureReturn PBMap\TargetLocation\Latitude
+;    ProcedureReturn 0-(90-Mod((PBMap\GeographicCoordinates\Latitude+90),180))
+    ProcedureReturn PBMap\GeographicCoordinates\Latitude
   EndProcedure
   
   Procedure.d GetLongitude()
-;    ProcedureReturn 0-(180-Mod((PBMap\TargetLocation\Longitude+180),360))   
-    ProcedureReturn PBMap\TargetLocation\Longitude
+;    ProcedureReturn 0-(180-Mod((PBMap\GeographicCoordinates\Longitude+180),360))   
+    ProcedureReturn PBMap\GeographicCoordinates\Longitude
   EndProcedure
   
   Procedure.i GetZoom()
@@ -1168,7 +1169,7 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
-    Protected Marker.Coordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
+    Protected MarkerCoords.Coordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     PBMap\Moving = #False
     Select EventType()    
       Case #PB_EventType_MouseWheel
@@ -1177,20 +1178,20 @@ Module PBMap
           SetZoomOnPosition(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
         Else
           ;Absolute zoom (centered on the center of the map)
-          SetZoom(GetGadgetAttribute(PBMap\Gadget,#PB_Canvas_WheelDelta), #PB_Relative)
+          SetZoom(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
         EndIf        
       Case #PB_EventType_LeftButtonDown
         ;Check if we select a marker
-        MouseX = PBMap\PixelPosition\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
-        MouseY = PBMap\PixelPosition\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+        MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+        MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
         ;Clip MouseX to the map range (in X, the map is infinite)
         MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
         ForEach PBMap\Marker()                   
-          LatLon2TileXY(@PBMap\Marker()\Location, @Marker, PBMap\Zoom)
-          Marker\x * PBMap\TileSize
-          Marker\y * PBMap\TileSize 
-          ;Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\TilePosition\x) 
-          If Distance(Marker\x, Marker\y, MouseX, MouseY) < 8
+          LatLon2TileXY(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+          MarkerCoords\x * PBMap\TileSize
+          MarkerCoords\y * PBMap\TileSize 
+          ;Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\TileCoordinates\x) 
+          If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
             PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
             Break
           EndIf
@@ -1206,27 +1207,24 @@ Module PBMap
           ;Move marker
           If PBMap\EditMarkerIndex > -1
             SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
-            LatLon2TileXY(@PBMap\Marker()\Location, @Marker, PBMap\Zoom)
-            Marker\x + MouseX / PBMap\TileSize
-            Marker\y + MouseY / PBMap\TileSize
-            TileXY2LatLon(@Marker, @PBMap\Marker()\Location, PBMap\Zoom)                      
+            LatLon2TileXY(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+            MarkerCoords\x + MouseX / PBMap\TileSize
+            MarkerCoords\y + MouseY / PBMap\TileSize
+            TileXY2LatLon(@MarkerCoords, @PBMap\Marker()\GeographicCoordinates, PBMap\Zoom)                      
           Else
             ;New move values
             ;PBMap\Position\x  - MouseX
             ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
-            PBMap\PixelPosition\x - MouseX
-            PBMap\PixelPosition\x = Mod(Mod(PBMap\PixelPosition\x, MapWidth) + MapWidth, MapWidth)
-            PBMap\PixelPosition\y - MouseY
-            ;PBMap tile position in tile.decimal
-            PBMap\Drawing\TilePosition\x = PBMap\PixelPosition\x / PBMap\TileSize
-            PBMap\Drawing\TilePosition\y = PBMap\PixelPosition\y / PBMap\TileSize
-            PBMap\Drawing\PassNb = 1
-            TileXY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation, PBMap\Zoom)
+            PBMap\PixelCoordinates\x - MouseX
+            PBMap\PixelCoordinates\x = Mod(Mod(PBMap\PixelCoordinates\x, MapWidth) + MapWidth, MapWidth)
+            PBMap\PixelCoordinates\y - MouseY
+            Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
             ;If CallBackLocation send Location to function
             If PBMap\CallBackLocation > 0
-              CallFunctionFast(PBMap\CallBackLocation, @PBMap\TargetLocation)
+              CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
             EndIf 
           EndIf
+          PBMap\Drawing\PassNb = 1
           PBMap\Redraw = #True
           PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
           PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
@@ -1236,10 +1234,10 @@ Module PBMap
         If PBMap\EditMarkerIndex > -1
           PBMap\EditMarkerIndex = -1
         Else ;Move Map
-          PBMap\Drawing\TilePosition\x = PBMap\PixelPosition\x / PBMap\TileSize
-          PBMap\Drawing\TilePosition\y = PBMap\PixelPosition\y / PBMap\TileSize
-          MyDebug("PBMap\Drawing\TilePosition\x " + Str(PBMap\Drawing\TilePosition\x) + " ; PBMap\Drawing\TilePosition\y " + Str(PBMap\Drawing\TilePosition\y) )
-          TileXY2LatLon(@PBMap\Drawing, @PBMap\TargetLocation, PBMap\Zoom)
+;           PBMap\Drawing\TileCoordinates\x = PBMap\PixelCoordinates\x / PBMap\TileSize
+;           PBMap\Drawing\TileCoordinates\y = PBMap\PixelCoordinates\y / PBMap\TileSize
+;           MyDebug("PBMap\Drawing\TileCoordinates\x " + Str(PBMap\Drawing\TileCoordinates\x) + " ; PBMap\Drawing\TileCoordinates\y " + Str(PBMap\Drawing\TileCoordinates\y) )
+;           TileXY2LatLon(@PBMap\Drawing\TileCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
           PBMap\Redraw = #True
         EndIf
       Case #PB_MAP_REDRAW
@@ -1425,9 +1423,9 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 430
-; FirstLine = 415
-; Folding = ----------
+; CursorPosition = 408
+; FirstLine = 397
+; Folding = -----------
 ; EnableThread
 ; EnableXP
 ; EnableUnicode
