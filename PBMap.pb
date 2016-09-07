@@ -419,7 +419,7 @@ Module PBMap
     Protected LatRad.d = Radian(*Location\Latitude)
     *Pixel\x = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
     *Pixel\y = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
-  EndProcedure  
+  EndProcedure   
   
   ;Lat Lon coordinates 2 pixel relative to the center of view
   Procedure LatLon2PixelRel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
@@ -430,7 +430,7 @@ Module PBMap
     Protected px = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
     Protected py = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
-    If dpx - px > tilemax / 2
+    If dpx - px >= tilemax / 2
       ;Debug "c1"
       *Pixel\x = cx + (px - dpx + tilemax)
     ElseIf px - dpx > tilemax / 2
@@ -1116,34 +1116,27 @@ Module PBMap
     Protected MouseX.d, MouseY.d
     Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d, Px.d, Py.d
     Protected CenterX = GadgetWidth(PBMap\Gadget) / 2, CenterY = GadgetHeight(PBMap\Gadget) / 2
-    ;Fast and dirty code
+    Protected MapWidth = Pow(2.0, PBMap\Zoom) * PBMap\TileSize  
+    LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
     OldPx = PBMap\PixelCoordinates\x : OldPy = PBMap\PixelCoordinates\y
     OldMx = OldPx + CenterX - x
     OldMy = OldPy + CenterY - y
+    ;*** First : Zoom
     PBMap\Zoom = PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
-    LatLon2TileXY(@PBMap\GeographicCoordinates, @PBMap\Drawing\TileCoordinates, PBMap\Zoom)
-    ;Convert X, Y in tile.decimal into real pixels
-    PBMap\PixelCoordinates\X = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
-    PBMap\PixelCoordinates\Y = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize
-    ;Convert X, Y in tile.decimal into real pixels
-    Px = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
-    Py = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize
-    MouseX = Px + CenterX - x
-    MouseY = Py + CenterY - y
-    ;Cross-multiply to get the new center
-    PBMap\PixelCoordinates\x = (OldPx * MouseX) / OldMx
-    PBMap\PixelCoordinates\y = (OldPy * MouseY) / OldMy
-    ;PBMap tile position in tile.decimal
-    PBMap\Drawing\TileCoordinates\x = PBMap\PixelCoordinates\x / PBMap\TileSize
-    PBMap\Drawing\TileCoordinates\y = PBMap\PixelCoordinates\y / PBMap\TileSize
-    PBMap\Drawing\PassNb = 1
-    TileXY2LatLon(@PBMap\Drawing\TileCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
-    ;LatLon2PixelRel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+    LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+    ;***
+    Debug OldMx - OldPx
+    MouseX = PBMap\PixelCoordinates\X + CenterX - x
+    MouseY = PBMap\PixelCoordinates\Y + CenterY - y
+    ;Cross-multiply to get the new view center
+    PBMap\PixelCoordinates\x = (OldPx * MouseX) / OldMx   
+    PBMap\PixelCoordinates\y = (OldPy * MouseY) / OldMy     
+    Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
     ;Start drawing
+    PBMap\Drawing\PassNb = 1
     PBMap\Redraw = #True
-    ;Drawing()
     ;If CallBackLocation send Location to function
     If PBMap\CallBackLocation > 0
       CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
@@ -1423,8 +1416,8 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1117
-; FirstLine = 1108
+; CursorPosition = 1129
+; FirstLine = 1115
 ; Folding = -----------
 ; EnableThread
 ; EnableXP
