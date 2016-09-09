@@ -531,9 +531,7 @@ Module PBMap
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
     If FileSize(CacheFile) > 0
-      ; OnErrorCall(@LoadErrorHandler())
       nImage = LoadImage(#PB_Any, CacheFile)
-      ; OnErrorDefault()
       If IsImage(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
@@ -574,7 +572,7 @@ Module PBMap
         Else
           MyDebug("Can't catch image loaded from web " + TileURL, 3)
           nImage = -1
-          ;ShowMemoryViewer(*Buffer, MemorySize(*Buffer))
+
         EndIf
       Else
         MyDebug(" Problem loading from web " + TileURL, 3)
@@ -1209,7 +1207,7 @@ Module PBMap
           Else
             ;New move values
             LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom) ;This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
-                                                                                            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
+            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\PixelCoordinates\x - MouseX
             PBMap\PixelCoordinates\x = Mod(Mod(PBMap\PixelCoordinates\x, MapWidth) + MapWidth, MapWidth)
             PBMap\PixelCoordinates\y - MouseY
@@ -1426,7 +1424,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1411
+; CursorPosition = 1209
+; FirstLine = 1381
 ; Folding = -----------
 ; EnableThread
 ; EnableXP
