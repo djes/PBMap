@@ -460,9 +460,7 @@ Module PBMap
     EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (py - PBMap\PixelCoordinates\y) 
   EndProcedure
-  
-  
-  
+   
   ; HaversineAlgorithm 
   ; http://andrew.hedges.name/experiments/haversine/
   Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
@@ -485,26 +483,17 @@ Module PBMap
     Protected mapWidth.l    = Pow(2, Zoom + 8)
     Protected mapHeight.l   = Pow(2, Zoom + 8)
     Protected x1.l,y1.l
-    ; get x value
     x1 = (*Location\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     Protected latRad.d = *Location\Latitude*#PI/180;
     Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
     y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
-                                                    ;     Debug "location"
-                                                    ;     Debug x1
-                                                    ;     Debug y1
     Protected x2.l, y2.l
-    ; get x value
     x2 = (PBMap\GeographicCoordinates\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
     latRad = PBMap\GeographicCoordinates\Latitude*#PI/180;
-                                                         ; get y value
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
     y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
-                                                   ;     Debug "GeographicCoordinates"
-                                                   ;     Debug x1
-                                                   ;     Debug y1
     *Pixel\x=GadgetWidth(PBMap\Gadget)/2  - (x2-x1)
     *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
   EndProcedure
@@ -538,11 +527,7 @@ Module PBMap
       Next 
     EndIf
   EndProcedure
-  
-  ;   Procedure LoadErrorHandler()
-  ;     MessageRequester("Error", "")
-  ;   EndProcedure
-  
+   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
     If FileSize(CacheFile) > 0
@@ -579,16 +564,6 @@ Module PBMap
       If *Buffer
         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
         If IsImage(nImage)
-          ; Debug "url: " + TileURL 
-          ; Debug "cache file: " + CacheFile 
-          ; timg = LoadImage(#PB_Any,CacheFile)
-          ; If timg 
-          ;   StartDrawing(ImageOutput(timg)) 
-          ;   DrawImage(ImageID(nimage)) 
-          ;   StopDrawing() 
-          ;   SaveImage(timg, CacheFile, #PB_ImagePlugin_PNG)    
-          ;   FreeImage(timg)  
-          ; Else 
           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32)
             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
           Else
@@ -764,18 +739,15 @@ Module PBMap
   EndProcedure
   
   Procedure DrawScale(*Drawing.DrawingParameters,x,y,alpha=80)
-    ;TODO Add Option and function to display Scale on Map
     Protected sunit.s 
-    Protected Scale.d= 40075*Cos(Radian(PBMap\GeographicCoordinates\Latitude))/Pow(2,PBMap\Zoom) / 2
-    
+    Protected Scale.d= 40075*Cos(Radian(PBMap\GeographicCoordinates\Latitude))/Pow(2,PBMap\Zoom) / 2   
     Select PBMap\Options\ScaleUnit 
       Case #SCALE_Nautical
         Scale * 0.539957 
         sunit = " Nm"
       Case #SCALE_KM; 
         sunit = " Km"
-    EndSelect     
-    
+    EndSelect
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0,alpha))
     MovePathCursor(x,y)
@@ -1333,8 +1305,6 @@ CompilerIf #PB_Compiler_IsMainFile
   EndStructure
   
   Procedure UpdateLocation(*Location.Location)
-    ;    SetGadgetText(#String_0, StrD(0-(90-Mod((*Location\Latitude+90),180))))
-    ;    SetGadgetText(#String_1, StrD(0-(180-Mod((*Location\Longitude+180),360))))
     SetGadgetText(#String_0, StrD(*Location\Latitude))
     SetGadgetText(#String_1, StrD(*Location\Longitude))
     ProcedureReturn 0
@@ -1456,8 +1426,7 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 310
-; FirstLine = 291
+; CursorPosition = 1411
 ; Folding = -----------
 ; EnableThread
 ; EnableXP
