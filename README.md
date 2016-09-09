@@ -11,4 +11,5 @@ http://www.purebasic.fr/french/viewtopic.php?f=3&t=16160 (french)
 Contributors :
 Thyphoon
 djes
+Idle
 Progi1984
