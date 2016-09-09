@@ -107,7 +107,6 @@ Module PBMap
     DeltaX.i
     DeltaY.i
     Dirty.i
-    PassNB.i
     End.i
   EndStructure  
   
@@ -1025,7 +1024,6 @@ Module PBMap
     ;Convert X, Y in tile.decimal into real pixels
     PBMap\PixelCoordinates\x = PBMap\Drawing\TileCoordinates\x * PBMap\TileSize
     PBMap\PixelCoordinates\y = PBMap\Drawing\TileCoordinates\y * PBMap\TileSize 
-    PBMap\Drawing\PassNb = 1
     PBMap\Redraw = #True
     ;Drawing()
     If PBMap\CallBackLocation > 0
@@ -1111,31 +1109,45 @@ Module PBMap
   EndProcedure   
   
   ;Zoom on x, y position relative to the canvas gadget
-  ;TODO
   Procedure SetZoomOnPosition(x, y, zoom)
     Protected MouseX.d, MouseY.d
     Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d, Px.d, Py.d
-    Protected CenterX = GadgetWidth(PBMap\Gadget) / 2, CenterY = GadgetHeight(PBMap\Gadget) / 2
-    Protected MapWidth = Pow(2.0, PBMap\Zoom) * PBMap\TileSize  
-    LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-    OldPx = PBMap\PixelCoordinates\x : OldPy = PBMap\PixelCoordinates\y
-    OldMx = OldPx + CenterX - x
-    OldMy = OldPy + CenterY - y
+    Protected CenterX = GadgetWidth(PBMap\Gadget) / 2
+    Protected CenterY = GadgetHeight(PBMap\Gadget) / 2
+    x - CenterX 
+    y - CenterY
     ;*** First : Zoom
-    PBMap\Zoom = PBMap\Zoom + zoom
+    PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
     LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-    ;***
-    Debug OldMx - OldPx
-    MouseX = PBMap\PixelCoordinates\X + CenterX - x
-    MouseY = PBMap\PixelCoordinates\Y + CenterY - y
-    ;Cross-multiply to get the new view center
-    PBMap\PixelCoordinates\x = (OldPx * MouseX) / OldMx   
-    PBMap\PixelCoordinates\y = (OldPy * MouseY) / OldMy     
+    If Zoom = 1
+      PBMap\PixelCoordinates\x + x
+      PBMap\PixelCoordinates\y + y
+    ElseIf zoom = -1
+      PBMap\PixelCoordinates\x - x/2
+      PBMap\PixelCoordinates\y - y/2
+    EndIf
     Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
     ;Start drawing
-    PBMap\Drawing\PassNb = 1
+    PBMap\Redraw = #True
+    ;If CallBackLocation send Location to function
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
+    EndIf      
+  EndProcedure  
+  
+  ;Go to x, y position relative to the canvas gadget
+  Procedure GotoPixelRel(x, y)
+    Protected CenterX = GadgetWidth(PBMap\Gadget) / 2
+    Protected CenterY = GadgetHeight(PBMap\Gadget) / 2
+    x - CenterX 
+    y - CenterY
+    LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+    PBMap\PixelCoordinates\x + x
+    PBMap\PixelCoordinates\y + y
+    Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
+    ;Start drawing
     PBMap\Redraw = #True
     ;If CallBackLocation send Location to function
     If PBMap\CallBackLocation > 0
@@ -1164,6 +1176,8 @@ Module PBMap
     Protected MarkerCoords.Coordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     PBMap\Moving = #False
     Select EventType()    
+      Case #PB_EventType_LeftDoubleClick
+        GotoPixelRel(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY))
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
           ;Relative zoom (centered on the mouse)
@@ -1217,7 +1231,6 @@ Module PBMap
               CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
             EndIf 
           EndIf
-          PBMap\Drawing\PassNb = 1
           PBMap\Redraw = #True
           PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
           PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
@@ -1416,8 +1429,7 @@ CompilerIf #PB_Compiler_IsMainFile
     
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1129
-; FirstLine = 1115
+; CursorPosition = 8
 ; Folding = -----------
 ; EnableThread
 ; EnableXP
