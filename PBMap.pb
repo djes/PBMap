@@ -217,7 +217,7 @@ Module PBMap
   
   ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
-    MessageRequester("MapGadget", msg, #PB_MessageRequester_Ok)
+    MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
     End
   EndProcedure
   
@@ -408,9 +408,7 @@ Module PBMap
     EndIf
     PreferenceGroup("URL")
     PBMap\Options\DefaultOSMServer = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
-    If PBMap\Options\DefaultOSMServer <> "" 
-      AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
-    EndIf
+
     PreferenceGroup("PATHS")
     PBMap\Options\HDDCachePath = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory())
     PreferenceGroup("OPTIONS")   
@@ -435,7 +433,10 @@ Module PBMap
     PBMap\Window = Window
     PBMap\Timer = 1
     PBMap\Mode = #MODE_DEFAULT
-    LoadOptions()
+    LoadOptions()    
+    If PBMap\Options\DefaultOSMServer <> "" 
+      AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
+    EndIf
     curl_global_init(#CURL_GLOBAL_WIN32)
     TechnicalImagesCreation()
     SetLocation(0, 0)
@@ -443,6 +444,14 @@ Module PBMap
   
   Procedure.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
     Protected *Ptr = AddElement(PBMap\Layers())
+    Protected DirName.s = PBMap\Options\HDDCachePath + LayerName + "\"
+    If FileSize(DirName) <> -2
+      If CreateDirectory(DirName) = #False ; Creates a directory based on the layer name
+        Error("Can't create the following cache directory : " + DirName)
+      Else
+        MyDebug(DirName + " successfully created", 4)
+      EndIf
+    EndIf
     If *Ptr
       PBMap\Layers()\Name = LayerName
       PBMap\Layers()\Order = Order
@@ -651,43 +660,38 @@ Module PBMap
     Protected FileSize.i, timg 
     If PBMap\Options\Proxy
       FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-      If FileSize > 0
-        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-        nImage = GetTileFromHDD(CacheFile)
-      Else
-        MyDebug("Problem loading from web " + TileURL, 3)
-      EndIf
     Else
-      FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile)
-      If FileSize > 0
-        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-        nImage = GetTileFromHDD(CacheFile)
-      Else
-        MyDebug("Problem loading from web " + TileURL, 3)
-      EndIf
-      ; **** PLEASE KEEP THIS CODE
-      ; I'm (djes) now using Curl only as the catchimage/saveimage is a double operation (uncompress/recompress PNG)
-      ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 2 bits PNG bug)
-      ; More than that, the original Receive library is not Proxy enabled.
-      ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-      ;       If *Buffer
-      ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-      ;         If IsImage(nImage)
-      ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
-      ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-      ;           Else
-      ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
-      ;           EndIf
-      ;           FreeMemory(*Buffer)
-      ;         Else
-      ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
-      ;           nImage = -1
-      ;         EndIf
-      ;       Else
-      ;         MyDebug(" Problem loading from web " + TileURL, 3)
-      ;       EndIf
-      ; ****
+      FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile)      
     EndIf
+    If FileSize > 0
+      MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+      nImage = GetTileFromHDD(CacheFile)
+    Else
+      MyDebug("Problem loading from web " + TileURL, 3)
+    EndIf
+    
+    ; **** PLEASE KEEP THIS CODE
+    ; I'm (djes) now using Curl only as the catchimage/saveimage is a double operation (uncompress/recompress PNG)
+    ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 2 bits PNG bug)
+    ; More than that, the original Receive library is not Proxy enabled.
+    ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
+    ;       If *Buffer
+    ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
+    ;         If IsImage(nImage)
+    ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
+    ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+    ;           Else
+    ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
+    ;           EndIf
+    ;           FreeMemory(*Buffer)
+    ;         Else
+    ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
+    ;           nImage = -1
+    ;         EndIf
+    ;       Else
+    ;         MyDebug(" Problem loading from web " + TileURL, 3)
+    ;       EndIf
+    ; ****
     ProcedureReturn nImage
   EndProcedure
   
@@ -748,7 +752,7 @@ Module PBMap
           \CacheFile = CacheFile
           \ServerURL = ServerURL
           \RetryNb = 5
-          \nImage = -1
+          \nImage = -1         
           MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
           \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
         EndWith  
@@ -780,9 +784,24 @@ Module PBMap
         EndIf
         tiley = ty + y 
         If tiley >= 0 And tiley < tilemax
-          kq = (PBMap\zoom << 8) | (tilex << 16) | (tiley << 36)
+          kq = (PBMap\Zoom << 8) | (tilex << 16) | (tiley << 36)
           key = PBMap\Layers()\Name + Str(kq)
-          CacheFile = PBMap\Options\HDDCachePath + key + ".png"
+          ; Creates a directory based on the zoom
+          Protected DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name + "\" + Str(PBMap\Zoom)
+          If FileSize(DirName) <> -2
+            If CreateDirectory(DirName) = #False 
+              Error("Can't create the following cache directory : " + DirName)
+            EndIf
+          EndIf          
+          ; Creates a directory based on x
+          DirName.s + "\" + Str(tilex)
+          If FileSize(DirName) <> -2
+            If CreateDirectory(DirName) = #False 
+              Error("Can't create the following cache directory : " + DirName)
+            EndIf
+          EndIf
+          ; Tile cache name based on y
+          CacheFile = DirName + "\" + Str(tiley) + ".png" 
           img = GetTile(key, CacheFile, px, py, tilex, tiley, PBMap\Layers()\ServerURL)
           If img <> -1  
             MovePathCursor(px, py)
@@ -1558,8 +1577,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1515
-; FirstLine = 1485
+; CursorPosition = 450
+; FirstLine = 419
 ; Folding = ------------
 ; EnableThread
 ; EnableXP
