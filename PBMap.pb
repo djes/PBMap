@@ -61,6 +61,8 @@ DeclareModule PBMap
   Declare Refresh()
   Declare.d GetLatitude()
   Declare.d GetLongitude()
+  Declare.d MouseLatitude()
+  Declare.d MouseLongitude()
   Declare.i GetZoom()
 EndDeclareModule
 
@@ -1418,6 +1420,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_LoadGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
+    #Gdt_Degrees
   EndEnumeration
   
   Structure Location
@@ -1465,6 +1468,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     PBMap::Refresh()
   EndProcedure
   
@@ -1480,8 +1484,8 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
     ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
     TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
-    ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")      : SetGadgetFont(#Button_4, FontID(1)) 
-    ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")      : SetGadgetFont(#Button_5, FontID(1)) 
+    ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
+    ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
     TextGadget(#Text_3, 530, 230, 60, 15, "Latitude : ")
     StringGadget(#String_0, 600, 230, 90, 20, "")
     TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
@@ -1489,10 +1493,11 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "OpenSeaMap")
+    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees")
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
-    Define OpenSeaMap = 0
+    Define OpenSeaMap = 0, Degrees = 1
     
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
@@ -1500,11 +1505,11 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("ShowDebugInfos", "1")
     PBMap::SetOption("ShowScale", "1")
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
-    PBMap::SetCallBackMainPointer(@MainPointer()) ;To change the Main Pointer
-    PBMap::SetCallBackLocation(@UpdateLocation())
-    ;PBMap::SetLocation(-36.81148, 175.08634,12)
-    PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)
-    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())
+    PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
+    PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
+    PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
+    PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)                  ; To change the scale unit
+    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())  ; To add a marker
     
     Repeat
       Event = WaitWindowEvent()
@@ -1532,12 +1537,16 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::AddMarker(ValD(GetGadgetText(#String_0)), ValD(GetGadgetText(#String_1)), RGBA(Random(255), Random(255), Random(255), 255), @MyMarker())
             Case #Gdt_AddOpenseaMap
               If OpenSeaMap = 0
-                OpenSeaMap = PBMap::AddMapServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ;add a special osm overlay map
+                OpenSeaMap = PBMap::AddMapServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
               Else
                 PBMap::DeleteLayer(OpenSeaMap)
                 OpenSeaMap = 0
               EndIf
               PBMAP::Refresh()
+            Case #Gdt_Degrees
+              Degrees = 1 - Degrees
+              PBMap::SetOption("ShowDegrees", Str(Degrees))
+              PBMap::Refresh()
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -1549,8 +1558,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1499
-; FirstLine = 1484
+; CursorPosition = 1515
+; FirstLine = 1485
 ; Folding = ------------
 ; EnableThread
 ; EnableXP
