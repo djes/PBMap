@@ -119,7 +119,7 @@ Module PBMap
     Dirty.i
     End.i
   EndStructure  
-    
+  
   Structure ImgMemCach
     nImage.i
     *Tile.Tile
@@ -137,7 +137,8 @@ Module PBMap
   
   Structure Marker
     GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
-    color.l                                        ; Marker color
+    Color.l                                        ; Marker color
+    Selected.i                                     ; Is the marker selected ?
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
   
@@ -163,7 +164,7 @@ Module PBMap
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
   EndStructure
-    
+  
   ;-PBMap Structure
   Structure PBMap
     Window.i                                       ; Parent Window
@@ -173,34 +174,34 @@ Module PBMap
     
     GeographicCoordinates.GeographicCoordinates    ; Latitude and Longitude from focus point
     Drawing.DrawingParameters                      ; Drawing parameters based on focus point
-
+    
     CallBackLocation.i                             ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                          ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-
+    
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
-                    
+    
     List Layers.Layer()                            ; 
     
     ZoomMin.i                                      ; Min Zoom supported by server
     ZoomMax.i                                      ; Max Zoom supported by server
     Zoom.i                                         ; Current zoom
     TileSize.i                                     ; Tile size downloaded on the server ex : 256
-
+    
     MemCache.TileMemCach                           ; Images in memory cache
     
     Mode.i                                         ; User mode : 0 (default)->hand (moving map) and select markers, 1->hand, 2->select only (moving objects), 3->drawing (todo) 
     Redraw.i
     Moving.i
     Dirty.i                                        ; To signal that drawing need a refresh
-   
+    
     List track.GeographicCoordinates()             ; To display a GPX track
     List Marker.Marker()                           ; To diplay marker
-    EditMarkerIndex.l
-
+    EditMarker.l
+    
     ImgLoading.i                                   ; Image Loading Tile
     ImgNothing.i                                   ; Image Nothing Tile
-
+    
     Options.option                                 ; Options
     
   EndStructure
@@ -315,18 +316,18 @@ Module PBMap
     EndIf
   EndProcedure  
   
-    ;TODO : best cleaning of the string from bad behaviour
+  ;TODO : best cleaning of the string from bad behaviour
   Procedure.s StringCheck(String.s)
     ProcedureReturn Trim(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(String, Chr(0)), Chr(32)), Chr(39)), Chr(33)), Chr(34)), "@"), "/"), "\"), "$"), "%"))
   EndProcedure
   
   Macro SelBool(Name)
-        Select UCase(Value)
-          Case "0", "FALSE", "DISABLE"
-            PBMap\Options\Name = #False
-          Default
-            PBMap\Options\Name = #True
-        EndSelect
+    Select UCase(Value)
+      Case "0", "FALSE", "DISABLE"
+        PBMap\Options\Name = #False
+      Default
+        PBMap\Options\Name = #True
+    EndSelect
   EndMacro
   
   Procedure SetOption(Option.s, Value.s)
@@ -409,7 +410,7 @@ Module PBMap
     EndIf
     PreferenceGroup("URL")
     PBMap\Options\DefaultOSMServer = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
-
+    
     PreferenceGroup("PATHS")
     PBMap\Options\HDDCachePath = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory())
     PreferenceGroup("OPTIONS")   
@@ -418,7 +419,7 @@ Module PBMap
     PBMap\Options\TimerInterval = 20
     ClosePreferences()
   EndProcedure
-
+  
   Procedure InitPBMap(Window)
     Protected Result.i
     If Verbose
@@ -429,8 +430,7 @@ Module PBMap
     PBMap\MoveStartingPoint\x = - 1
     PBMap\TileSize = 256
     PBMap\Dirty = #False
-    ;PBMap\TileThreadMutex = CreateMutex()
-    PBMap\EditMarkerIndex = -1                      ;Initialised with "no marker selected"
+    PBMap\EditMarker = #False
     PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
     PBMap\Window = Window
     PBMap\Timer = 1
@@ -571,7 +571,7 @@ Module PBMap
     EndIf
     *Pixel\y = PBMap\Drawing\CenterY + (py - PBMap\PixelCoordinates\y) 
   EndProcedure
-   
+  
   ; HaversineAlgorithm 
   ; http://andrew.hedges.name/experiments/haversine/
   Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
@@ -1030,7 +1030,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure DrawMarker(x.i, y.i, color.l = 0)
+  Procedure DrawMarker(x.i, y.i, color.l = 0, Selected = #False)
     VectorSourceColor(color)
     MovePathCursor(x, y)
     AddPathLine(-8, -16, #PB_Path_Relative)
@@ -1040,8 +1040,14 @@ Module PBMap
     ;ClipPath(#PB_Path_Preserve)
     AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
     VectorSourceColor(color)
-    FillPath(#PB_Path_Preserve):VectorSourceColor(color);RGBA(0, 0, 0, 255)) 
-    StrokePath(1)
+    FillPath(#PB_Path_Preserve)
+    If Selected
+      VectorSourceColor(RGBA(255, 255, 0, 255))
+      StrokePath(3)
+    Else
+      VectorSourceColor(color)
+      StrokePath(1)
+    EndIf
   EndProcedure
   
   ; Add a Marker To the Map
@@ -1055,7 +1061,7 @@ Module PBMap
   EndProcedure
   
   ; Draw all markers on the screen !
-  Procedure  DrawMarkers(*Drawing.DrawingParameters)
+  Procedure DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
     ForEach PBMap\Marker()
       If PBMap\Marker()\GeographicCoordinates\Latitude <> 0 And PBMap\Marker()\GeographicCoordinates\Longitude <> 0
@@ -1063,9 +1069,9 @@ Module PBMap
         LatLon2PixelRel(PBMap\Marker()\GeographicCoordinates, @Pixel, PBMap\Zoom)
         If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
           If PBMap\Marker()\CallBackPointer > 0
-            CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y)
+            CallFunctionFast(PBMap\Marker()\CallBackPointer, Pixel\X, Pixel\Y, PBMap\Marker()\Selected)
           Else
-            DrawMarker(Pixel\X, Pixel\Y, PBMap\Marker()\color)
+            DrawMarker(Pixel\X, Pixel\Y, PBMap\Marker()\Color, PBMap\Marker()\Selected)
           EndIf
         EndIf 
       EndIf 
@@ -1330,7 +1336,7 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
-    Protected MarkerCoords.Coordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
+    Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     Protected key.s
     PBMap\Moving = #False
     Select EventType()    
@@ -1353,12 +1359,8 @@ Module PBMap
         If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
           ;Check if we select a marker
           ForEach PBMap\Marker()                   
-            LatLon2TileXY(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom) ;This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
-            MarkerCoords\x * PBMap\TileSize
-            MarkerCoords\y * PBMap\TileSize 
-            ;Debug "Pos : " + StrD(Marker\x) + " ; Drawing pos : " + StrD(PBMap\Drawing\TileCoordinates\x) 
-            If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
-              PBMap\EditMarkerIndex = ListIndex(PBMap\Marker())  
+            If PBMap\Marker()\Selected
+              PBMap\EditMarker = #True;ListIndex(PBMap\Marker())  
               Break
             EndIf
           Next
@@ -1371,15 +1373,19 @@ Module PBMap
         If PBMap\MoveStartingPoint\x <> - 1
           MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\MoveStartingPoint\x
           MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
-          ;Move marker
-          If PBMap\EditMarkerIndex > -1 And (PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT)
-            SelectElement(PBMap\Marker(), PBMap\EditMarkerIndex)
-            LatLon2TileXY(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
-            MarkerCoords\x + MouseX / PBMap\TileSize
-            MarkerCoords\y + MouseY / PBMap\TileSize
-            TileXY2LatLon(@MarkerCoords, @PBMap\Marker()\GeographicCoordinates, PBMap\Zoom)                      
+          ;Move selected markers
+          If PBMap\EditMarker And (PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT)
+            ForEach PBMap\Marker()
+              If PBMap\Marker()\Selected
+                LatLon2Pixel(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+                MarkerCoords\x + MouseX
+                MarkerCoords\y + MouseY
+                Pixel2LatLon(@MarkerCoords, @PBMap\Marker()\GeographicCoordinates, PBMap\Zoom)
+                Break ;Only one marker moved at once
+              EndIf  
+            Next
           ElseIf PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_HAND
-            ;New move values
+            ;Move map only
             LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom) ;This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
             ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\PixelCoordinates\x - MouseX
@@ -1394,18 +1400,35 @@ Module PBMap
           PBMap\Redraw = #True
           PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
           PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-        EndIf 
-      Case #PB_EventType_LeftButtonUp
-        PBMap\MoveStartingPoint\x = - 1
-        If PBMap\EditMarkerIndex > -1
-          PBMap\EditMarkerIndex = -1
-        Else ;Move Map
-             ;           PBMap\Drawing\TileCoordinates\x = PBMap\PixelCoordinates\x / PBMap\TileSize
-             ;           PBMap\Drawing\TileCoordinates\y = PBMap\PixelCoordinates\y / PBMap\TileSize
-             ;           MyDebug("PBMap\Drawing\TileCoordinates\x " + Str(PBMap\Drawing\TileCoordinates\x) + " ; PBMap\Drawing\TileCoordinates\y " + Str(PBMap\Drawing\TileCoordinates\y) )
-             ;           TileXY2LatLon(@PBMap\Drawing\TileCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
+        Else
+          LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+          MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+          MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+          ;Clip MouseX to the map range (in X, the map is infinite)
+          MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
+          If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
+            ;Check if mouse touch markers
+            ForEach PBMap\Marker()              
+              LatLon2Pixel(@PBMap\Marker()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+              If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
+                PBMap\Marker()\Selected = #True
+              Else
+                PBMap\Marker()\Selected = #False
+              EndIf
+            Next
+          EndIf
           PBMap\Redraw = #True
         EndIf
+      Case #PB_EventType_LeftButtonUp
+        PBMap\MoveStartingPoint\x = - 1
+        If PBMap\EditMarker
+          PBMap\EditMarker = #False
+          ;Deselect markers
+          ForEach PBMap\Marker()              
+            PBMap\Marker()\Selected = #False
+          Next
+        EndIf
+        PBMap\Redraw = #True
       Case #PB_MAP_REDRAW
         Debug "Redraw"
         PBMap\Redraw = #True
@@ -1484,16 +1507,21 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
-  Procedure MyMarker(x.i, y.i)
-    Protected color.l
-    color=RGBA(0, 255, 0, 255)
-    VectorSourceColor(color)
+  Procedure MyMarker(x.i, y.i, Selected = #False)
+    Protected color = RGBA(0, 255, 0, 255) 
     MovePathCursor(x, y)
     AddPathLine(-16,-32,#PB_Path_Relative)
     AddPathCircle(16,0,16,180,0,#PB_Path_Relative)
     AddPathLine(-16,32,#PB_Path_Relative)
     VectorSourceColor(color)
-    FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA(0, 0, 0, 255)):StrokePath(1)
+    FillPath(#PB_Path_Preserve)
+    If Selected
+      VectorSourceColor(RGBA($FF, $FF, 0, $FF))
+      StrokePath(2)
+    Else
+      VectorSourceColor(RGBA(0, 0, 0, 255))
+      StrokePath(1)
+    EndIf
   EndProcedure
   
   Procedure MainPointer(x.i, y.i)
@@ -1559,7 +1587,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_NAUTICAL)                  ; To change the scale unit
-    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())  ; To add a marker
+    PBMap::AddMarker(49.0446828398, 2.0349812508, -1, @MyMarker())  ; To add a marker with a customised GFX
     
     Repeat
       Event = WaitWindowEvent()
@@ -1608,8 +1636,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 134
-; FirstLine = 113
+; CursorPosition = 438
+; FirstLine = 422
 ; Folding = ------------
 ; EnableThread
 ; EnableXP
