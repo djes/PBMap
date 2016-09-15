@@ -165,8 +165,8 @@ Module PBMap
     TimerInterval.i
     MaxMemCache.i                                  ; in MiB
     TrackShowKms.i
-    ShowMarkerNb.i
-    ShowMarkerLegend.i
+    ShowMarkersNb.i
+    ShowMarkersLegend.i
   EndStructure
   
   Structure Layer
@@ -377,10 +377,10 @@ Module PBMap
         SelBool(ShowPointer)
       Case "showtrack"
         SelBool(ShowTrack)
-      Case "showmarkernb"
-        SelBool(ShowMarkerNb)      
-      Case "showmarkerlegend"
-        SelBool(ShowMarkerLegend)      
+      Case "showmarkersnb"
+        SelBool(ShowMarkersNb)      
+      Case "showmarkerslegend"
+        SelBool(ShowMarkersLegend)      
       Case "trackshowkms"
         SelBool(TrackShowKms)
     EndSelect
@@ -411,8 +411,8 @@ Module PBMap
     WritePreferenceInteger("ShowMarkers", PBMap\Options\ShowMarkers)
     WritePreferenceInteger("ShowPointer", PBMap\Options\ShowPointer)
     WritePreferenceInteger("ShowTrack", PBMap\Options\ShowTrack)
-    WritePreferenceInteger("ShowMarkerNb", PBMap\Options\ShowMarkerNb)
-    WritePreferenceInteger("ShowMarkerLegend", PBMap\Options\ShowMarkerLegend)
+    WritePreferenceInteger("ShowMarkersNb", PBMap\Options\ShowMarkersNb)
+    WritePreferenceInteger("ShowMarkersLegend", PBMap\Options\ShowMarkersLegend)
     WritePreferenceInteger("TrackShowKms", PBMap\Options\TrackShowKms)
     ClosePreferences()
   EndProcedure
@@ -458,8 +458,8 @@ Module PBMap
     PBMap\Options\ShowMarkers      = ReadPreferenceInteger("ShowMarkers", #True)
     PBMap\Options\ShowPointer      = ReadPreferenceInteger("ShowPointer", #True)
     PBMap\Options\ShowTrack        = ReadPreferenceInteger("ShowTrack", #True)
-    PBMap\Options\ShowMarkerNb     = ReadPreferenceInteger("ShowMarkerNb", #True)
-    PBMap\Options\ShowMarkerLegend = ReadPreferenceInteger("ShowMarkerLegend", #False)
+    PBMap\Options\ShowMarkersNb     = ReadPreferenceInteger("ShowMarkersNb", #True)
+    PBMap\Options\ShowMarkersLegend = ReadPreferenceInteger("ShowMarkersLegend", #False)
     PBMap\Options\TrackShowKms     = ReadPreferenceInteger("TrackShowKms", #False)
     PBMap\Options\TimerInterval    = 20
     ClosePreferences()
@@ -1045,7 +1045,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure DrawMarker(x.i, y.i, Nb, Color.l, Focus.i, Selected.i, Legend.s)
+  Procedure DrawMarker(x.i, y.i, Nb, Color.l, Legend.s, Focus.i, Selected.i)
     VectorSourceColor(color)
     MovePathCursor(x, y)
     AddPathLine(-8, -16, #PB_Path_Relative)
@@ -1066,18 +1066,19 @@ Module PBMap
       VectorSourceColor(Color)
       StrokePath(1)
     EndIf
-    If PBMap\Options\ShowMarkerNb
+    If PBMap\Options\ShowMarkersNb
       Protected Text.s = Str(Nb)
       VectorFont(FontID(PBMap\Font), 13)
       MovePathCursor(x - 10, y)
       VectorSourceColor(RGBA(0, 0, 0, 255))
       DrawVectorParagraph(Text, 20, 20, #PB_VectorParagraph_Center)
     EndIf
-    If PBMap\Options\ShowMarkerLegend
+    If PBMap\Options\ShowMarkersLegend
       VectorFont(FontID(PBMap\Font), 13)
-      MovePathCursor(x - 10, y - 30)
+      Protected Height = VectorParagraphHeight(Legend, 100, 13)
+      MovePathCursor(x - 50, y - 30 - Height)
       VectorSourceColor(RGBA(0, 0, 0, 255))
-      DrawVectorParagraph(Legend, 20, 20, #PB_VectorParagraph_Center)
+      DrawVectorParagraph(Legend, 100, Height, #PB_VectorParagraph_Center)
     EndIf  
   EndProcedure
     
@@ -1114,7 +1115,7 @@ Module PBMap
           If PBMap\Markers()\CallBackPointer > 0
             CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\X, Pixel\Y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
           Else
-            DrawMarker(Pixel\X, Pixel\Y, ListIndex(PBMap\Markers()), PBMap\Markers()\Color, PBMap\Markers()\Focus, PBMap\Markers()\Selected, PBMap\Markers()\Legend)
+            DrawMarker(Pixel\X, Pixel\Y, ListIndex(PBMap\Markers()), PBMap\Markers()\Color, PBMap\Markers()\Legend, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
           EndIf
         EndIf 
       EndIf 
@@ -1555,6 +1556,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
+  ;This callback demonstration procedure will receive relative coords from canvas
   Procedure MyMarker(x.i, y.i, Focus = #False, Selected = #False)
     Protected color = RGBA(0, 255, 0, 255) 
     MovePathCursor(x, y)
@@ -1633,7 +1635,8 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("ShowDegrees", "1")
     PBMap::SetOption("ShowDebugInfos", "1")
     PBMap::SetOption("ShowScale", "1")
-    PBMap::SetOption("TrackShowKms", "1")
+    PBMap::SetOption("ShowMarkersLegend", "1")
+    PBMap::SetOption("TrackShowKms", "1")    
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
@@ -1670,7 +1673,7 @@ CompilerIf #PB_Compiler_IsMainFile
                   PBMAP::Refresh()
               EndSelect
             Case #Gdt_AddMarker
-              PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", RGBA(Random(255), Random(255), Random(255), 255))
+              PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "Test", RGBA(Random(255), Random(255), Random(255), 255))
             Case #Gdt_AddOpenseaMap
               If OpenSeaMap = 0
                 OpenSeaMap = PBMap::AddMapServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
@@ -1694,8 +1697,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 49
-; FirstLine = 27
+; CursorPosition = 1675
+; FirstLine = 1654
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
