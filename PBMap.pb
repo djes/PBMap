@@ -1401,21 +1401,22 @@ Module PBMap
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
-    Protected key.s, Touch.i, CtrlKey.i
+    Protected key.s, Touch.i
+    Static CtrlKey
     PBMap\Moving = #False
     Select EventType()
       Case #PB_EventType_KeyUp  
         Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
           Case #PB_Shortcut_Delete
             DeleteSelectedMarkers()
-          Case #PB_Canvas_Control
-            CtrlKey = #False
         EndSelect
-      Case #PB_EventType_KeyDown
-        Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
-          Case #PB_Canvas_Control
-            CtrlKey = #True
-        EndSelect
+        If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control = 0
+          CtrlKey = #False
+        EndIf
+       Case #PB_EventType_KeyDown
+         If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control <> 0
+          CtrlKey = #True
+        EndIf
       Case #PB_EventType_LeftDoubleClick
         If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
           ;Check if the mouse touch a marker, if so, jump to it
@@ -1455,7 +1456,9 @@ Module PBMap
           PBMap\EditMarker = #False
           ;Check if we select marker(s)
           ForEach PBMap\Markers()                   
-            PBMap\Markers()\Selected = #False
+            If CtrlKey = #False
+              PBMap\Markers()\Selected = #False ;If no CTRL key, deselect everything and select only the focused marker
+            EndIf
             If PBMap\Markers()\Focus
               PBMap\Markers()\Selected = #True
               PBMap\EditMarker = #True;ListIndex(PBMap\Markers())  
@@ -1741,8 +1744,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1514
-; FirstLine = 1487
+; CursorPosition = 1500
+; FirstLine = 1478
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
