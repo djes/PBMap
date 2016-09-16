@@ -58,6 +58,7 @@ DeclareModule PBMap
   Declare.i AddMarker(Latitude.d, Longitude.d, Legend.s = "", color.l=-1, CallBackPointer.i = -1)
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
+  Declare DeleteSelectedMarkers()
   Declare Quit()
   Declare Error(msg.s)
   Declare Refresh()
@@ -206,7 +207,7 @@ Module PBMap
     Dirty.i                                        ; To signal that drawing need a refresh
     
     List track.GeographicCoordinates()             ; To display a GPX track
-    List Markers.Marker()                           ; To diplay marker
+    List Markers.Marker()                          ; To diplay marker
     EditMarker.l
     
     ImgLoading.i                                   ; Image Loading Tile
@@ -884,14 +885,14 @@ Module PBMap
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
-            MovePathCursor(px, py)
-            DrawVectorImage(ImageID(PBMap\ImgNothing))
+          MovePathCursor(px, py)
+          DrawVectorImage(ImageID(PBMap\ImgNothing))
           ;EndIf
         EndIf
       Next
     Next 
   EndProcedure
-    
+  
   Procedure DrawPointer(*Drawing.DrawingParameters)
     If PBMap\CallBackMainPointer > 0
       ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
@@ -1009,12 +1010,12 @@ Module PBMap
       ;Trace Track
       ForEach PBMap\track()
         ;If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
-          LatLon2PixelRel(@PBMap\track(), @Pixel, PBMap\Zoom)
-          If ListIndex(PBMap\track())=0
-            MovePathCursor(Pixel\X, Pixel\Y)
-          Else
-            AddPathLine(Pixel\X, Pixel\Y)    
-          EndIf 
+        LatLon2PixelRel(@PBMap\track(), @Pixel, PBMap\Zoom)
+        If ListIndex(PBMap\track())=0
+          MovePathCursor(Pixel\X, Pixel\Y)
+        Else
+          AddPathLine(Pixel\X, Pixel\Y)    
+        EndIf 
         ;EndIf 
       Next
       VectorSourceColor(RGBA(0, 255, 0, 150))
@@ -1081,14 +1082,23 @@ Module PBMap
       DrawVectorParagraph(Legend, 100, Height, #PB_VectorParagraph_Center)
     EndIf  
   EndProcedure
-    
- Procedure ClearMarkers()
+  
+  Procedure ClearMarkers()
     ClearList(PBMap\Markers())
   EndProcedure
-    
+  
   Procedure DeleteMarker(*Ptr)
     ChangeCurrentElement(PBMap\Markers(), *Ptr)
     DeleteElement(PBMap\Markers())
+  EndProcedure
+  
+  Procedure DeleteSelectedMarkers()
+    ForEach PBMap\Markers()
+      If PBMap\Markers()\Selected
+        DeleteElement(PBMap\Markers())
+        PBMap\Redraw = #True
+      EndIf
+    Next
   EndProcedure
   
   Procedure.i AddMarker(Latitude.d, Longitude.d, Legend.s = "", Color.l=-1, CallBackPointer.i = -1)
@@ -1139,7 +1149,7 @@ Module PBMap
     Next
     DrawVectorText(Str(ThreadCounter))
   EndProcedure
-    
+  
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
@@ -1391,11 +1401,42 @@ Module PBMap
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
-    Protected key.s
+    Protected key.s, Touch.i, CtrlKey.i
     PBMap\Moving = #False
-    Select EventType()    
+    Select EventType()
+      Case #PB_EventType_KeyUp  
+        Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
+          Case #PB_Shortcut_Delete
+            DeleteSelectedMarkers()
+          Case #PB_Canvas_Control
+            CtrlKey = #False
+        EndSelect
+      Case #PB_EventType_KeyDown
+        Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
+          Case #PB_Canvas_Control
+            CtrlKey = #True
+        EndSelect
       Case #PB_EventType_LeftDoubleClick
-        GotoPixelRel(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY))
+        If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
+          ;Check if the mouse touch a marker, if so, jump to it
+          LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+          MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+          MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+          ;Clip MouseX to the map range (in X, the map is infinite)
+          MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
+          Touch = #False
+          ForEach PBMap\Markers()              
+            LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+            If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
+              Touch = #True
+              SetLocation(PBMap\Markers()\GeographicCoordinates\Latitude, PBMap\Markers()\GeographicCoordinates\Longitude)
+              Break
+            EndIf
+          Next
+        EndIf
+        If Not Touch
+          GotoPixelRel(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY))
+        EndIf
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
           ;Relative zoom (centered on the mouse)
@@ -1432,19 +1473,19 @@ Module PBMap
           MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\MoveStartingPoint\y
           ;Move selected markers
           If PBMap\EditMarker And (PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT)
-              ForEach PBMap\Markers()
+            ForEach PBMap\Markers()
               If PBMap\Markers()\Selected
                 LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
                 MarkerCoords\x + MouseX
                 MarkerCoords\y + MouseY
                 Pixel2LatLon(@MarkerCoords, @PBMap\Markers()\GeographicCoordinates, PBMap\Zoom)
               EndIf
-              Next
+            Next
           ElseIf PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_HAND
             ;Move map only
             LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom) ;This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
-            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\PixelCoordinates\x - MouseX
+            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\PixelCoordinates\x = Mod(Mod(PBMap\PixelCoordinates\x, MapWidth) + MapWidth, MapWidth)
             PBMap\PixelCoordinates\y - MouseY
             Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
@@ -1469,7 +1510,9 @@ Module PBMap
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
                 PBMap\Markers()\Focus = #True
               Else
-                PBMap\Markers()\Focus = #False
+                If CtrlKey = #False
+                  PBMap\Markers()\Focus = #False
+                EndIf  
               EndIf
             Next
           EndIf
@@ -1514,6 +1557,7 @@ Module PBMap
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
     BindEvent(#PB_Event_Timer, @TimerEvents())
+    ;AddKeyboardShortcut(#PB_Shortcut_Delete
   EndProcedure
   
 EndModule
@@ -1641,7 +1685,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
-    PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                  ; To change the scale unit
+    PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", -1, @MyMarker())  ; To add a marker with a customised GFX
     
     Repeat
@@ -1697,8 +1741,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1675
-; FirstLine = 1654
+; CursorPosition = 1514
+; FirstLine = 1487
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
