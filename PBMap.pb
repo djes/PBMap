@@ -585,6 +585,11 @@ Module PBMap
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
   EndProcedure
   
+  ;Ensures the longitude to be in the range [-180;180[
+  Procedure.d ClipLongitude(Longitude.d)
+    ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
+  EndProcedure
+  
   ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
   Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
@@ -1410,11 +1415,41 @@ Module PBMap
           Case #PB_Shortcut_Delete
             DeleteSelectedMarkers()
         EndSelect
+        PBMap\Redraw = #True
         If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control = 0
           CtrlKey = #False
         EndIf
-       Case #PB_EventType_KeyDown
-         If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control <> 0
+      Case #PB_EventType_KeyDown
+        With PBMap\Markers()
+        Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
+          Case #PB_Shortcut_Left
+            ForEach PBMap\Markers()
+              If \Selected
+                \GeographicCoordinates\Longitude = ClipLongitude( \GeographicCoordinates\Longitude - 10* 360 / Pow(2, PBMap\Zoom + 8))
+              EndIf
+            Next            
+          Case #PB_Shortcut_Up        
+            ForEach PBMap\Markers()
+              If \Selected
+                \GeographicCoordinates\Latitude + 10* 360 / Pow(2, PBMap\Zoom + 8)
+              EndIf
+            Next            
+          Case #PB_Shortcut_Right     
+            ForEach PBMap\Markers()
+              If \Selected
+                \GeographicCoordinates\Longitude = ClipLongitude( \GeographicCoordinates\Longitude + 10* 360 / Pow(2, PBMap\Zoom + 8))
+              EndIf
+            Next            
+          Case #PB_Shortcut_Down
+            ForEach PBMap\Markers()
+              If \Selected
+                \GeographicCoordinates\Latitude - 10* 360 / Pow(2, PBMap\Zoom + 8)
+              EndIf
+            Next            
+        EndSelect
+        EndWith
+        PBMap\Redraw = #True
+        If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control <> 0
           CtrlKey = #True
         EndIf
       Case #PB_EventType_LeftDoubleClick
@@ -1513,9 +1548,9 @@ Module PBMap
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
                 PBMap\Markers()\Focus = #True
               Else
-                If CtrlKey = #False
-                  PBMap\Markers()\Focus = #False
-                EndIf  
+                ;If CtrlKey = #False
+                PBMap\Markers()\Focus = #False
+                ;EndIf  
               EndIf
             Next
           EndIf
@@ -1743,10 +1778,10 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
   
 CompilerEndIf
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1500
-; FirstLine = 1478
+; IDE Options = PureBasic 5.42 LTS (Windows - x64)
+; CursorPosition = 1433
+; FirstLine = 1405
 ; Folding = -------------
+; EnableUnicode
 ; EnableThread
 ; EnableXP
-; EnableUnicode
