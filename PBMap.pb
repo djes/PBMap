@@ -113,8 +113,8 @@ Module PBMap
     TileCoordinates.Coordinates
     Bounds.TileBounds 
     Canvas.i
-    PBMapTileX.i
-    PBMapTileY.i
+    ;PBMapTileX.i
+    ;PBMapTileY.i
     PBMapZoom.i
     GeographicCoordinates.GeographicCoordinates
     CenterX.i
@@ -897,6 +897,14 @@ Module PBMap
           DrawVectorImage(ImageID(PBMap\ImgNothing))
           ;EndIf
         EndIf
+        If PBMap\Options\ShowDebugInfos
+          VectorFont(FontID(PBMap\Font), 16)
+          VectorSourceColor(RGBA(0, 0, 0, 80))
+          MovePathCursor(px, py)
+          DrawVectorText("x:" + Str(tilex)) 
+          MovePathCursor(px, py + 16)
+          DrawVectorText("y:" + Str(tiley))
+        EndIf
       Next
     Next 
   EndProcedure
@@ -1039,7 +1047,7 @@ Module PBMap
     If PBMap\Options\TrackShowKms And ListSize(PBMap\TracksList()) > 0
       BeginVectorLayer()
       ForEach PBMap\TracksList()
-        km = 0
+        km = 0 : memKm = -1
         ForEach PBMap\TracksList()\Track()
           ;Test Distance
           If ListIndex(PBMap\TracksList()\Track()) = 0
@@ -1164,7 +1172,9 @@ Module PBMap
         EndIf
       EndIf
     Next
-    DrawVectorText(Str(ThreadCounter))
+    DrawVectorText(Str(ThreadCounter))    
+    MovePathCursor(50,110)
+    DrawVectorText(Str(PBMap\Zoom))
   EndProcedure
   
   ;-*** Main drawing
@@ -1707,7 +1717,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1")
-    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("TrackShowKms", "1")    
@@ -1770,8 +1780,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1195
-; FirstLine = 1169
+; CursorPosition = 1719
+; FirstLine = 1707
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
