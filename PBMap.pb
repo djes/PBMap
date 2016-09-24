@@ -40,6 +40,7 @@ DeclareModule PBMap
   #MODE_SELECT = 2
   #MODE_EDIT = 3
   
+  ;-Declarations
   Declare InitPBMap(window)
   Declare SetOption(Option.s, Value.s)
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
@@ -50,7 +51,8 @@ DeclareModule PBMap
   Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
   Declare Drawing()
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
-  Declare ZoomToArea()
+  Declare ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+  Declare ZoomToTracks(*Tracks)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
   Declare SetMapScaleUnit(ScaleUnit=PBMAP::#SCALE_KM) 
@@ -111,8 +113,6 @@ Module PBMap
     TileCoordinates.Coordinates
     Bounds.TileBounds 
     Canvas.i
-    PBMapTileX.i
-    PBMapTileY.i
     PBMapZoom.i
     GeographicCoordinates.GeographicCoordinates
     CenterX.i
@@ -176,6 +176,9 @@ Module PBMap
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
   EndStructure
   
+  Structure Tracks
+    List Track.GeographicCoordinates()
+  EndStructure
   ;-PBMap Structure
   Structure PBMap
     Window.i                                       ; Parent Window
@@ -206,7 +209,7 @@ Module PBMap
     Moving.i
     Dirty.i                                        ; To signal that drawing need a refresh
     
-    List track.GeographicCoordinates()             ; To display a GPX track
+    List TracksList.Tracks()                       ; To display a GPX track
     List Markers.Marker()                          ; To diplay marker
     EditMarker.l
     
@@ -672,21 +675,22 @@ Module PBMap
       Protected *MainNode,*subNode,*child,child.l
       *MainNode=MainXMLNode(0)
       *MainNode=XMLNodeFromPath(*MainNode,"/gpx/trk/trkseg")
-      ClearList(PBMap\track())
+      Protected *NewTrack.Tracks = AddElement(PBMap\TracksList())
       For child = 1 To XMLChildCount(*MainNode)
         *child = ChildXMLNode(*MainNode, child)
-        AddElement(PBMap\track())
+        AddElement(*NewTrack\Track())
         If ExamineXMLAttributes(*child)
           While NextXMLAttribute(*child)
             Select XMLAttributeName(*child)
               Case "lat"
-                PBMap\track()\Latitude=ValD(XMLAttributeValue(*child))
+                *NewTrack\Track()\Latitude=ValD(XMLAttributeValue(*child))
               Case "lon"
-                PBMap\track()\Longitude=ValD(XMLAttributeValue(*child))
+                *NewTrack\Track()\Longitude=ValD(XMLAttributeValue(*child))
             EndSelect
           Wend
         EndIf
       Next 
+      ZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
     EndIf
   EndProcedure
   
@@ -894,6 +898,14 @@ Module PBMap
           DrawVectorImage(ImageID(PBMap\ImgNothing))
           ;EndIf
         EndIf
+        If PBMap\Options\ShowDebugInfos
+          VectorFont(FontID(PBMap\Font), 16)
+          VectorSourceColor(RGBA(0, 0, 0, 80))
+          MovePathCursor(px, py)
+          DrawVectorText("x:" + Str(tilex)) 
+          MovePathCursor(px, py + 16)
+          DrawVectorText("y:" + Str(tiley))
+        EndIf
       Next
     Next 
   EndProcedure
@@ -1007,47 +1019,56 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
-  Procedure  DrawTrack(*Drawing.DrawingParameters)
+  Procedure  DrawTracks(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
     Protected Location.GeographicCoordinates
     Protected km.f, memKm.i
-    If ListSize(PBMap\track())>0
-      ;Trace Track
-      ForEach PBMap\track()
-        ;If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
-        LatLon2PixelRel(@PBMap\track(), @Pixel, PBMap\Zoom)
-        If ListIndex(PBMap\track())=0
-          MovePathCursor(Pixel\X, Pixel\Y)
-        Else
-          AddPathLine(Pixel\X, Pixel\Y)    
-        EndIf 
-        ;EndIf 
-      Next
-      VectorSourceColor(RGBA(0, 255, 0, 150))
-      StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
-      ;Draw Distance
-      ForEach PBMap\track()
-        ;Test Distance
-        If ListIndex(PBMap\track())=0
-          Location\Latitude=PBMap\track()\Latitude
-          Location\Longitude=PBMap\track()\Longitude 
-        Else 
-          km=km+HaversineInKM(@Location,@PBMap\track()) ;<- display Distance 
-          Location\Latitude=PBMap\track()\Latitude
-          Location\Longitude=PBMap\track()\Longitude 
+    ;Trace Track
+    If ListSize(PBMap\TracksList()) > 0
+      BeginVectorLayer()
+      ForEach PBMap\TracksList()
+        If ListSize(PBMap\TracksList()\Track()) > 0
+          ForEach PBMap\TracksList()\Track()
+            ;If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
+            LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
+            If ListIndex(PBMap\TracksList()\Track()) = 0
+              MovePathCursor(Pixel\X, Pixel\Y)
+            Else
+              AddPathLine(Pixel\X, Pixel\Y)    
+            EndIf
+            ;EndIf 
+          Next
+          VectorSourceColor(RGBA(0, 255, 0, 150))
+          StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
         EndIf
-        If PBMap\Options\TrackShowKms
-          LatLon2PixelRel(@PBMap\track(),@Pixel, PBMap\Zoom)
-          If Int(km)<>memKm
-            memKm=Int(km)
-            If PBMap\Zoom>10
-              BeginVectorLayer()
+      Next
+      EndVectorLayer()
+    EndIf
+    ;Draw Distance
+    If PBMap\Options\TrackShowKms And ListSize(PBMap\TracksList()) > 0
+      BeginVectorLayer()
+      ForEach PBMap\TracksList()
+        km = 0 : memKm = -1
+        ForEach PBMap\TracksList()\Track()
+          ;Test Distance
+          If ListIndex(PBMap\TracksList()\Track()) = 0
+            Location\Latitude = PBMap\TracksList()\Track()\Latitude
+            Location\Longitude = PBMap\TracksList()\Track()\Longitude 
+          Else 
+            km = km + HaversineInKM(@Location, @PBMap\TracksList()\Track())
+            Location\Latitude = PBMap\TracksList()\Track()\Latitude
+            Location\Longitude = PBMap\TracksList()\Track()\Longitude 
+          EndIf
+          LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
+          If Int(km) <> memKm
+            memKm = Int(km)
+            If PBMap\Zoom > 10
               TrackPointer(Pixel\X , Pixel\Y, Int(km))
-              EndVectorLayer()
             EndIf 
           EndIf
-        EndIf
+        Next
       Next
+      EndVectorLayer()
     EndIf
   EndProcedure
   
@@ -1153,6 +1174,8 @@ Module PBMap
       EndIf
     Next
     DrawVectorText(Str(ThreadCounter))
+    MovePathCursor(50,110)
+    DrawVectorText(Str(PBMap\Zoom))
   EndProcedure
   
   ;-*** Main drawing
@@ -1179,7 +1202,7 @@ Module PBMap
       DrawTiles(*Drawing, ListIndex(PBMap\Layers())) 
     Next   
     If PBMap\Options\ShowTrack
-      DrawTrack(*Drawing)
+      DrawTracks(*Drawing)
     EndIf
     If PBMap\Options\ShowMarkers
       DrawMarkers()
@@ -1257,24 +1280,9 @@ Module PBMap
     EndIf 
   EndProcedure
   
-  Procedure  ZoomToArea()
+  Procedure ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
-    Protected MinY.d,MaxY.d,MinX.d,MaxX.d
-    ForEach PBMap\track()
-      If ListIndex(PBMap\track())=0 Or PBMap\track()\Longitude<MinX
-        MinX=PBMap\track()\Longitude
-      EndIf
-      If ListIndex(PBMap\track())=0 Or PBMap\track()\Longitude>MaxX
-        MaxX=PBMap\track()\Longitude
-      EndIf
-      If ListIndex(PBMap\track())=0 Or PBMap\track()\Latitude<MinY
-        MinY=PBMap\track()\Latitude
-      EndIf
-      If ListIndex(PBMap\track())=0 Or PBMap\track()\Latitude>MaxY
-        MaxY=PBMap\track()\Latitude
-      EndIf
-    Next 
     Protected DeltaX.d=MaxX-MinX                            ;assumption ! In original code DeltaX have no source
     Protected centerX.d=MinX+DeltaX/2                       ; assumption ! In original code CenterX have no source
     Protected paddingFactor.f= 1.2                          ;paddingFactor: this can be used to get the "120%" effect ThomM refers to. Value of 1.2 would get you the 120%.
@@ -1299,6 +1307,30 @@ Module PBMap
     EndIf
   EndProcedure
   
+  Procedure  ZoomToTracks(*Tracks.Tracks)
+    Protected MinY.d, MaxY.d, MinX.d, MaxX.d
+    If ListSize(*Tracks\Track()) > 0
+      With *Tracks\Track()
+        FirstElement(*Tracks\Track())
+        MinX = \Longitude : MaxX = MinX : MinY = \Latitude : MaxY = MinY
+        ForEach *Tracks\Track()
+          If \Longitude < MinX
+            MinX = \Longitude
+          EndIf
+          If \Longitude > MaxX
+            MaxX = \Longitude
+          EndIf
+          If \Latitude < MinY
+            MinY = \Latitude
+          EndIf
+          If \Latitude > MaxY
+            MaxY = \Latitude
+          EndIf
+        Next 
+        ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+      EndWith
+    EndIf
+  EndProcedure
   Procedure SetZoom(Zoom.i, mode.i = #PB_Relative)
     Select mode
       Case #PB_Relative
@@ -1715,7 +1747,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1")
-    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("TrackShowKms", "1")    
@@ -1747,7 +1779,6 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
               PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
-              PBMap::ZoomToArea() ; <-To center the view, and zoom on the tracks
             Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_LostFocus
@@ -1778,10 +1809,10 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
   
 CompilerEndIf
-; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 1433
-; FirstLine = 1405
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 11
 ; Folding = -------------
-; EnableUnicode
 ; EnableThread
 ; EnableXP
+; DisableDebugger
+; EnableUnicode
