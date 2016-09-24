@@ -2,17 +2,13 @@
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
-; Author:            Thyphoon, Djes And Idle
+; Author:            Thyphoon, djes And Idle
 ; Date:              Mai 17, 2016
 ; License:           Free, unrestricted, credit appreciated 
 ;                    but not required.
 ; Note:              Please share improvement !
 ; Thanks:            Progi1984
-; Usage:             Change the Proxy global variables if needed
-;                    (see also Proxy Details)
 ;************************************************************** 
-
-;#Red = 255
 
 CompilerIf #PB_Compiler_Thread = #False
   MessageRequester("Warning !!","You must enable ThreadSafe support in compiler options",#PB_MessageRequester_Ok )
@@ -1810,7 +1806,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 11
+; CursorPosition = 24
+; FirstLine = 159
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
