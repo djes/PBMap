@@ -143,6 +143,7 @@ Module PBMap
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
   EndStructure
   
+  ;-Options
   Structure Option
     HDDCachePath.s                                 ; Path where to load and save tiles downloaded from server
     DefaultOSMServer.s                             ; Base layer OSM server
@@ -157,13 +158,15 @@ Module PBMap
     ShowDebugInfos.i
     ShowScale.i
     ShowTrack.i
+    ShowTrackKms.i
     ShowMarkers.i
     ShowPointer.i
     TimerInterval.i
     MaxMemCache.i                                  ; in MiB
-    TrackShowKms.i
     ShowMarkersNb.i
     ShowMarkersLegend.i
+    ;Colours
+    ColourFocus.i
   EndStructure
   
   Structure Layer
@@ -348,6 +351,27 @@ Module PBMap
     EndSelect
   EndMacro
   
+  Procedure.i ColourString2Value(Value.s)
+    ;TODO : better string check
+    Protected Col.s = RemoveString(Value, " ")
+    If Left(Col, 1) = "$"
+      Protected r.i, g.i, b.i, a.i = 255
+      Select Len(Col)
+        Case 4 ;RGB  (eg : "$9BC"
+          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1))
+        Case 5 ;RGBA (eg : "$9BC5")
+          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1)) : a = Val("$"+Mid(Col, 5, 1))
+        Case 7 ;RRGGBB (eg : "$95B4C2")
+          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2))
+        Case 9 ;RRGGBBAA (eg : "$95B4C249")
+          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2)) : a = Val("$"+Mid(Col, 8, 2))
+      EndSelect
+      ProcedureReturn RGBA(r, g, b, a)
+    Else
+      ProcedureReturn Val(Value)
+    EndIf
+  EndProcedure  
+  
   Procedure SetOption(Option.s, Value.s)
     Option = StringCheck(Option)
     Select LCase(Option)
@@ -381,8 +405,10 @@ Module PBMap
         SelBool(ShowMarkersNb)      
       Case "showmarkerslegend"
         SelBool(ShowMarkersLegend)      
-      Case "trackshowkms"
-        SelBool(TrackShowKms)
+      Case "showtrackkms"
+        SelBool(ShowTrackKms)
+      Case "colourfocus"
+        PBMap\Options\ColourFocus = ColourString2Value(Value)
     EndSelect
   EndProcedure
   
@@ -393,28 +419,32 @@ Module PBMap
     Else
       CreatePreferences(PreferencesFile)     
     EndIf
+    With PBMap\Options
     PreferenceGroup("PROXY")
-    WritePreferenceInteger("Proxy", PBMap\Options\Proxy)
-    WritePreferenceString("ProxyURL", PBMap\Options\ProxyURL)
-    WritePreferenceString("ProxyPort", PBMap\Options\ProxyPort)
-    WritePreferenceString("ProxyUser", PBMap\Options\ProxyUser)
+    WritePreferenceInteger("Proxy", \Proxy)
+    WritePreferenceString("ProxyURL", \ProxyURL)
+    WritePreferenceString("ProxyPort", \ProxyPort)
+    WritePreferenceString("ProxyUser", \ProxyUser)
     PreferenceGroup("URL")
-    WritePreferenceString("DefaultOSMServer", PBMap\Options\DefaultOSMServer)
+    WritePreferenceString("DefaultOSMServer", \DefaultOSMServer)
     PreferenceGroup("PATHS")
-    WritePreferenceString("TilesCachePath", PBMap\Options\HDDCachePath)
+    WritePreferenceString("TilesCachePath", \HDDCachePath)
     PreferenceGroup("OPTIONS")   
-    WritePreferenceInteger("WheelMouseRelative", PBMap\Options\WheelMouseRelative)
-    WritePreferenceInteger("MaxMemCache", PBMap\Options\MaxMemCache)
-    WritePreferenceInteger("ShowDegrees", PBMap\Options\ShowDegrees)
-    WritePreferenceInteger("ShowDebugInfos", PBMap\Options\ShowDebugInfos)
-    WritePreferenceInteger("ShowScale", PBMap\Options\ShowScale)
-    WritePreferenceInteger("ShowMarkers", PBMap\Options\ShowMarkers)
-    WritePreferenceInteger("ShowPointer", PBMap\Options\ShowPointer)
-    WritePreferenceInteger("ShowTrack", PBMap\Options\ShowTrack)
-    WritePreferenceInteger("ShowMarkersNb", PBMap\Options\ShowMarkersNb)
-    WritePreferenceInteger("ShowMarkersLegend", PBMap\Options\ShowMarkersLegend)
-    WritePreferenceInteger("TrackShowKms", PBMap\Options\TrackShowKms)
+    WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
+    WritePreferenceInteger("MaxMemCache", \MaxMemCache)
+    WritePreferenceInteger("ShowDegrees", \ShowDegrees)
+    WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
+    WritePreferenceInteger("ShowScale", \ShowScale)
+    WritePreferenceInteger("ShowMarkers", \ShowMarkers)
+    WritePreferenceInteger("ShowPointer", \ShowPointer)
+    WritePreferenceInteger("ShowTrack", \ShowTrack)
+    WritePreferenceInteger("ShowTrackKms", \ShowTrackKms)
+    WritePreferenceInteger("ShowMarkersNb", \ShowMarkersNb)
+    WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
+    ;Colours;
+    WritePreferenceInteger("ColourFocus", \ColourFocus)
     ClosePreferences()
+    EndWith
   EndProcedure
   
   Procedure LoadOptions(PreferencesFile.s = "PBMap.prefs")
@@ -436,33 +466,37 @@ Module PBMap
     ;     WritePreferenceString("ProxyUser", "myproxyname")       
     ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
     ;     ClosePreferences()
+    With PBMap\Options
     PreferenceGroup("PROXY")       
-    PBMap\Options\Proxy = ReadPreferenceInteger("Proxy", #False)
-    If PBMap\Options\Proxy
-      PBMap\Options\ProxyURL  = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
-      PBMap\Options\ProxyPort = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
-      PBMap\Options\ProxyUser = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-      PBMap\Options\ProxyPassword = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
+    \Proxy              = ReadPreferenceInteger("Proxy", #False)
+    If \Proxy
+      \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
+      \ProxyPort        = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
+      \ProxyUser        = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
+      \ProxyPassword    = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
     EndIf
     PreferenceGroup("URL")
-    PBMap\Options\DefaultOSMServer = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
+    \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
     
     PreferenceGroup("PATHS")
-    PBMap\Options\HDDCachePath = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory())
+    \HDDCachePath       = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory())
     PreferenceGroup("OPTIONS")   
-    PBMap\Options\WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
-    PBMap\Options\MaxMemCache      = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
-    PBMap\Options\ShowDegrees      = ReadPreferenceInteger("ShowDegrees", #False)
-    PBMap\Options\ShowDebugInfos   = ReadPreferenceInteger("ShowDebugInfos", #False)
-    PBMap\Options\ShowScale        = ReadPreferenceInteger("ShowScale", #False)
-    PBMap\Options\ShowMarkers      = ReadPreferenceInteger("ShowMarkers", #True)
-    PBMap\Options\ShowPointer      = ReadPreferenceInteger("ShowPointer", #True)
-    PBMap\Options\ShowTrack        = ReadPreferenceInteger("ShowTrack", #True)
-    PBMap\Options\ShowMarkersNb     = ReadPreferenceInteger("ShowMarkersNb", #True)
-    PBMap\Options\ShowMarkersLegend = ReadPreferenceInteger("ShowMarkersLegend", #False)
-    PBMap\Options\TrackShowKms     = ReadPreferenceInteger("TrackShowKms", #False)
-    PBMap\Options\TimerInterval    = 20
+    \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
+    \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
+    \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
+    \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
+    \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
+    \ShowMarkers        = ReadPreferenceInteger("ShowMarkers", #True)
+    \ShowPointer        = ReadPreferenceInteger("ShowPointer", #True)
+    \ShowTrack          = ReadPreferenceInteger("ShowTrack", #True)
+    \ShowTrackKms       = ReadPreferenceInteger("ShowTrackKms", #False)
+    \ShowMarkersNb      = ReadPreferenceInteger("ShowMarkersNb", #True)
+    \ShowMarkersLegend  = ReadPreferenceInteger("ShowMarkersLegend", #False)
+    \TimerInterval      = 20
+    PreferenceGroup("COLOURS")
+    \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
     ClosePreferences()
+    EndWith  
   EndProcedure
   
   Procedure InitPBMap(Window)
@@ -1041,7 +1075,7 @@ Module PBMap
       EndVectorLayer()
     EndIf
     ;Draw Distance
-    If PBMap\Options\TrackShowKms And ListSize(PBMap\TracksList()) > 0
+    If PBMap\Options\ShowTrackKms And ListSize(PBMap\TracksList()) > 0
       BeginVectorLayer()
       ForEach PBMap\TracksList()
         km = 0 : memKm = -1
@@ -1069,6 +1103,7 @@ Module PBMap
   EndProcedure
   
   Procedure DrawMarker(x.i, y.i, Nb, Color.l, Legend.s, Focus.i, Selected.i)
+    ;Nice marker by yves86
     VectorSourceColor(color)
     MovePathCursor(x, y)
     AddPathLine(-8, -16, #PB_Path_Relative)
@@ -1080,10 +1115,10 @@ Module PBMap
     VectorSourceColor(Color)
     FillPath(#PB_Path_Preserve)
     If Focus
-      VectorSourceColor(RGBA(255, 255, 0, 255))
+      VectorSourceColor(PBMap\Options\ColourFocus)
       StrokePath(3)
     ElseIf Selected
-      VectorSourceColor(RGBA(255, 255, 0, 255))
+      VectorSourceColor(PBMap\Options\ColourFocus)
       StrokePath(4)
     Else
       VectorSourceColor(Color)
@@ -1098,7 +1133,21 @@ Module PBMap
     EndIf
     If PBMap\Options\ShowMarkersLegend
       VectorFont(FontID(PBMap\Font), 13)
-      Protected Height = VectorParagraphHeight(Legend, 100, 13)
+;      Protected Height = VectorParagraphHeight(Legend, 100, 13)
+      ;dessin d'un cadre avec fond transparent
+      Protected Height = VectorParagraphHeight(Legend, 100, 100)
+      Protected Width.l
+      If Height < 20 ; une ligne
+        Width = VectorTextWidth(Legend)
+      Else
+        Width = 100
+      EndIf
+      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
+      VectorSourceColor(RGBA(168, 255, 255, 100))
+      FillPath()
+      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
+      VectorSourceColor(RGBA(36, 36, 255, 100))
+      StrokePath(2)
       MovePathCursor(x - 50, y - 30 - Height)
       VectorSourceColor(RGBA(0, 0, 0, 255))
       DrawVectorParagraph(Legend, 100, Height, #PB_VectorParagraph_Center)
@@ -1746,7 +1795,8 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
-    PBMap::SetOption("TrackShowKms", "1")    
+    PBMap::SetOption("ShowTrackKms", "1")        
+    PBMap::SetOption("ColourFocus", "$FFFF00AA")    
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
@@ -1806,8 +1856,8 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 24
-; FirstLine = 159
+; CursorPosition = 1104
+; FirstLine = 1107
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
