@@ -52,7 +52,10 @@ DeclareModule PBMap
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
   Declare SetMapScaleUnit(ScaleUnit=PBMAP::#SCALE_KM) 
-  Declare LoadGpxFile(file.s);  
+  Declare.i LoadGpxFile(file.s);  
+  Declare ClearTracks()
+  Declare DeleteTrack(*Ptr)
+  Declare DeleteSelectedTracks()
   Declare.i AddMarker(Latitude.d, Longitude.d, Legend.s = "", color.l=-1, CallBackPointer.i = -1)
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
@@ -167,8 +170,12 @@ Module PBMap
     MaxMemCache.i                                  ; in MiB
     ShowMarkersNb.i
     ShowMarkersLegend.i
+    ;Drawing stuff
+    StrokeWidthTrackDefault.i
     ;Colours
     ColourFocus.i
+    ColourSelected.i
+    ColourTrackDefault.i
   EndStructure
   
   Structure Layer
@@ -187,6 +194,11 @@ Module PBMap
   Structure Tracks
     List Track.GeographicCoordinates()             ; To display a GPX track
     BoundingBox.Box
+    Visible.i
+    Focus.i
+    Selected.i
+    Colour.i
+    StrokeWidth.i
   EndStructure
   
   ;-PBMap Structure
@@ -418,8 +430,14 @@ Module PBMap
         SelBool(ShowMarkersLegend)      
       Case "showtrackkms"
         SelBool(ShowTrackKms)
+      Case "strokewidthtrackdefault"
+        SelBool(StrokeWidthTrackDefault)
       Case "colourfocus"
         PBMap\Options\ColourFocus = ColourString2Value(Value)
+      Case "colourselected"
+        PBMap\Options\ColourSelected = ColourString2Value(Value)
+      Case "colourtrackdefault"
+        PBMap\Options\ColourTrackDefault = ColourString2Value(Value)
     EndSelect
   EndProcedure
   
@@ -452,8 +470,12 @@ Module PBMap
     WritePreferenceInteger("ShowTrackKms", \ShowTrackKms)
     WritePreferenceInteger("ShowMarkersNb", \ShowMarkersNb)
     WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
+    PreferenceGroup("DRAWING")  
+    WritePreferenceInteger("StrokeWidthTrackDefault", \StrokeWidthTrackDefault)
     ;Colours;
     WritePreferenceInteger("ColourFocus", \ColourFocus)
+    WritePreferenceInteger("ColourSelected", \ColourSelected)
+    WritePreferenceInteger("ColourTrackDefault", \ColourTrackDefault)
     ClosePreferences()
     EndWith
   EndProcedure
@@ -503,9 +525,13 @@ Module PBMap
     \ShowTrackKms       = ReadPreferenceInteger("ShowTrackKms", #False)
     \ShowMarkersNb      = ReadPreferenceInteger("ShowMarkersNb", #True)
     \ShowMarkersLegend  = ReadPreferenceInteger("ShowMarkersLegend", #False)
-    \TimerInterval      = 20
+    PreferenceGroup("DRAWING")   
+    \StrokeWidthTrackDefault = ReadPreferenceInteger("StrokeWidthTrackDefault", 10)
     PreferenceGroup("COLOURS")
     \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
+    \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
+    \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
+    \TimerInterval      = 20
     ClosePreferences()
     EndWith  
   EndProcedure
@@ -633,11 +659,7 @@ Module PBMap
   Procedure.d ClipLongitude(Longitude.d)
     ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
   EndProcedure
-  
-;   Procedure.d Positivise(Value.d)
-;     ProcedureReturn Mod(Mod(Value, 360) + 360.0, 360)
-;   EndProcedure
-  
+   
   ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
   Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
@@ -708,37 +730,37 @@ Module PBMap
     *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
   EndProcedure
   
-  Procedure LoadGpxFile(file.s)
-    If LoadXML(0, file.s)
-      Protected Message.s
-      If XMLStatus(0) <> #PB_XML_Success
-        Message = "Error in the XML file:" + Chr(13)
-        Message + "Message: " + XMLError(0) + Chr(13)
-        Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
-        MessageRequester("Error", Message)
-      EndIf
-      Protected *MainNode,*subNode,*child,child.l
-      *MainNode=MainXMLNode(0)
-      *MainNode=XMLNodeFromPath(*MainNode,"/gpx/trk/trkseg")
-      Protected *NewTrack.Tracks = AddElement(PBMap\TracksList())
-      For child = 1 To XMLChildCount(*MainNode)
-        *child = ChildXMLNode(*MainNode, child)
-        AddElement(*NewTrack\Track())
-        If ExamineXMLAttributes(*child)
-          While NextXMLAttribute(*child)
-            Select XMLAttributeName(*child)
-              Case "lat"
-                *NewTrack\Track()\Latitude=ValD(XMLAttributeValue(*child))
-              Case "lon"
-                *NewTrack\Track()\Longitude=ValD(XMLAttributeValue(*child))
-            EndSelect
-          Wend
-        EndIf
-      Next 
-      ZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
+  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+    Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
+    Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
+    Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
+    If LatSE > LatNW
+      Debug "WTF"
+      CallDebugger
     EndIf
-  EndProcedure
-  
+    If Lat >= LatSE And Lat <= LatNW
+      If *Drawing\Width >= 360
+        ProcedureReturn #True
+      Else
+        If LonNW < LonSE      
+          If Lon >= LonNW And Lon <= LonSE
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf  
+        Else
+          If (Lon >= -180 And Lon <= LonSE) Or (Lon >= LonNW And Lon <= 180)
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf
+        EndIf
+      EndIf
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure  
+   
   ;-*** These are threaded
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
@@ -1068,65 +1090,137 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
+  Procedure DeleteTrack(*Ptr)
+    If *Ptr 
+      ChangeCurrentElement(PBMap\TracksList(), *Ptr)
+      DeleteElement(PBMap\TracksList())
+    EndIf
+  EndProcedure
+  
+  Procedure DeleteSelectedTracks()
+    ForEach PBMap\TracksList()
+      If PBMap\TracksList()\Selected
+        DeleteElement(PBMap\TracksList())
+        PBMap\Redraw = #True
+      EndIf
+    Next
+  EndProcedure
+  
+  Procedure ClearTracks()
+    ClearList(PBMap\TracksList())
+    PBMap\Redraw = #True  
+  EndProcedure
+  
   Procedure  DrawTracks(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
     Protected Location.GeographicCoordinates
     Protected km.f, memKm.i
     With PBMap\TracksList()
-    ;Trace Track
-    If ListSize(PBMap\TracksList()) > 0
-      BeginVectorLayer()
-      ForEach PBMap\TracksList()
-        If ListSize(\Track()) > 0
-          ForEach \Track()
-            ;If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
-            LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
-            If ListIndex(\Track()) = 0
-              MovePathCursor(Pixel\X, Pixel\Y)
-            Else
-              AddPathLine(Pixel\X, Pixel\Y)    
-            EndIf
-            ;EndIf 
-          Next
-;           \BoundingBox\x = PathBoundsX()
-;           \BoundingBox\y = PathBoundsY()
-;           \BoundingBox\w = PathBoundsWidth()
-;           \BoundingBox\h = PathBoundsHeight()
-          VectorSourceColor(RGBA(0, 255, 0, 150))
-          StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
-        EndIf
-      Next
-      EndVectorLayer()
-    EndIf
-    ;Draw Distance
-    If PBMap\Options\ShowTrackKms And ListSize(PBMap\TracksList()) > 0
-      BeginVectorLayer()
-      ForEach PBMap\TracksList()
-        km = 0 : memKm = -1
-        ForEach PBMap\TracksList()\Track()
-          ;Test Distance
-          If ListIndex(\Track()) = 0
-            Location\Latitude = \Track()\Latitude
-            Location\Longitude = \Track()\Longitude 
-          Else 
-            km = km + HaversineInKM(@Location, @PBMap\TracksList()\Track())
-            Location\Latitude = \Track()\Latitude
-            Location\Longitude = \Track()\Longitude 
-          EndIf
-          LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
-          If Int(km) <> memKm
-            memKm = Int(km)
-            If PBMap\Zoom > 10
-              TrackPointer(Pixel\X , Pixel\Y, Int(km))
-            EndIf 
+      ;Trace Track
+      If ListSize(PBMap\TracksList()) > 0
+        BeginVectorLayer()
+        ForEach PBMap\TracksList()
+          If ListSize(\Track()) > 0
+            ;Check visibility
+            \Visible = #False
+            ForEach \Track()
+              If IsInDrawingBoundaries(*Drawing, @PBMap\TracksList()\Track())
+                \Visible = #True
+                Break
+              EndIf
+            Next
+            If \Visible
+              ;Draw tracks
+              ForEach \Track()
+                LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
+                If ListIndex(\Track()) = 0
+                  MovePathCursor(Pixel\X, Pixel\Y)
+                Else
+                  AddPathLine(Pixel\X, Pixel\Y)    
+                EndIf
+              Next
+              ;           \BoundingBox\x = PathBoundsX()
+              ;           \BoundingBox\y = PathBoundsY()
+              ;           \BoundingBox\w = PathBoundsWidth()
+              ;           \BoundingBox\h = PathBoundsHeight()
+              If \Focus
+                VectorSourceColor(PBMap\Options\ColourFocus)
+              ElseIf \Selected
+                VectorSourceColor(PBMap\Options\ColourSelected)
+              Else
+                VectorSourceColor(\Colour)
+              EndIf
+              StrokePath(\StrokeWidth, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
+            EndIf  
           EndIf
         Next
-      Next
-      EndVectorLayer()
-    EndIf
+        EndVectorLayer()
+        ;Draw distances
+        If PBMap\Options\ShowTrackKms
+          BeginVectorLayer()
+          ForEach PBMap\TracksList()
+            If \Visible
+              km = 0 : memKm = -1
+              ForEach PBMap\TracksList()\Track()
+                ;Test Distance
+                If ListIndex(\Track()) = 0
+                  Location\Latitude = \Track()\Latitude
+                  Location\Longitude = \Track()\Longitude 
+                Else 
+                  km = km + HaversineInKM(@Location, @PBMap\TracksList()\Track())
+                  Location\Latitude = \Track()\Latitude
+                  Location\Longitude = \Track()\Longitude 
+                EndIf
+                LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
+                If Int(km) <> memKm
+                  memKm = Int(km)
+                  If PBMap\Zoom > 10
+                    TrackPointer(Pixel\X , Pixel\Y, Int(km))
+                  EndIf 
+                EndIf
+              Next
+            EndIf
+          Next
+          EndVectorLayer()
+        EndIf
+      EndIf
     EndWith
   EndProcedure
   
+  Procedure.i LoadGpxFile(file.s)
+    If LoadXML(0, file.s)
+      Protected Message.s
+      If XMLStatus(0) <> #PB_XML_Success
+        Message = "Error in the XML file:" + Chr(13)
+        Message + "Message: " + XMLError(0) + Chr(13)
+        Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
+        MessageRequester("Error", Message)
+      EndIf
+      Protected *MainNode,*subNode,*child,child.l
+      *MainNode=MainXMLNode(0)
+      *MainNode=XMLNodeFromPath(*MainNode,"/gpx/trk/trkseg")
+      Protected *NewTrack.Tracks = AddElement(PBMap\TracksList())
+      PBMap\TracksList()\StrokeWidth = PBMap\Options\StrokeWidthTrackDefault
+      PBMap\TracksList()\Colour      = PBMap\Options\ColourTrackDefault
+      For child = 1 To XMLChildCount(*MainNode)
+        *child = ChildXMLNode(*MainNode, child)
+        AddElement(*NewTrack\Track())
+        If ExamineXMLAttributes(*child)
+          While NextXMLAttribute(*child)
+            Select XMLAttributeName(*child)
+              Case "lat"
+                *NewTrack\Track()\Latitude=ValD(XMLAttributeValue(*child))
+              Case "lon"
+                *NewTrack\Track()\Longitude=ValD(XMLAttributeValue(*child))
+            EndSelect
+          Wend
+        EndIf
+      Next 
+      ZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
+      ProcedureReturn *NewTrack  
+    EndIf
+  EndProcedure
+
   Procedure DrawMarker(x.i, y.i, Nb, Color.l, Legend.s, Focus.i, Selected.i)
     ;Nice marker by yves86
     VectorSourceColor(color)
@@ -1143,7 +1237,7 @@ Module PBMap
       VectorSourceColor(PBMap\Options\ColourFocus)
       StrokePath(3)
     ElseIf Selected
-      VectorSourceColor(PBMap\Options\ColourFocus)
+      VectorSourceColor(PBMap\Options\ColourSelected)
       StrokePath(4)
     Else
       VectorSourceColor(Color)
@@ -1181,11 +1275,15 @@ Module PBMap
   
   Procedure ClearMarkers()
     ClearList(PBMap\Markers())
+    PBMap\Redraw = #True  
   EndProcedure
   
   Procedure DeleteMarker(*Ptr)
-    ChangeCurrentElement(PBMap\Markers(), *Ptr)
-    DeleteElement(PBMap\Markers())
+    If *Ptr 
+      ChangeCurrentElement(PBMap\Markers(), *Ptr)
+      DeleteElement(PBMap\Markers())
+      PBMap\Redraw = #True
+    EndIf
   EndProcedure
   
   Procedure DeleteSelectedMarkers()
@@ -1209,38 +1307,7 @@ Module PBMap
       ProcedureReturn *Ptr
     EndIf
   EndProcedure
-  
-  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
-    Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
-    Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
-    Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
-    If LatSE > LatNW
-      Debug "WTF"
-      CallDebugger
-    EndIf
-    If Lat >= LatSE And Lat <= LatNW
-      If *Drawing\Width >= 360
-        ProcedureReturn #True
-      Else
-        If LonNW < LonSE      
-          If Lon >= LonNW And Lon <= LonSE
-            ProcedureReturn #True
-          Else
-            ProcedureReturn #False
-          EndIf  
-        Else
-          If (Lon >= -180 And Lon <= LonSE) Or (Lon >= LonNW And Lon <= 180)
-            ProcedureReturn #True
-          Else
-            ProcedureReturn #False
-          EndIf
-        EndIf
-      EndIf
-    Else
-      ProcedureReturn #False
-    EndIf
-  EndProcedure
-  
+    
   ; Draw all markers
   Procedure DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
@@ -1256,7 +1323,7 @@ Module PBMap
         EndIf 
       EndIf 
     Next
-  EndProcedure
+  EndProcedure 
   
   Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
@@ -1558,6 +1625,7 @@ Module PBMap
     Protected MouseX.i, MouseY.i
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     Protected key.s, Touch.i
+    Protected Pixel.PixelCoordinates
     Static CtrlKey
     PBMap\Moving = #False
     Select EventType()
@@ -1565,6 +1633,7 @@ Module PBMap
         Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
           Case #PB_Shortcut_Delete
             DeleteSelectedMarkers()
+            DeleteSelectedTracks()
         EndSelect
         PBMap\Redraw = #True
         If GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Modifiers)&#PB_Canvas_Control = 0
@@ -1651,6 +1720,16 @@ Module PBMap
               PBMap\Markers()\Focus = #False
             EndIf
           Next
+          ;Check if we select track(s)
+          ForEach PBMap\TracksList()                   
+            If CtrlKey = #False
+              PBMap\TracksList()\Selected = #False ;If no CTRL key, deselect everything and select only the focused track
+            EndIf
+            If PBMap\TracksList()\Focus
+              PBMap\TracksList()\Selected = #True
+              PBMap\TracksList()\Focus = #False
+            EndIf
+          Next
         EndIf
         ;Mem cursor Coord
         PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -1692,8 +1771,8 @@ Module PBMap
           MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
           ;Clip MouseX to the map range (in X, the map is infinite)
           MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
-          ;Check if mouse touch markers
           If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
+            ;Check if mouse touch markers
             ForEach PBMap\Markers()              
               LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
@@ -1704,6 +1783,35 @@ Module PBMap
                 ;EndIf  
               EndIf
             Next
+            ;Check if mouse touch tracks           
+            With PBMap\TracksList()
+              ;Trace Track
+              If ListSize(PBMap\TracksList()) > 0
+                ForEach PBMap\TracksList()
+                  If ListSize(\Track()) > 0
+                    If \Visible
+                      StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+                      ;Draw tracks
+                      ForEach \Track()
+                        LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
+                        If ListIndex(\Track()) = 0
+                          MovePathCursor(Pixel\X, Pixel\Y)
+                        Else
+                          AddPathLine(Pixel\X, Pixel\Y)    
+                        EndIf
+                      Next
+                      If IsInsideStroke(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), \StrokeWidth)
+                        \Focus = #True
+                      Else
+                        \Focus = #False
+                      EndIf
+                      StopVectorDrawing()
+                    EndIf  
+                  EndIf
+                Next
+              EndIf
+            EndWith
+            
           EndIf
           PBMap\Redraw = #True
         EndIf
@@ -1931,8 +2039,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 638
-; FirstLine = 636
-; Folding = -------------
+; CursorPosition = 55
+; FirstLine = 34
+; Folding = --------------
 ; EnableThread
 ; EnableXP
