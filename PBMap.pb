@@ -646,6 +646,12 @@ Module PBMap
     ;Ensures the longitude to be in the range [-180;180[
     *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
   EndProcedure
   
   Procedure Pixel2LatLon(*Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
@@ -653,6 +659,12 @@ Module PBMap
     ;Ensures the longitude to be in the range [-180;180[
     *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
   EndProcedure
   
   ;Ensures the longitude to be in the range [-180;180[
@@ -1028,10 +1040,10 @@ Module PBMap
 ;     *Drawing\Bounds\SouthEast\x = tx+nx+2 
 ;     *Drawing\Bounds\SouthEast\y = ty+ny+2 
     ;    Debug "------------------"
+    ;TileXY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1, PBMap\Zoom)
+    ;TileXY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2, PBMap\Zoom)    
     CopyStructure(*Drawing\Bounds\NorthWest, @Degrees1, GeographicCoordinates)
     CopyStructure(*Drawing\Bounds\SouthEast, @Degrees2, GeographicCoordinates)
-    ;TileXY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1, PBMap\Zoom)
-    ;TileXY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2, PBMap\Zoom)
     ;ensure we stay positive for the drawing
     nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
     ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
@@ -1398,7 +1410,7 @@ Module PBMap
     If PBMap\Options\ShowDebugInfos
       DrawDebugInfos(*Drawing)
     EndIf
-    If PBMap\Options\ShowDegrees
+    If PBMap\Options\ShowDegrees And PBMap\Zoom > 2
       DrawDegrees(*Drawing, 192)    
     EndIf
     If PBMap\Options\ShowScale
@@ -1453,6 +1465,13 @@ Module PBMap
           PBMap\Zoom + Zoom
         EndIf    
     EndSelect
+    PBMap\GeographicCoordinates\Longitude = ClipLongitude(PBMap\GeographicCoordinates\Longitude)
+    If PBMap\GeographicCoordinates\Latitude < -89 
+      PBMap\GeographicCoordinates\Latitude = -89 
+    EndIf
+    If PBMap\GeographicCoordinates\Latitude > 89
+      PBMap\GeographicCoordinates\Latitude = 89 
+    EndIf
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : EndIf
     LatLon2TileXY(@PBMap\GeographicCoordinates, @PBMap\Drawing\TileCoordinates, PBMap\Zoom)
@@ -1974,7 +1993,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1")
-    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")        
@@ -2039,8 +2058,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 55
-; FirstLine = 34
+; CursorPosition = 1467
+; FirstLine = 1437
 ; Folding = --------------
 ; EnableThread
 ; EnableXP
