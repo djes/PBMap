@@ -101,19 +101,21 @@ Module PBMap
   EndStructure
   
   Structure TileBounds 
-    NorthWest.Coordinates
-    SouthEast.Coordinates 
+    NorthWest.GeographicCoordinates
+    SouthEast.GeographicCoordinates 
   EndStructure
   
   Structure DrawingParameters
-    TileCoordinates.Coordinates
-    Bounds.TileBounds 
     Canvas.i
-    PBMapZoom.i
-    GeographicCoordinates.GeographicCoordinates
-    CenterX.i
+    CenterX.i                                     ; Gadget center in screen relative pixels
     CenterY.i
-    DeltaX.i
+    GeographicCoordinates.GeographicCoordinates   ; Real center
+    TileCoordinates.Coordinates                   ; Center coordinates in tile.decimal
+    Bounds.TileBounds                             ; Drawing boundaries in lat/lon
+    Height.d                                      ; Drawing height in degrees
+    Width.d                                       ; Drawing width in degrees
+    PBMapZoom.i
+    DeltaX.i                                      ; Screen relative pixels tile shift
     DeltaY.i
     Dirty.i
     End.i
@@ -175,8 +177,16 @@ Module PBMap
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
   EndStructure
   
+  Structure Box
+    x1.i
+    y1.i
+    x2.i
+    y2.i
+  EndStructure 
+  
   Structure Tracks
     List Track.GeographicCoordinates()             ; To display a GPX track
+    BoundingBox.Box
   EndStructure
   
   ;-PBMap Structure
@@ -624,6 +634,10 @@ Module PBMap
     ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
+;   Procedure.d Positivise(Value.d)
+;     ProcedureReturn Mod(Mod(Value, 360) + 360.0, 360)
+;   EndProcedure
+  
   ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
   Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
@@ -981,17 +995,21 @@ Module PBMap
     Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
     Protected pos1.PixelCoordinates,pos2.PixelCoordinates,Degrees1.GeographicCoordinates,degrees2.GeographicCoordinates 
     Protected realx
-    tx = Int(*Drawing\TileCoordinates\x)
-    ty = Int(*Drawing\TileCoordinates\y)
-    nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
-    ny = *Drawing\CenterY / PBMap\TileSize
-    *Drawing\Bounds\NorthWest\x = tx-nx-1
-    *Drawing\Bounds\NorthWest\y = ty-ny-1
-    *Drawing\Bounds\SouthEast\x = tx+nx+2 
-    *Drawing\Bounds\SouthEast\y = ty+ny+2 
+;    tx = Int(*Drawing\TileCoordinates\x)
+;    ty = Int(*Drawing\TileCoordinates\y)
+;      tx = *Drawing\TileCoordinates\x
+;      ty = *Drawing\TileCoordinates\y
+;      nx = *Drawing\CenterX / PBMap\TileSize ;How many tiles around the point
+;      ny = *Drawing\CenterY / PBMap\TileSize
+;     *Drawing\Bounds\NorthWest\x = tx-nx-1
+;     *Drawing\Bounds\NorthWest\y = ty-ny-1
+;     *Drawing\Bounds\SouthEast\x = tx+nx+2 
+;     *Drawing\Bounds\SouthEast\y = ty+ny+2 
     ;    Debug "------------------"
-    TileXY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1, PBMap\Zoom)
-    TileXY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2, PBMap\Zoom)
+    CopyStructure(*Drawing\Bounds\NorthWest, @Degrees1, GeographicCoordinates)
+    CopyStructure(*Drawing\Bounds\SouthEast, @Degrees2, GeographicCoordinates)
+    ;TileXY2LatLon(*Drawing\Bounds\NorthWest, @Degrees1, PBMap\Zoom)
+    ;TileXY2LatLon(*Drawing\Bounds\SouthEast, @Degrees2, PBMap\Zoom)
     ;ensure we stay positive for the drawing
     nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
     ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
@@ -1054,21 +1072,26 @@ Module PBMap
     Protected Pixel.PixelCoordinates
     Protected Location.GeographicCoordinates
     Protected km.f, memKm.i
+    With PBMap\TracksList()
     ;Trace Track
     If ListSize(PBMap\TracksList()) > 0
       BeginVectorLayer()
       ForEach PBMap\TracksList()
-        If ListSize(PBMap\TracksList()\Track()) > 0
-          ForEach PBMap\TracksList()\Track()
+        If ListSize(\Track()) > 0
+          ForEach \Track()
             ;If *Drawing\GeographicCoordinates\Latitude<>0 And *Drawing\GeographicCoordinates\Longitude<>0
             LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
-            If ListIndex(PBMap\TracksList()\Track()) = 0
+            If ListIndex(\Track()) = 0
               MovePathCursor(Pixel\X, Pixel\Y)
             Else
               AddPathLine(Pixel\X, Pixel\Y)    
             EndIf
             ;EndIf 
           Next
+;           \BoundingBox\x = PathBoundsX()
+;           \BoundingBox\y = PathBoundsY()
+;           \BoundingBox\w = PathBoundsWidth()
+;           \BoundingBox\h = PathBoundsHeight()
           VectorSourceColor(RGBA(0, 255, 0, 150))
           StrokePath(10, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
         EndIf
@@ -1082,13 +1105,13 @@ Module PBMap
         km = 0 : memKm = -1
         ForEach PBMap\TracksList()\Track()
           ;Test Distance
-          If ListIndex(PBMap\TracksList()\Track()) = 0
-            Location\Latitude = PBMap\TracksList()\Track()\Latitude
-            Location\Longitude = PBMap\TracksList()\Track()\Longitude 
+          If ListIndex(\Track()) = 0
+            Location\Latitude = \Track()\Latitude
+            Location\Longitude = \Track()\Longitude 
           Else 
             km = km + HaversineInKM(@Location, @PBMap\TracksList()\Track())
-            Location\Latitude = PBMap\TracksList()\Track()\Latitude
-            Location\Longitude = PBMap\TracksList()\Track()\Longitude 
+            Location\Latitude = \Track()\Latitude
+            Location\Longitude = \Track()\Longitude 
           EndIf
           LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
           If Int(km) <> memKm
@@ -1101,6 +1124,7 @@ Module PBMap
       Next
       EndVectorLayer()
     EndIf
+    EndWith
   EndProcedure
   
   Procedure DrawMarker(x.i, y.i, Nb, Color.l, Legend.s, Focus.i, Selected.i)
@@ -1177,7 +1201,7 @@ Module PBMap
     Protected *Ptr = AddElement(PBMap\Markers())
     If *Ptr 
       PBMap\Markers()\GeographicCoordinates\Latitude = Latitude
-      PBMap\Markers()\GeographicCoordinates\Longitude = Mod(Mod(Longitude, 360) + 360, 360)
+      PBMap\Markers()\GeographicCoordinates\Longitude = ClipLongitude(Longitude)
       PBMap\Markers()\Legend = Legend
       PBMap\Markers()\Color = Color
       PBMap\Markers()\CallBackPointer = CallBackPointer
@@ -1186,12 +1210,42 @@ Module PBMap
     EndIf
   EndProcedure
   
+  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+    Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
+    Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
+    Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
+    If LatSE > LatNW
+      Debug "WTF"
+      CallDebugger
+    EndIf
+    If Lat >= LatSE And Lat <= LatNW
+      If *Drawing\Width >= 360
+        ProcedureReturn #True
+      Else
+        If LonNW < LonSE      
+          If Lon >= LonNW And Lon <= LonSE
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf  
+        Else
+          If (Lon >= -180 And Lon <= LonSE) Or (Lon >= LonNW And Lon <= 180)
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf
+        EndIf
+      EndIf
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
   ; Draw all markers
-  Procedure DrawMarkers()
+  Procedure DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
     ForEach PBMap\Markers()
-      If PBMap\Markers()\GeographicCoordinates\Latitude <> 0 And PBMap\Markers()\GeographicCoordinates\Longitude <> 0
-        ;GetPixelCoordFromLocation(PBMap\Markers()\GeographicCoordinates, @Pixel)
+      If IsInDrawingBoundaries(*Drawing, @PBMap\Markers()\GeographicCoordinates)
         LatLon2PixelRel(PBMap\Markers()\GeographicCoordinates, @Pixel, PBMap\Zoom)
         If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
           If PBMap\Markers()\CallBackPointer > 0
@@ -1204,13 +1258,13 @@ Module PBMap
     Next
   EndProcedure
   
-  Procedure DrawDebugInfos()
+  Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
-    VectorFont(FontID(PBMap\Font), 30)
+    VectorFont(FontID(PBMap\Font), 16)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(50,50)
     DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
-    MovePathCursor(50,80)
+    MovePathCursor(50,70)
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
       If PBMap\MemCache\Images()\Tile <> 0
@@ -1220,26 +1274,44 @@ Module PBMap
       EndIf
     Next
     DrawVectorText(Str(ThreadCounter))    
-    MovePathCursor(50,110)
+    MovePathCursor(50,90)
     DrawVectorText(Str(PBMap\Zoom))
+    MovePathCursor(50,110)
+    DrawVectorText(StrD(*Drawing\Bounds\NorthWest\Latitude) + "," + StrD(*Drawing\Bounds\NorthWest\Longitude))  
+    MovePathCursor(50,130)
+    DrawVectorText(StrD(*Drawing\Bounds\SouthEast\Latitude) + "," + StrD(*Drawing\Bounds\SouthEast\Longitude))  
   EndProcedure
   
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
-    Protected Px.d, Py.d,a, ts = PBMap\TileSize
+    Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
+    Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
     PBMap\Redraw = #False
-    ; Precalc some values
+    ;*** Precalc some values
     *Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
     *Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
     *Drawing\GeographicCoordinates\Latitude = PBMap\GeographicCoordinates\Latitude
     *Drawing\GeographicCoordinates\Longitude = PBMap\GeographicCoordinates\Longitude
     LatLon2TileXY(*Drawing\GeographicCoordinates, *Drawing\TileCoordinates, PBMap\Zoom)
     ; Pixel shift, aka position in the tile
-    Px = *Drawing\TileCoordinates\x : Py = *Drawing\TileCoordinates\y
+    Px = *Drawing\TileCoordinates\x 
+    Py = *Drawing\TileCoordinates\y
     *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
     *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
+    ;Drawing boundaries  
+    nx = *Drawing\CenterX / ts ;How many tiles around the point
+    ny = *Drawing\CenterY / ts
+    NW\x = Px - nx - 1
+    NW\y = Py - ny - 1
+    SE\x = Px + nx + 2 
+    SE\y = Py + ny + 2
+    TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
+    TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+    *Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ;Calculus without clipping
+    *Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
+    ;***
     ; Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
@@ -1251,13 +1323,13 @@ Module PBMap
       DrawTracks(*Drawing)
     EndIf
     If PBMap\Options\ShowMarkers
-      DrawMarkers()
+      DrawMarkers(*Drawing)
     EndIf
     If PBMap\Options\ShowPointer
       DrawPointer(*Drawing)
     EndIf
     If PBMap\Options\ShowDebugInfos
-      DrawDebugInfos()
+      DrawDebugInfos(*Drawing)
     EndIf
     If PBMap\Options\ShowDegrees
       DrawDegrees(*Drawing, 192)    
@@ -1794,7 +1866,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1")
-    PBMap::SetOption("ShowDebugInfos", "0")
+    PBMap::SetOption("ShowDebugInfos", "1")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")        
@@ -1804,7 +1876,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
-    PBMap::AddMarker(49.0446828398, 2.0349812508, "", -1, @MyMarker())  ; To add a marker with a customised GFX
+    ;PBMap::AddMarker(49.0446828398, 2.0349812508, "", -1, @MyMarker())  ; To add a marker with a customised GFX
     
     Repeat
       Event = WaitWindowEvent()
@@ -1859,8 +1931,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1078
-; FirstLine = 1074
+; CursorPosition = 638
+; FirstLine = 636
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
