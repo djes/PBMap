@@ -39,6 +39,11 @@ DeclareModule PBMap
   
   #MARKER_EDIT_EVENT = #PB_Event_FirstCustomValue
   
+  Structure GeographicCoordinates
+    Longitude.d
+    Latitude.d
+  EndStructure
+  
   ;-Declarations
   Declare InitPBMap(window)
   Declare SetOption(Option.s, Value.s)
@@ -73,17 +78,13 @@ DeclareModule PBMap
   Declare.i GetZoom()
   Declare.i GetMode()
   Declare SetMode(Mode.i = #MODE_DEFAULT)
+  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition.GeographicCoordinates = 0) ;Send back the position *ptr.GeographicCoordinates
 EndDeclareModule
 
 Module PBMap 
   
   EnableExplicit
-  
-  Structure GeographicCoordinates
-    Longitude.d
-    Latitude.d
-  EndStructure
-  
+    
   Structure PixelCoordinates
     x.i
     y.i
@@ -108,7 +109,7 @@ Module PBMap
     ServerURL.s
   EndStructure
   
-  Structure TileBounds 
+  Structure BoundingBox 
     NorthWest.GeographicCoordinates
     SouthEast.GeographicCoordinates 
   EndStructure
@@ -119,7 +120,7 @@ Module PBMap
     CenterY.i
     GeographicCoordinates.GeographicCoordinates   ; Real center
     TileCoordinates.Coordinates                   ; Center coordinates in tile.decimal
-    Bounds.TileBounds                             ; Drawing boundaries in lat/lon
+    Bounds.BoundingBox                            ; Drawing boundaries in lat/lon
     Height.d                                      ; Drawing height in degrees
     Width.d                                       ; Drawing width in degrees
     PBMapZoom.i
@@ -619,7 +620,7 @@ Module PBMap
     ClosePreferences()
     EndWith  
   EndProcedure
-    
+  
   Procedure.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
     Protected *Ptr = AddElement(PBMap\Layers())
     Protected DirName.s = PBMap\Options\HDDCachePath + LayerName + "\"
@@ -1757,6 +1758,44 @@ Module PBMap
     ProcedureReturn Value
   EndProcedure
   
+  Procedure NominatimGeoLocationQuery(Address.s, *ReturnPosition.GeographicCoordinates = 0)
+    Protected Query.s = "http://nominatim.openstreetmap.org/search/" + 
+                        URLEncoder(Address) + 
+                        ;"Unter%20den%20Linden%201%20Berlin" +
+    "?format=json&addressdetails=0&polygon=0&limit=1"
+    Protected JSONFileName.s = PBMap\Options\HDDCachePath + "nominatimresponse.json"
+    ;    Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    ;     Debug *Buffer
+    ;     Debug MemorySize(*Buffer)
+    ;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
+    Protected Size.i = CurlReceiveHTTPToFile(Query, JSONFileName, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    If LoadJSON(0, JSONFileName) = 0
+      ;Demivec's code
+      MyDebug( JSONErrorMessage() + " at position " +
+               JSONErrorPosition() + " in line " +
+               JSONErrorLine() + " of JSON web Data", 1)
+    EndIf
+    If JSONArraySize(JSONValue(0)) > 0
+      Protected object_val = GetJSONElement(JSONValue(0), 0)
+      Protected object_box = GetJSONMember(object_val, "boundingbox")
+      Protected bbox.BoundingBox
+      bbox\SouthEast\Latitude = ValD(GetJSONString(GetJSONElement(object_box, 0)))
+      bbox\NorthWest\Latitude = ValD(GetJSONString(GetJSONElement(object_box, 1)))
+      bbox\NorthWest\Longitude = ValD(GetJSONString(GetJSONElement(object_box, 2)))
+      bbox\SouthEast\Longitude = ValD(GetJSONString(GetJSONElement(object_box, 3)))
+      Protected lat.s = GetJSONString(GetJSONMember(object_val, "lat"))
+      Protected lon.s = GetJSONString(GetJSONMember(object_val, "lon"))
+      If *ReturnPosition <> 0
+        *ReturnPosition\Latitude = ValD(lat)
+        *ReturnPosition\Longitude = ValD(lon)
+      EndIf
+      If lat<> "" And lon <> "" 
+        ZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
+        ;SetLocation(Position\Latitude, Position\Longitude)
+      EndIf
+    EndIf  
+  EndProcedure
+
   Procedure CanvasEvents()
     Protected MouseX.i, MouseY.i
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
@@ -2018,37 +2057,6 @@ Module PBMap
     curl_global_init(#CURL_GLOBAL_WIN32)
     TechnicalImagesCreation()
     SetLocation(0, 0)
-    
-    Protected Name.s = PBMap\Options\HDDCachePath + "JSon.json"
-
-;    Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-;     Debug *Buffer
-;     Debug MemorySize(*Buffer)
-;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
-;     If *Buffer <> 0
-;       Debug JSon
-;     EndIf    
-    Protected i
-    ;Protected Size.i = CurlReceiveHTTPToFile("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", Name, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    If LoadJSON(0, Name) = 0
-      ;Demivec's code
-      MessageRequester("Error", JSONErrorMessage() + " at position " +
-                                JSONErrorPosition() + " in line " +
-                                JSONErrorLine() + " of JSON web Data")
-    EndIf
-    
-    Protected object_val = JSONValue(0)
-    Protected lat = GetJSONMember(object_val, "lat")
-   Protected lon = GetJSONMember(object_val, "lon")
-   CallDebugger
-;   forecast_mem = GetJSONMember(item_mem, "forecast")
-
-; ExtractJSONArray(forecast_mem, forecast())
-;     For i = 0 To JSONArraySize(JSONValue(0)) - 1
-;       Debug GetJSONElement(JSONValue(0), i)
-;     Next i
-
-    
   EndProcedure
   
 EndModule
@@ -2079,6 +2087,8 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_AddOpenseaMap
     #Gdt_Degrees
     #Gdt_EditMode
+    #TextGeoLocationQuery
+    #StringGeoLocationQuery
   EndEnumeration
   
   Structure Location
@@ -2129,14 +2139,16 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Button_4,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Button_5,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Text_3,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#StringLatitude,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#StringLongitude,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#StringLatitude,WindowWidth(#Window_0)-120,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#StringLongitude,WindowWidth(#Window_0)-120,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#TextGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#StringGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     PBMap::Refresh()
   EndProcedure
   
@@ -2154,15 +2166,19 @@ CompilerIf #PB_Compiler_IsMainFile
     TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
     ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
     ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
-    TextGadget(#Text_3, 530, 230, 60, 15, "Latitude : ")
-    StringGadget(#StringLatitude, 600, 230, 90, 20, "")
-    TextGadget(#Text_4, 530, 250, 60, 15, "Longitude : ")
-    StringGadget(#StringLongitude, 600, 250, 90, 20, "")
+    TextGadget(#Text_3, 530, 230, 50, 15, "Latitude ")
+    StringGadget(#StringLatitude, 580, 230, 90, 20, "")
+    TextGadget(#Text_4, 530, 250, 50, 15, "Longitude ")
+    StringGadget(#StringLongitude, 580, 250, 90, 20, "")
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
     ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
     ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 435, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
+    SetActiveGadget(#StringGeoLocationQuery)
+    AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -2206,7 +2222,10 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
             Case #StringLatitude, #StringLongitude
               Select EventType()
+                Case #PB_EventType_Focus
+                  AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
                 Case #PB_EventType_LostFocus
+                  RemoveKeyboardShortcut(#Window_0, #PB_Shortcut_Return)
                   PBMap::SetLocation(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)))                     ; Change the PBMap coordinates
                   PBMap::Refresh()
               EndSelect
@@ -2235,10 +2254,24 @@ CompilerIf #PB_Compiler_IsMainFile
                 PBMap::SetMode(PBMap::#MODE_DEFAULT)
                 SetGadgetState(#Gdt_EditMode, 0)
               EndIf
-          EndSelect
-        Case #PB_Event_SizeWindow
-          ResizeAll()
-      EndSelect
+            Case #StringGeoLocationQuery
+              Select EventType()
+              Case #PB_EventType_Focus
+                AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+              Case #PB_EventType_LostFocus
+                RemoveKeyboardShortcut(#Window_0, #PB_Shortcut_Return)
+                PBMap::NominatimGeoLocationQuery(GetGadgetText(#StringGeoLocationQuery))
+                PBMap::Refresh()
+            EndSelect
+        EndSelect
+      Case #PB_Event_SizeWindow
+        ResizeAll()
+      Case #PB_Event_Menu
+        Select EventMenu()
+          Case 1
+            SetActiveGadget(-1)
+        EndSelect
+    EndSelect
     Until Quit = #True
     
     PBMap::Quit()
@@ -2247,8 +2280,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 2039
-; FirstLine = 2023
+; CursorPosition = 2183
+; FirstLine = 2166
 ; Folding = ---------------
 ; EnableThread
 ; EnableXP
