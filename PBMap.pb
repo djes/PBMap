@@ -64,6 +64,7 @@ DeclareModule PBMap
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
+  Declare SetTrackColour(*Ptr, Colour.i)
   Declare.i AddMarker(Latitude.d, Longitude.d, Identifier.s = "", Legend.s = "", color.l=-1, CallBackPointer.i = -1)
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
@@ -1163,6 +1164,25 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
+  Procedure TrackPointerFirst(x.i, y.i, dist.l)
+    Protected color.l
+    color=RGBA(0, 0, 0, 255)
+    MovePathCursor(x,y)
+    AddPathLine(-9,-17,#PB_Path_Relative)
+    AddPathLine(17,0,#PB_Path_Relative)
+    AddPathLine(-9,17,#PB_Path_Relative)
+    VectorSourceColor(color)
+    AddPathCircle(x,y-24,16)
+    FillPath()
+    VectorSourceColor(RGBA(255, 0, 0, 255))
+    AddPathCircle(x,y-24,14)
+    FillPath()
+    VectorFont(FontID(PBMap\Font), 14)
+    MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-24-VectorTextHeight(Str(dist))/2)
+    VectorSourceColor(RGBA(0, 0, 0, 255))
+    DrawVectorText(Str(dist))
+  EndProcedure
+  
   Procedure DeleteTrack(*Ptr)
     If *Ptr 
       ChangeCurrentElement(PBMap\TracksList(), *Ptr)
@@ -1182,6 +1202,14 @@ Module PBMap
   Procedure ClearTracks()
     ClearList(PBMap\TracksList())
     PBMap\Redraw = #True  
+  EndProcedure
+  
+  Procedure SetTrackColour(*Ptr, Colour.i)
+    If *Ptr 
+      ChangeCurrentElement(PBMap\TracksList(), *Ptr)
+      PBMap\TracksList()\Colour = Colour
+      PBMap\Redraw = #True
+    EndIf
   EndProcedure
   
   Procedure  DrawTracks(*Drawing.DrawingParameters)
@@ -1229,7 +1257,7 @@ Module PBMap
         Next
         EndVectorLayer()
         ;Draw distances
-        If PBMap\Options\ShowTrackKms
+        If PBMap\Options\ShowTrackKms And PBMap\Zoom > 10
           BeginVectorLayer()
           ForEach PBMap\TracksList()
             If \Visible
@@ -1247,9 +1275,11 @@ Module PBMap
                 LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
                 If Int(km) <> memKm
                   memKm = Int(km)
-                  If PBMap\Zoom > 10
+                  If Int(km) = 0
+                    TrackPointerFirst(Pixel\X , Pixel\Y, Int(km))
+                  Else
                     TrackPointer(Pixel\X , Pixel\Y, Int(km))
-                  EndIf 
+                  EndIf  
                 EndIf
               Next
             EndIf
@@ -2183,6 +2213,7 @@ CompilerIf #PB_Compiler_IsMainFile
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define OpenSeaMap = 0, Degrees = 1
+    Define *Track
     
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
@@ -2219,7 +2250,8 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Button_5
               PBMap::SetZoom( - 1)
             Case #Gdt_LoadGpx
-              PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
+              *Track = PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
+              PBMap::SetTrackColour(*Track, RGBA(Random(255), Random(255), Random(255), 128))
             Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_Focus
@@ -2280,8 +2312,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 2183
-; FirstLine = 2166
-; Folding = ---------------
+; CursorPosition = 1156
+; FirstLine = 1144
+; Folding = ----------------
 ; EnableThread
 ; EnableXP
