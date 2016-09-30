@@ -278,6 +278,79 @@ Module PBMap
   
   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
   
+  Global *ReceiveHTTPToMemoryBuffer, ReceiveHTTPToMemoryBufferPtr.i, ReceivedData.s
+   
+  ProcedureC ReceiveHTTPWriteToMemoryFunction(*ptr, Size.i, NMemB.i, *Stream)
+    Protected SizeProper.i  = Size & 255
+    Protected NMemBProper.i = NMemB
+    If *ReceiveHTTPToMemoryBuffer = 0
+      *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
+      If *ReceiveHTTPToMemoryBuffer = 0
+        Error("Curl : Problem allocating memory")
+      EndIf
+    Else
+      *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
+      If *ReceiveHTTPToMemoryBuffer = 0
+        Error("Curl : Problem reallocating memory")
+      EndIf  
+    EndIf
+    CopyMemory(*ptr, *ReceiveHTTPToMemoryBuffer + ReceiveHTTPToMemoryBufferPtr, SizeProper * NMemBProper)
+    ReceiveHTTPToMemoryBufferPtr + SizeProper * NMemBProper
+    ProcedureReturn SizeProper * NMemBProper
+  EndProcedure
+  
+  Procedure.i CurlReceiveHTTPToMemory(URL$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
+    Protected *Buffer, curl.i, Timeout.i, res.i
+    If Len(URL$)
+      curl  = curl_easy_init()
+      If curl
+        Timeout = 3
+        curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
+        curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
+        curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
+        curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
+        curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
+        curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
+        If Len(ProxyURL$)
+          ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
+          If Len(ProxyPort$)
+            ProxyURL$ + ":" + ProxyPort$
+          EndIf
+          ; Debug ProxyURL$
+          curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
+          If Len(ProxyUser$)
+            If Len(ProxyPassword$)
+              ProxyUser$ + ":" + ProxyPassword$
+            EndIf
+            ;Debug ProxyUser$
+            curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
+          EndIf
+        EndIf
+        curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
+        res = curl_easy_perform(curl)
+        If res = #CURLE_OK
+          *Buffer = AllocateMemory(ReceiveHTTPToMemoryBufferPtr)
+          If *Buffer
+            CopyMemory(*ReceiveHTTPToMemoryBuffer, *Buffer, ReceiveHTTPToMemoryBufferPtr)
+            FreeMemory(*ReceiveHTTPToMemoryBuffer)
+            *ReceiveHTTPToMemoryBuffer = #Null
+            ReceiveHTTPToMemoryBufferPtr = 0
+          Else
+            MyDebug("Problem allocating buffer", 4)         
+          EndIf        
+          ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
+        Else
+          MyDebug("CURL problem", 4)
+        EndIf
+        curl_easy_cleanup(curl)
+      Else
+        MyDebug("Can't Init CURL", 4)
+      EndIf      
+    EndIf
+    ; Debug "Curl Buffer : " + Str(*Buffer)
+    ProcedureReturn *Buffer
+  EndProcedure
+  
   ;Curl write callback (needed for win32 dll)
   ProcedureC ReceiveHTTPWriteToFileFunction(*ptr, Size.i, NMemB.i, FileHandle.i)
     ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)    
@@ -299,7 +372,7 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)        
-        curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
+        curl_easy_setopt(curl, #CURLOPT_VERBOSE, 0)
         ;curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 60)
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
@@ -331,6 +404,7 @@ Module PBMap
     EndIf
     ProcedureReturn #False
   EndProcedure
+    
   ;- ***
   
   Procedure TechnicalImagesCreation()
@@ -1944,6 +2018,24 @@ Module PBMap
     curl_global_init(#CURL_GLOBAL_WIN32)
     TechnicalImagesCreation()
     SetLocation(0, 0)
+    
+    Protected Name.s = PBMap\Options\HDDCachePath + "JSon.json"
+
+;    Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+;     Debug *Buffer
+;     Debug MemorySize(*Buffer)
+;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
+;     If *Buffer <> 0
+;       Debug JSon
+;     EndIf    
+    Protected i
+    ;Protected Size.i = CurlReceiveHTTPToFile("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", Name, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    LoadJSON(0, Name)
+    For i = 0 To JSONArraySize(JSONValue(0)) - 1
+      Debug GetJSONElement(JSONValue(0), i)
+    Next i
+
+    
   EndProcedure
   
 EndModule
@@ -2142,7 +2234,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 10
+; CursorPosition = 2030
+; FirstLine = 2009
 ; Folding = ---------------
 ; EnableThread
 ; EnableXP
