@@ -1,14 +1,15 @@
-;************************************************************** 
+;******************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes And Idle
 ; Date:              Mai 17, 2016
-; License:           Free, unrestricted, credit appreciated 
-;                    but not required.
+; License:           PBMap : Free, unrestricted, credit 
+;                            appreciated but not required.
+;                    OSM : see http://www.openstreetmap.org/copyright
 ; Note:              Please share improvement !
-; Thanks:            Progi1984
-;************************************************************** 
+; Thanks:            Progi1984, yves86
+;******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
   MessageRequester("Warning !!","You must enable ThreadSafe support in compiler options",#PB_MessageRequester_Ok )
@@ -35,6 +36,8 @@ DeclareModule PBMap
   #MODE_HAND = 1
   #MODE_SELECT = 2
   #MODE_EDIT = 3
+  
+  #MARKER_EDIT_EVENT = #PB_Event_FirstCustomValue
   
   ;-Declarations
   Declare InitPBMap(window)
@@ -149,6 +152,7 @@ Module PBMap
     Focus.i
     Selected.i                                     ; Is the marker selected ?
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
+    EditWindow.i
   EndStructure
   
   ;-Options
@@ -541,31 +545,7 @@ Module PBMap
     ClosePreferences()
     EndWith  
   EndProcedure
-  
-  Procedure InitPBMap(Window)
-    Protected Result.i
-    If Verbose
-      OpenConsole()
-    EndIf
-    PBMap\ZoomMin = 0
-    PBMap\ZoomMax = 18
-    PBMap\MoveStartingPoint\x = - 1
-    PBMap\TileSize = 256
-    PBMap\Dirty = #False
-    PBMap\EditMarker = #False
-    PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
-    PBMap\Window = Window
-    PBMap\Timer = 1
-    PBMap\Mode = #MODE_DEFAULT
-    LoadOptions()
-    If PBMap\Options\DefaultOSMServer <> "" 
-      AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
-    EndIf
-    curl_global_init(#CURL_GLOBAL_WIN32)
-    TechnicalImagesCreation()
-    SetLocation(0, 0)
-  EndProcedure
-  
+    
   Procedure.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
     Protected *Ptr = AddElement(PBMap\Layers())
     Protected DirName.s = PBMap\Options\HDDCachePath + LayerName + "\"
@@ -1276,33 +1256,47 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure MarkerWindowEvents()
-    If EventType() = #PB_EventType_Change
-      If EventGadget() = GetGadgetText(EventGadget()) <> ""
-        *Marker\Identifier = GetGadgetText(StringIdentifier)
-      EndIf
-      If GetGadgetText(EditorLegend) <> ""
-        *Marker\Legend = GetGadgetText(EditorLegend)
-      EndIf
+  ;-*** Marker Edit
+  Procedure MarkerIdentifierChange()
+    Protected *Marker.Marker = GetGadgetData(EventGadget())
+    If GetGadgetText(EventGadget()) <> *Marker\Identifier
+      *Marker\Identifier = GetGadgetText(EventGadget())
     EndIf
   EndProcedure  
-  
-  Procedure EditMarker(*Marker.Marker)
-    CallDebugger
-    Protected WindowMarkerEdit = OpenWindow(#PB_Any, 0, 0, 300, 100, "Marker Edit", #PB_Window_SystemMenu | #PB_Window_TitleBar | #PB_Window_WindowCentered | #PB_Window_NoGadgets)
-    BindEvent()
-    TextGadget(#PB_Any, 2, 2, 80, 25, gettext("Identifier"))
-    TextGadget(#PB_Any, 2, 27, 80, 25, gettext("Legend"))
-    Protected StringIdentifier = StringGadget(#PB_Any, 84, 2, 120, 25, "")
-    Protected EditorLegend = EditorGadget(#PB_Any, 84, 27, 210, 70)
-    BindEvent(#PB_Event_CloseWindow, @MarkerWindowEvents(), WindowMarkerEdit, *Marker)
-    BindGadgetEvent(StringIdentifier, @MarkerWindowEvents())
-    BindGadgetEvent(EditorLegend, @MarkerWindowEvents())
+  Procedure MarkerLegendChange()
+    Protected *Marker.Marker = GetGadgetData(EventGadget())
+    If GetGadgetText(EventGadget()) <> *Marker\Legend
+      *Marker\Legend = GetGadgetText(EventGadget())
+    EndIf
+  EndProcedure  
+  Procedure MarkerEditCloseWindow()
+    ForEach PBMap\Markers()
+      If PBMap\Markers()\EditWindow = EventWindow()
+        PBMap\Markers()\EditWindow = 0
+      EndIf
+    Next
+    CloseWindow(EventWindow())  
   EndProcedure
+  Procedure MarkerEdit(*Marker.Marker)
+    If *Marker\EditWindow = 0 ;Check that this marker has no already opened window
+      Protected WindowMarkerEdit = OpenWindow(#PB_Any, WindowX(PBMap\Window) + WindowWidth(PBMap\Window) / 2 - 150, WindowY(PBMap\Window)+ WindowHeight(PBMap\Window) / 2 + 50, 300, 100, "Marker Edit", #PB_Window_SystemMenu | #PB_Window_TitleBar)
+      StickyWindow(WindowMarkerEdit, #True) 
+      TextGadget(#PB_Any, 2, 2, 80, 25, gettext("Identifier"))
+      TextGadget(#PB_Any, 2, 27, 80, 25, gettext("Legend"))
+      Protected StringIdentifier = StringGadget(#PB_Any, 84, 2, 120, 25, *Marker\Identifier) : SetGadgetData(StringIdentifier, *Marker)
+      Protected EditorLegend = EditorGadget(#PB_Any, 84, 27, 210, 70) : SetGadgetText(EditorLegend, *Marker\Legend) : SetGadgetData(EditorLegend, *Marker)
+      *Marker\EditWindow = WindowMarkerEdit
+      BindGadgetEvent(StringIdentifier, @MarkerIdentifierChange(), #PB_EventType_Change)
+      BindGadgetEvent(EditorLegend, @MarkerLegendChange(), #PB_EventType_Change)
+      BindEvent(#PB_Event_CloseWindow, @MarkerEditCloseWindow(), WindowMarkerEdit)  
+    Else
+      SetActiveWindow(*Marker\EditWindow)
+    EndIf
+  EndProcedure
+  ;-***
 
   Procedure DrawMarker(x.i, y.i, Nb.i, *Marker.Marker)
     Protected Text.s
-    ;Nice marker by yves86
     VectorSourceColor(*Marker\Color)
     MovePathCursor(x, y)
     AddPathLine(-8, -16, #PB_Path_Relative)
@@ -1397,6 +1391,14 @@ Module PBMap
     DrawVectorText(StrD(*Drawing\Bounds\SouthEast\Latitude) + "," + StrD(*Drawing\Bounds\SouthEast\Longitude))  
   EndProcedure
   
+  Procedure DrawOSMCopyright(*Drawing.DrawingParameters)
+    Protected Text.s = "© OpenStreetMap contributors"
+    VectorFont(FontID(PBMap\Font), 12)
+    VectorSourceColor(RGBA(0, 0, 0, 80))
+    MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
+    DrawVectorText(Text)
+  EndProcedure
+  
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
@@ -1451,7 +1453,8 @@ Module PBMap
     EndIf
     If PBMap\Options\ShowScale
       DrawScale(*Drawing, 10, GadgetHeight(PBMAP\Gadget) - 20, 192)
-    EndIf 
+    EndIf
+    DrawOSMCopyright(*Drawing)
     StopVectorDrawing()
   EndProcedure
   
@@ -1748,7 +1751,7 @@ Module PBMap
               SetLocation(PBMap\Markers()\GeographicCoordinates\Latitude, PBMap\Markers()\GeographicCoordinates\Longitude)
             ElseIf PBMap\Mode = #MODE_EDIT
               ;Edit the legend
-              EditMarker(@PBMap\Markers())
+              MarkerEdit(@PBMap\Markers())
             EndIf
             Break
           EndIf
@@ -1834,7 +1837,7 @@ Module PBMap
           MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
           ;Clip MouseX to the map range (in X, the map is infinite)
           MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
-          If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
+          If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT Or PBMap\Mode = #MODE_EDIT
             ;Check if mouse touch markers
             ForEach PBMap\Markers()              
               LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
@@ -1917,6 +1920,30 @@ Module PBMap
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
     BindEvent(#PB_Event_Timer, @TimerEvents())
+  EndProcedure
+
+  Procedure InitPBMap(Window)
+    Protected Result.i
+    If Verbose
+      OpenConsole()
+    EndIf
+    PBMap\ZoomMin = 0
+    PBMap\ZoomMax = 18
+    PBMap\MoveStartingPoint\x = - 1
+    PBMap\TileSize = 256
+    PBMap\Dirty = #False
+    PBMap\EditMarker = #False
+    PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+    PBMap\Window = Window
+    PBMap\Timer = 1
+    PBMap\Mode = #MODE_DEFAULT
+    LoadOptions()
+    If PBMap\Options\DefaultOSMServer <> "" 
+      AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
+    EndIf
+    curl_global_init(#CURL_GLOBAL_WIN32)
+    TechnicalImagesCreation()
+    SetLocation(0, 0)
   EndProcedure
   
 EndModule
@@ -2028,9 +2055,9 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringLongitude, 600, 250, 90, 20, "")
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
-    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "OpenSeaMap", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
     ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit Mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -2115,8 +2142,7 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1278
-; FirstLine = 1269
-; Folding = --------------
+; CursorPosition = 10
+; Folding = ---------------
 ; EnableThread
 ; EnableXP
