@@ -56,7 +56,7 @@ DeclareModule PBMap
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
-  Declare.i AddMarker(Latitude.d, Longitude.d, Legend.s = "", color.l=-1, CallBackPointer.i = -1)
+  Declare.i AddMarker(Latitude.d, Longitude.d, Identifier.s = "", Legend.s = "", color.l=-1, CallBackPointer.i = -1)
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
   Declare DeleteSelectedMarkers()
@@ -68,6 +68,8 @@ DeclareModule PBMap
   Declare.d MouseLatitude()
   Declare.d MouseLongitude()
   Declare.i GetZoom()
+  Declare.i GetMode()
+  Declare SetMode(Mode.i = #MODE_DEFAULT)
 EndDeclareModule
 
 Module PBMap 
@@ -141,6 +143,7 @@ Module PBMap
   
   Structure Marker
     GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
+    Identifier.s
     Legend.s
     Color.l                                        ; Marker color
     Focus.i
@@ -262,6 +265,9 @@ Module PBMap
       ;Debug msg  
     EndIf
   EndProcedure
+  
+  ;- *** GetText - Translation purpose
+  IncludeFile "gettext.pbi"
   
   ;- *** CURL specific
   ; (program has To be compiled in console format for curl debug infos)
@@ -1233,57 +1239,6 @@ Module PBMap
     EndIf
   EndProcedure
 
-  Procedure DrawMarker(x.i, y.i, Nb, Color.l, Legend.s, Focus.i, Selected.i)
-    ;Nice marker by yves86
-    VectorSourceColor(color)
-    MovePathCursor(x, y)
-    AddPathLine(-8, -16, #PB_Path_Relative)
-    AddPathCircle(8, 0, 8, 180, 0, #PB_Path_Relative)
-    AddPathLine(-8, 16, #PB_Path_Relative)
-    ;FillPath(#PB_Path_Preserve) 
-    ;ClipPath(#PB_Path_Preserve)
-    AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
-    VectorSourceColor(Color)
-    FillPath(#PB_Path_Preserve)
-    If Focus
-      VectorSourceColor(PBMap\Options\ColourFocus)
-      StrokePath(3)
-    ElseIf Selected
-      VectorSourceColor(PBMap\Options\ColourSelected)
-      StrokePath(4)
-    Else
-      VectorSourceColor(Color)
-      StrokePath(1)
-    EndIf
-    If PBMap\Options\ShowMarkersNb
-      Protected Text.s = Str(Nb)
-      VectorFont(FontID(PBMap\Font), 13)
-      MovePathCursor(x - 10, y)
-      VectorSourceColor(RGBA(0, 0, 0, 255))
-      DrawVectorParagraph(Text, 20, 20, #PB_VectorParagraph_Center)
-    EndIf
-    If PBMap\Options\ShowMarkersLegend
-      VectorFont(FontID(PBMap\Font), 13)
-;      Protected Height = VectorParagraphHeight(Legend, 100, 13)
-      ;dessin d'un cadre avec fond transparent
-      Protected Height = VectorParagraphHeight(Legend, 100, 100)
-      Protected Width.l
-      If Height < 20 ; une ligne
-        Width = VectorTextWidth(Legend)
-      Else
-        Width = 100
-      EndIf
-      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
-      VectorSourceColor(RGBA(168, 255, 255, 100))
-      FillPath()
-      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
-      VectorSourceColor(RGBA(36, 36, 255, 100))
-      StrokePath(2)
-      MovePathCursor(x - 50, y - 30 - Height)
-      VectorSourceColor(RGBA(0, 0, 0, 255))
-      DrawVectorParagraph(Legend, 100, Height, #PB_VectorParagraph_Center)
-    EndIf  
-  EndProcedure
   
   Procedure ClearMarkers()
     ClearList(PBMap\Markers())
@@ -1307,17 +1262,98 @@ Module PBMap
     Next
   EndProcedure
   
-  Procedure.i AddMarker(Latitude.d, Longitude.d, Legend.s = "", Color.l=-1, CallBackPointer.i = -1)
+  Procedure.i AddMarker(Latitude.d, Longitude.d, Identifier.s = "", Legend.s = "", Color.l=-1, CallBackPointer.i = -1)
     Protected *Ptr = AddElement(PBMap\Markers())
     If *Ptr 
       PBMap\Markers()\GeographicCoordinates\Latitude = Latitude
       PBMap\Markers()\GeographicCoordinates\Longitude = ClipLongitude(Longitude)
+      PBMap\Markers()\Identifier = Identifier
       PBMap\Markers()\Legend = Legend
       PBMap\Markers()\Color = Color
       PBMap\Markers()\CallBackPointer = CallBackPointer
       PBMap\Redraw = #True
       ProcedureReturn *Ptr
     EndIf
+  EndProcedure
+  
+  Procedure MarkerWindowEvents()
+    If EventType() = #PB_EventType_Change
+      If EventGadget() = GetGadgetText(EventGadget()) <> ""
+        *Marker\Identifier = GetGadgetText(StringIdentifier)
+      EndIf
+      If GetGadgetText(EditorLegend) <> ""
+        *Marker\Legend = GetGadgetText(EditorLegend)
+      EndIf
+    EndIf
+  EndProcedure  
+  
+  Procedure EditMarker(*Marker.Marker)
+    CallDebugger
+    Protected WindowMarkerEdit = OpenWindow(#PB_Any, 0, 0, 300, 100, "Marker Edit", #PB_Window_SystemMenu | #PB_Window_TitleBar | #PB_Window_WindowCentered | #PB_Window_NoGadgets)
+    BindEvent()
+    TextGadget(#PB_Any, 2, 2, 80, 25, gettext("Identifier"))
+    TextGadget(#PB_Any, 2, 27, 80, 25, gettext("Legend"))
+    Protected StringIdentifier = StringGadget(#PB_Any, 84, 2, 120, 25, "")
+    Protected EditorLegend = EditorGadget(#PB_Any, 84, 27, 210, 70)
+    BindEvent(#PB_Event_CloseWindow, @MarkerWindowEvents(), WindowMarkerEdit, *Marker)
+    BindGadgetEvent(StringIdentifier, @MarkerWindowEvents())
+    BindGadgetEvent(EditorLegend, @MarkerWindowEvents())
+  EndProcedure
+
+  Procedure DrawMarker(x.i, y.i, Nb.i, *Marker.Marker)
+    Protected Text.s
+    ;Nice marker by yves86
+    VectorSourceColor(*Marker\Color)
+    MovePathCursor(x, y)
+    AddPathLine(-8, -16, #PB_Path_Relative)
+    AddPathCircle(8, 0, 8, 180, 0, #PB_Path_Relative)
+    AddPathLine(-8, 16, #PB_Path_Relative)
+    ;FillPath(#PB_Path_Preserve) 
+    ;ClipPath(#PB_Path_Preserve)
+    AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
+    VectorSourceColor(*Marker\Color)
+    FillPath(#PB_Path_Preserve)
+    If *Marker\Focus
+      VectorSourceColor(PBMap\Options\ColourFocus)
+      StrokePath(3)
+    ElseIf *Marker\Selected
+      VectorSourceColor(PBMap\Options\ColourSelected)
+      StrokePath(4)
+    Else
+      VectorSourceColor(*Marker\Color)
+      StrokePath(1)
+    EndIf
+    If PBMap\Options\ShowMarkersNb
+      If *Marker\Identifier = ""
+        Text.s = Str(Nb)
+      Else
+        Text.s = *Marker\Identifier
+      EndIf
+      VectorFont(FontID(PBMap\Font), 13)
+      MovePathCursor(x - VectorTextWidth(Text) / 2, y)
+      VectorSourceColor(RGBA(0, 0, 0, 255))
+      DrawVectorText(Text)
+    EndIf
+    If PBMap\Options\ShowMarkersLegend And *Marker\Legend <> ""
+      VectorFont(FontID(PBMap\Font), 13)
+      ;dessin d'un cadre avec fond transparent
+      Protected Height = VectorParagraphHeight(*Marker\Legend, 100, 100)
+      Protected Width.l
+      If Height < 20 ; une ligne
+        Width = VectorTextWidth(*Marker\Legend)
+      Else
+        Width = 100
+      EndIf
+      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
+      VectorSourceColor(RGBA(168, 255, 255, 100))
+      FillPath()
+      AddPathBox(x - (Width / 2), y - 30 - Height, Width, Height)
+      VectorSourceColor(RGBA(36, 36, 255, 100))
+      StrokePath(2)
+      MovePathCursor(x - 50, y - 30 - Height)
+      VectorSourceColor(RGBA(0, 0, 0, 255))
+      DrawVectorParagraph(*Marker\Legend, 100, Height, #PB_VectorParagraph_Center)
+    EndIf  
   EndProcedure
     
   ; Draw all markers
@@ -1330,7 +1366,7 @@ Module PBMap
           If PBMap\Markers()\CallBackPointer > 0
             CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\X, Pixel\Y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
           Else
-            DrawMarker(Pixel\X, Pixel\Y, ListIndex(PBMap\Markers()), PBMap\Markers()\Color, PBMap\Markers()\Legend, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
+            DrawMarker(Pixel\X, Pixel\Y, ListIndex(PBMap\Markers()), @PBMap\Markers())
           EndIf
         EndIf 
       EndIf 
@@ -1575,9 +1611,13 @@ Module PBMap
   ; #MODE_HAND    = 1 -> Hand only
   ; #MODE_SELECT  = 2 -> Move objects only
   ; #MODE_EDIT    = 3 -> Create objects
-  Procedure SetMode(Mode = #MODE_DEFAULT)
-    PBMap\Mode = Mode
-  EndProcedure   
+  Procedure SetMode(Mode.i = #MODE_DEFAULT)
+    PBMap\Mode = Mode  
+  EndProcedure
+  
+  Procedure.i GetMode()
+    ProcedureReturn PBMap\Mode
+  EndProcedure
   
   ;Zoom on x, y position relative to the canvas gadget
   Procedure SetZoomOnPosition(x, y, zoom)
@@ -1692,23 +1732,27 @@ Module PBMap
           CtrlKey = #True
         EndIf
       Case #PB_EventType_LeftDoubleClick
-        If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
-          ;Check if the mouse touch a marker, if so, jump to it
-          LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-          MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
-          MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
-          ;Clip MouseX to the map range (in X, the map is infinite)
-          MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
-          Touch = #False
-          ForEach PBMap\Markers()              
-            LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
-            If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
+        LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+        MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
+        MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+        ;Clip MouseX to the map range (in X, the map is infinite)
+        MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
+        Touch = #False
+        ;Check if the mouse touch a marker
+        ForEach PBMap\Markers()              
+          LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
+          If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
+            If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
+              ;Jump to the marker
               Touch = #True
               SetLocation(PBMap\Markers()\GeographicCoordinates\Latitude, PBMap\Markers()\GeographicCoordinates\Longitude)
-              Break
+            ElseIf PBMap\Mode = #MODE_EDIT
+              ;Edit the legend
+              EditMarker(@PBMap\Markers())
             EndIf
-          Next
-        EndIf
+            Break
+          EndIf
+        Next
         If Not Touch
           GotoPixelRel(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY))
         EndIf
@@ -1869,11 +1913,10 @@ Module PBMap
     Else
       PBMap\Gadget = Gadget
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
-    EndIf 
+    EndIf
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
     BindEvent(#PB_Event_Timer, @TimerEvents())
-    ;AddKeyboardShortcut(#PB_Shortcut_Delete
   EndProcedure
   
 EndModule
@@ -1903,6 +1946,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
     #Gdt_Degrees
+    #Gdt_EditMode
   EndEnumeration
   
   Structure Location
@@ -1960,6 +2004,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     PBMap::Refresh()
   EndProcedure
   
@@ -1983,8 +2028,9 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringLongitude, 600, 250, 90, 20, "")
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
-    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "OpenSeaMap")
-    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees")
+    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "OpenSeaMap", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit Mode ON/OFF", #PB_Button_Toggle)
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -1992,7 +2038,7 @@ CompilerIf #PB_Compiler_IsMainFile
     
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
-    PBMap::SetOption("ShowDegrees", "1")
+    PBMap::SetOption("ShowDegrees", "0") : Degrees = 0
     PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
@@ -2003,7 +2049,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
-    ;PBMap::AddMarker(49.0446828398, 2.0349812508, "", -1, @MyMarker())  ; To add a marker with a customised GFX
+    PBMap::AddMarker(49.0446828398, 2.0349812508, "", "", -1, @MyMarker())  ; To add a marker with a customised GFX
     
     Repeat
       Event = WaitWindowEvent()
@@ -2030,22 +2076,33 @@ CompilerIf #PB_Compiler_IsMainFile
               Select EventType()
                 Case #PB_EventType_LostFocus
                   PBMap::SetLocation(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)))                     ; Change the PBMap coordinates
-                  PBMAP::Refresh()
+                  PBMap::Refresh()
               EndSelect
             Case #Gdt_AddMarker
-              PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "Test", RGBA(Random(255), Random(255), Random(255), 255))
+              PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", "Test", RGBA(Random(255), Random(255), Random(255), 255))
             Case #Gdt_AddOpenseaMap
               If OpenSeaMap = 0
                 OpenSeaMap = PBMap::AddMapServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
+                SetGadgetState(#Gdt_AddOpenseaMap, 1)
               Else
                 PBMap::DeleteLayer(OpenSeaMap)
                 OpenSeaMap = 0
+                SetGadgetState(#Gdt_AddOpenseaMap, 0)
               EndIf
               PBMAP::Refresh()
             Case #Gdt_Degrees
               Degrees = 1 - Degrees
               PBMap::SetOption("ShowDegrees", Str(Degrees))
               PBMap::Refresh()
+              SetGadgetState(#Gdt_Degrees, Degrees)
+            Case #Gdt_EditMode
+              If PBMap::GetMode() <> PBMap::#MODE_EDIT
+                PBMap::SetMode(PBMap::#MODE_EDIT)
+                SetGadgetState(#Gdt_EditMode, 1)
+              Else
+                PBMap::SetMode(PBMap::#MODE_DEFAULT)
+                SetGadgetState(#Gdt_EditMode, 0)
+              EndIf
           EndSelect
         Case #PB_Event_SizeWindow
           ResizeAll()
@@ -2058,8 +2115,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1467
-; FirstLine = 1437
+; CursorPosition = 1278
+; FirstLine = 1269
 ; Folding = --------------
 ; EnableThread
 ; EnableXP
