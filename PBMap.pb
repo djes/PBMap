@@ -2030,10 +2030,23 @@ Module PBMap
 ;     EndIf    
     Protected i
     ;Protected Size.i = CurlReceiveHTTPToFile("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", Name, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    LoadJSON(0, Name)
-    For i = 0 To JSONArraySize(JSONValue(0)) - 1
-      Debug GetJSONElement(JSONValue(0), i)
-    Next i
+    If LoadJSON(0, Name) = 0
+      ;Demivec's code
+      MessageRequester("Error", JSONErrorMessage() + " at position " +
+                                JSONErrorPosition() + " in line " +
+                                JSONErrorLine() + " of JSON web Data")
+    EndIf
+    
+    Protected object_val = JSONValue(0)
+    Protected lat = GetJSONMember(object_val, "lat")
+   Protected lon = GetJSONMember(object_val, "lon")
+   CallDebugger
+;   forecast_mem = GetJSONMember(item_mem, "forecast")
+
+; ExtractJSONArray(forecast_mem, forecast())
+;     For i = 0 To JSONArraySize(JSONValue(0)) - 1
+;       Debug GetJSONElement(JSONValue(0), i)
+;     Next i
 
     
   EndProcedure
@@ -2234,8 +2247,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 2030
-; FirstLine = 2009
+; CursorPosition = 2039
+; FirstLine = 2023
 ; Folding = ---------------
 ; EnableThread
 ; EnableXP
