@@ -2209,6 +2209,10 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+    CompilerIf #PB_Compiler_OS = #PB_OS_Linux
+      Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
+      HideGadget(Dummy, 1)
+    CompilerEndIf
     
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
@@ -2301,7 +2305,11 @@ CompilerIf #PB_Compiler_IsMainFile
       Case #PB_Event_Menu
         Select EventMenu()
           Case 1
-            SetActiveGadget(-1)
+            CompilerIf #PB_Compiler_OS = #PB_OS_Linux
+              SetActiveGadget(Dummy)
+            CompilerElse
+              SetActiveGadget(-1)
+            CompilerEndIf
         EndSelect
     EndSelect
     Until Quit = #True
@@ -2311,9 +2319,10 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1156
-; FirstLine = 1144
+; IDE Options = PureBasic 5.42 LTS (Windows - x64)
+; CursorPosition = 2180
+; FirstLine = 2221
 ; Folding = ----------------
+; EnableUnicode
 ; EnableThread
 ; EnableXP
