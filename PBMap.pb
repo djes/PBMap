@@ -99,16 +99,12 @@ Module PBMap
   
   ;- Tile Structure
   Structure Tile
-    Position.Coordinates
-    PBMapTileX.i
-    PBMapTileY.i
-    PBMapZoom.i
     nImage.i
     key.s
+    URL.s
     CacheFile.s
     GetImageThread.i
     RetryNb.i
-    ServerURL.s
   EndStructure
   
   Structure BoundingBox 
@@ -136,6 +132,7 @@ Module PBMap
     nImage.i
     *Tile.Tile
     TimeStackPosition.i
+    Alpha.i
   EndStructure
   
   Structure ImgMemCachKey
@@ -891,9 +888,8 @@ Module PBMap
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    Protected TileURL.s = *Tile\ServerURL + Str(*Tile\PBMapZoom) + "/" + Str(*Tile\PBMapTileX) + "/" + Str(*Tile\PBMapTileY) + ".png"   
     Repeat
-      nImage = GetTileFromWeb(TileURL, *Tile\CacheFile)
+      nImage = GetTileFromWeb(*Tile\URL, *Tile\CacheFile)
       If nImage <> -1
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
         *Tile\RetryNb = 0
@@ -909,7 +905,7 @@ Module PBMap
   EndProcedure
   ;-***
   
-  Procedure.i GetTile(key.s, CacheFile.s, px.i, py.i, tilex.i, tiley.i, ServerURL.s)
+  Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
     Protected timg = -1
@@ -967,14 +963,9 @@ Module PBMap
         With *NewTile
           PBMap\MemCache\Images()\Tile = *NewTile
           ;New tile parameters
-          \Position\x = px 
-          \Position\y = py 
-          \PBMapTileX = tilex 
-          \PBMapTileY = tiley
-          \PBMapZoom  = PBMap\Zoom
           \key = key
+          \URL = URL
           \CacheFile = CacheFile
-          \ServerURL = ServerURL
           \RetryNb = 5
           \nImage = -1         
           MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
@@ -993,7 +984,8 @@ Module PBMap
     Protected ty = Int(*Drawing\TileCoordinates\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize        ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
-    Protected px, py, img, tilex,tiley, key.s, CacheFile.s
+    Protected px, py, img, tilex,tiley, key.s
+    Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
     SelectElement(PBMap\Layers(), Layer)
     MyDebug("Drawing tiles")
@@ -1025,8 +1017,9 @@ Module PBMap
             EndIf
           EndIf
           ; Tile cache name based on y
+          URL = PBMap\Layers()\ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
           CacheFile = DirName + "\" + Str(tiley) + ".png" 
-          img = GetTile(key, CacheFile, px, py, tilex, tiley, PBMap\Layers()\ServerURL)
+          img = GetTile(key, URL, CacheFile)
           If img <> -1  
             MovePathCursor(px, py)
             DrawVectorImage(ImageID(img), alpha)
@@ -2218,7 +2211,7 @@ CompilerIf #PB_Compiler_IsMainFile
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
     CompilerIf #PB_Compiler_OS = #PB_OS_Linux
-      define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
+      Define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
       HideGadget(Dummy, 1) 
     CompilerElse
       Define Dummy = -1
@@ -2329,8 +2322,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 57
-; FirstLine = 48
+; CursorPosition = 911
+; FirstLine = 895
 ; Folding = ----------------
 ; EnableThread
 ; EnableXP
