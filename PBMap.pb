@@ -51,6 +51,7 @@ DeclareModule PBMap
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare DeleteLayer(Nb.i)
+  Declare BindMapGadget(Gadget.i)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
   Declare Drawing()
@@ -1804,8 +1805,7 @@ Module PBMap
       MyDebug( JSONErrorMessage() + " at position " +
                JSONErrorPosition() + " in line " +
                JSONErrorLine() + " of JSON web Data", 1)
-    EndIf
-    If JSONArraySize(JSONValue(0)) > 0
+    ElseIf JSONArraySize(JSONValue(0)) > 0
       Protected object_val = GetJSONElement(JSONValue(0), 0)
       Protected object_box = GetJSONMember(object_val, "boundingbox")
       Protected bbox.BoundingBox
@@ -1823,7 +1823,7 @@ Module PBMap
         ZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
         ;SetLocation(Position\Latitude, Position\Longitude)
       EndIf
-    EndIf  
+    EndIf
   EndProcedure
 
   Procedure CanvasEvents()
@@ -2053,6 +2053,15 @@ Module PBMap
     EndIf    
   EndProcedure 
   
+  ; Could be called directly to attach our map to an existing canvas
+  Procedure BindMapGadget(Gadget.i)
+    PBMap\Gadget = Gadget
+    BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
+    AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
+    BindEvent(#PB_Event_Timer, @TimerEvents())
+  EndProcedure
+  
+  ; Creates a canvas and attach our map
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
       PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
@@ -2060,11 +2069,9 @@ Module PBMap
       PBMap\Gadget = Gadget
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf
-    BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
-    AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
-    BindEvent(#PB_Event_Timer, @TimerEvents())
+    BindMapGadget(PBMap\Gadget)
   EndProcedure
-
+  
   Procedure InitPBMap(Window)
     Protected Result.i
     If Verbose
@@ -2209,7 +2216,15 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
-    
+    ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
+    CompilerIf #PB_Compiler_OS = #PB_OS_Linux
+      define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
+      HideGadget(Dummy, 1) 
+    CompilerElse
+      Define Dummy = -1
+    CompilerEndIf
+    ;***
+      
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define OpenSeaMap = 0, Degrees = 1
@@ -2301,7 +2316,9 @@ CompilerIf #PB_Compiler_IsMainFile
       Case #PB_Event_Menu
         Select EventMenu()
           Case 1
-            SetActiveGadget(-1)
+            ;*** TODO : code to change when the SetActiveGadget(-1) will be fixed
+            SetActiveGadget(Dummy)
+            ;***
         EndSelect
     EndSelect
     Until Quit = #True
@@ -2312,8 +2329,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1156
-; FirstLine = 1144
+; CursorPosition = 57
+; FirstLine = 48
 ; Folding = ----------------
 ; EnableThread
 ; EnableXP
