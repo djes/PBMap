@@ -908,18 +908,19 @@ Module PBMap
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
-    Protected timg = -1
-    If FindMapElement(PBMap\MemCache\Images(), key)
+    Protected img.i
+    Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
+    If *timg
       MyDebug("Key : " + key + " found in memory cache!", 3)
-      timg = PBMap\MemCache\Images()\nImage
-      If timg <> -1
-        MyDebug("Image : " + timg + " found in memory cache!", 3)
+      img = PBMap\MemCache\Images()\nImage
+      If img <> -1
+        MyDebug("Image : " + img + " found in memory cache!", 3)
         ;*** Cache management
         ; Move the newly used element to the last position of the time stack
         SelectElement(PBMap\MemCache\ImagesTimeStack(), PBMap\MemCache\Images()\TimeStackPosition)
         MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
         ;***
-        ProcedureReturn timg
+        ProcedureReturn *timg
       EndIf
     Else
       AddMapElement(PBMap\MemCache\Images(), key)
@@ -948,20 +949,23 @@ Module PBMap
       MyDebug("Key : " + key + " added in memory cache!", 3)
       PBMap\MemCache\Images()\nImage = -1
     EndIf
+    *timg = PBMap\MemCache\Images()
     If PBMap\MemCache\Images()\Tile = 0 ; Check if a loading thread is not running
       MyDebug("Trying to load from HDD " + CacheFile, 3)
-      timg = GetTileFromHDD(CacheFile.s)
-      If timg <> -1
+      img = GetTileFromHDD(CacheFile.s)
+      If img <> -1
         MyDebug("Key : " + key + " found on HDD", 3)
-        PBMap\MemCache\Images()\nImage = timg
-        ProcedureReturn timg
+        *timg\nImage = img
+        *timg\Alpha = 0
+        ProcedureReturn *timg
       EndIf
       MyDebug("Key : " + key + " not found on HDD", 3)
       ;Launch a new thread
       Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
       If *NewTile
         With *NewTile
-          PBMap\MemCache\Images()\Tile = *NewTile
+          *timg\Tile = *NewTile
+          *timg\Alpha = 0
           ;New tile parameters
           \key = key
           \URL = URL
@@ -975,16 +979,16 @@ Module PBMap
         MyDebug(" Error, can't create a new tile loading thread", 3)
       EndIf    
     EndIf
-    ProcedureReturn timg 
+    ProcedureReturn *timg 
   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters, Layer, alpha.i=255)
+  Procedure DrawTiles(*Drawing.DrawingParameters, Layer)
     Protected x.i, y.i,kq.q
     Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
     Protected ty = Int(*Drawing\TileCoordinates\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize        ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
-    Protected px, py, img, tilex,tiley, key.s
+    Protected px, py, *timg.ImgMemCach, tilex, tiley, key.s
     Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
     SelectElement(PBMap\Layers(), Layer)
@@ -1019,13 +1023,18 @@ Module PBMap
           ; Tile cache name based on y
           URL = PBMap\Layers()\ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
           CacheFile = DirName + "\" + Str(tiley) + ".png" 
-          img = GetTile(key, URL, CacheFile)
-          If img <> -1  
+          *timg = GetTile(key, URL, CacheFile)
+          If *timg\nImage <> -1  
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(img), alpha)
+            DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
+            If *timg\Alpha < 240
+              *timg\Alpha + 16
+            Else
+              *timg\Alpha = 255
+            EndIf
           Else 
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(PBMap\ImgLoading), alpha)
+            DrawVectorImage(ImageID(PBMap\ImgLoading))
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
@@ -1073,7 +1082,7 @@ Module PBMap
         sunit = " Km"
     EndSelect
     VectorFont(FontID(PBMap\Font), 10)
-    VectorSourceColor(RGBA(0, 0, 0,alpha))
+    VectorSourceColor(RGBA(0, 0, 0, alpha))
     MovePathCursor(x,y)
     DrawVectorText(StrD(Scale,3)+sunit)
     MovePathCursor(x,y+12) 
@@ -2322,8 +2331,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 911
-; FirstLine = 895
+; CursorPosition = 1037
+; FirstLine = 997
 ; Folding = ----------------
 ; EnableThread
 ; EnableXP
