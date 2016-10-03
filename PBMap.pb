@@ -2332,21 +2332,10 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-<<<<<<< HEAD
+
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 961
-; FirstLine = 939
-=======
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1156
-; FirstLine = 1144
->>>>>>> parent of 8648364... Linux SetActiveGadget(-1) fix
-; Folding = ----------------
-; EnableThread
-; EnableXP
-; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 2308
-; FirstLine = 2291
+; CursorPosition = 2334
+; FirstLine = 2280
 ; Folding = ----------------
 ; EnableUnicode
 ; EnableXP
