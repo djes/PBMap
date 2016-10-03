@@ -26,8 +26,8 @@ DeclareModule PBMap
   #Red = 255
   
   ;-Show debug infos  
-  Global Verbose = 0
-  Global MyDebugLevel = 5
+  Global Verbose = 1
+  Global MyDebugLevel = 4
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -51,6 +51,7 @@ DeclareModule PBMap
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare DeleteLayer(Nb.i)
+  Declare BindMapGadget(Gadget.i)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
   Declare Drawing()
@@ -98,16 +99,12 @@ Module PBMap
   
   ;- Tile Structure
   Structure Tile
-    Position.Coordinates
-    PBMapTileX.i
-    PBMapTileY.i
-    PBMapZoom.i
     nImage.i
     key.s
+    URL.s
     CacheFile.s
     GetImageThread.i
     RetryNb.i
-    ServerURL.s
   EndStructure
   
   Structure BoundingBox 
@@ -135,6 +132,7 @@ Module PBMap
     nImage.i
     *Tile.Tile
     TimeStackPosition.i
+    Alpha.i
   EndStructure
   
   Structure ImgMemCachKey
@@ -890,9 +888,8 @@ Module PBMap
   
   Procedure GetImageThread(*Tile.Tile)
     Protected nImage.i = -1
-    Protected TileURL.s = *Tile\ServerURL + Str(*Tile\PBMapZoom) + "/" + Str(*Tile\PBMapTileX) + "/" + Str(*Tile\PBMapTileY) + ".png"   
     Repeat
-      nImage = GetTileFromWeb(TileURL, *Tile\CacheFile)
+      nImage = GetTileFromWeb(*Tile\URL, *Tile\CacheFile)
       If nImage <> -1
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
         *Tile\RetryNb = 0
@@ -908,21 +905,22 @@ Module PBMap
   EndProcedure
   ;-***
   
-  Procedure.i GetTile(key.s, CacheFile.s, px.i, py.i, tilex.i, tiley.i, ServerURL.s)
+  Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
-    Protected timg = -1
-    If FindMapElement(PBMap\MemCache\Images(), key)
+    Protected img.i = -1
+    Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
+    If *timg
       MyDebug("Key : " + key + " found in memory cache!", 3)
-      timg = PBMap\MemCache\Images()\nImage
-      If timg <> -1
-        MyDebug("Image : " + timg + " found in memory cache!", 3)
+      img = *timg\nImage
+      If img <> -1
+        MyDebug("Image : " + img + " found in memory cache!", 3)
         ;*** Cache management
         ; Move the newly used element to the last position of the time stack
-        SelectElement(PBMap\MemCache\ImagesTimeStack(), PBMap\MemCache\Images()\TimeStackPosition)
+        SelectElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPosition)
         MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
         ;***
-        ProcedureReturn timg
+        ProcedureReturn *timg
       EndIf
     Else
       AddMapElement(PBMap\MemCache\Images(), key)
@@ -949,31 +947,30 @@ Module PBMap
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
       MyDebug("Key : " + key + " added in memory cache!", 3)
-      PBMap\MemCache\Images()\nImage = -1
+      *timg = PBMap\MemCache\Images()
+      *timg\nImage = -1
     EndIf
-    If PBMap\MemCache\Images()\Tile = 0 ; Check if a loading thread is not running
+    If *timg\Tile = 0 ; Check if a loading thread is not running
       MyDebug("Trying to load from HDD " + CacheFile, 3)
-      timg = GetTileFromHDD(CacheFile.s)
-      If timg <> -1
+      img = GetTileFromHDD(CacheFile.s)
+      If img <> -1
         MyDebug("Key : " + key + " found on HDD", 3)
-        PBMap\MemCache\Images()\nImage = timg
-        ProcedureReturn timg
+        *timg\nImage = img
+        *timg\Alpha = 0
+        ProcedureReturn *timg
       EndIf
       MyDebug("Key : " + key + " not found on HDD", 3)
       ;Launch a new thread
       Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
       If *NewTile
         With *NewTile
-          PBMap\MemCache\Images()\Tile = *NewTile
+          *timg\Tile = *NewTile
+          *timg\Alpha = 0
+          ;*timg\nImage = -1    
           ;New tile parameters
-          \Position\x = px 
-          \Position\y = py 
-          \PBMapTileX = tilex 
-          \PBMapTileY = tiley
-          \PBMapZoom  = PBMap\Zoom
           \key = key
+          \URL = URL
           \CacheFile = CacheFile
-          \ServerURL = ServerURL
           \RetryNb = 5
           \nImage = -1         
           MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
@@ -983,16 +980,17 @@ Module PBMap
         MyDebug(" Error, can't create a new tile loading thread", 3)
       EndIf    
     EndIf
-    ProcedureReturn timg 
+    ProcedureReturn *timg 
   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters, Layer, alpha.i=255)
+  Procedure DrawTiles(*Drawing.DrawingParameters, Layer)
     Protected x.i, y.i,kq.q
     Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
     Protected ty = Int(*Drawing\TileCoordinates\y)
     Protected nx = *Drawing\CenterX / PBMap\TileSize        ;How many tiles around the point
     Protected ny = *Drawing\CenterY / PBMap\TileSize
-    Protected px, py, img, tilex,tiley, key.s, CacheFile.s
+    Protected px, py, *timg.ImgMemCach, tilex, tiley, key.s
+    Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
     SelectElement(PBMap\Layers(), Layer)
     MyDebug("Drawing tiles")
@@ -1024,19 +1022,26 @@ Module PBMap
             EndIf
           EndIf
           ; Tile cache name based on y
+          URL = PBMap\Layers()\ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
           CacheFile = DirName + "\" + Str(tiley) + ".png" 
-          img = GetTile(key, CacheFile, px, py, tilex, tiley, PBMap\Layers()\ServerURL)
-          If img <> -1  
+          *timg = GetTile(key, URL, CacheFile)
+          If *timg\nImage <> -1  
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(img), alpha)
+            DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
+            If *timg\Alpha < 224 
+              *timg\Alpha = (*timg\Alpha + 32) & $FF
+              PBMap\Redraw = #True
+            Else
+              *timg\Alpha = 255
+            EndIf
           Else 
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(PBMap\ImgLoading), alpha)
+            DrawVectorImage(ImageID(PBMap\ImgLoading), 255)
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
           MovePathCursor(px, py)
-          DrawVectorImage(ImageID(PBMap\ImgNothing))
+          DrawVectorImage(ImageID(PBMap\ImgNothing), 255)
           ;EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
@@ -1079,7 +1084,7 @@ Module PBMap
         sunit = " Km"
     EndSelect
     VectorFont(FontID(PBMap\Font), 10)
-    VectorSourceColor(RGBA(0, 0, 0,alpha))
+    VectorSourceColor(RGBA(0, 0, 0, alpha))
     MovePathCursor(x,y)
     DrawVectorText(StrD(Scale,3)+sunit)
     MovePathCursor(x,y+12) 
@@ -1536,6 +1541,8 @@ Module PBMap
     ;***
     ; Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+    VectorSourceColor(RGBA(150, 150, 150, 255))
+    FillVectorOutput()
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
     ForEach PBMap\Layers()
@@ -1804,8 +1811,7 @@ Module PBMap
       MyDebug( JSONErrorMessage() + " at position " +
                JSONErrorPosition() + " in line " +
                JSONErrorLine() + " of JSON web Data", 1)
-    EndIf
-    If JSONArraySize(JSONValue(0)) > 0
+    ElseIf JSONArraySize(JSONValue(0)) > 0
       Protected object_val = GetJSONElement(JSONValue(0), 0)
       Protected object_box = GetJSONMember(object_val, "boundingbox")
       Protected bbox.BoundingBox
@@ -1823,7 +1829,7 @@ Module PBMap
         ZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
         ;SetLocation(Position\Latitude, Position\Longitude)
       EndIf
-    EndIf  
+    EndIf
   EndProcedure
 
   Procedure CanvasEvents()
@@ -2053,6 +2059,15 @@ Module PBMap
     EndIf    
   EndProcedure 
   
+  ; Could be called directly to attach our map to an existing canvas
+  Procedure BindMapGadget(Gadget.i)
+    PBMap\Gadget = Gadget
+    BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
+    AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
+    BindEvent(#PB_Event_Timer, @TimerEvents())
+  EndProcedure
+  
+  ; Creates a canvas and attach our map
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
       PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
@@ -2060,11 +2075,9 @@ Module PBMap
       PBMap\Gadget = Gadget
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf
-    BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
-    AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
-    BindEvent(#PB_Event_Timer, @TimerEvents())
+    BindMapGadget(PBMap\Gadget)
   EndProcedure
-
+  
   Procedure InitPBMap(Window)
     Protected Result.i
     If Verbose
@@ -2209,11 +2222,15 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+    ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
     CompilerIf #PB_Compiler_OS = #PB_OS_Linux
-      Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
-      HideGadget(Dummy, 1)
+      Define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
+      HideGadget(Dummy, 1) 
+    CompilerElse
+      Define Dummy = -1
     CompilerEndIf
-    
+    ;***
+      
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define OpenSeaMap = 0, Degrees = 1
@@ -2305,11 +2322,9 @@ CompilerIf #PB_Compiler_IsMainFile
       Case #PB_Event_Menu
         Select EventMenu()
           Case 1
-            CompilerIf #PB_Compiler_OS = #PB_OS_Linux
-              SetActiveGadget(Dummy)
-            CompilerElse
-              SetActiveGadget(-1)
-            CompilerEndIf
+            ;*** TODO : code to change when the SetActiveGadget(-1) will be fixed
+            SetActiveGadget(Dummy)
+            ;***
         EndSelect
     EndSelect
     Until Quit = #True
@@ -2320,8 +2335,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 2180
-; FirstLine = 2221
+; CursorPosition = 961
+; FirstLine = 939
 ; Folding = ----------------
 ; EnableUnicode
 ; EnableThread
