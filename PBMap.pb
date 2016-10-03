@@ -944,6 +944,7 @@ Module PBMap
       Wend
       PopMapPosition(PBMap\MemCache\Images())
       AddElement(PBMap\MemCache\ImagesTimeStack())
+      MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
       MyDebug("Key : " + key + " added in memory cache!", 3)
@@ -1028,7 +1029,7 @@ Module PBMap
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
             DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
-            If *timg\Alpha < 224 
+            If *timg\Alpha < 224
               *timg\Alpha = (*timg\Alpha + 32) & $FF
               PBMap\Redraw = #True
             Else
@@ -2334,8 +2335,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 2205
-; FirstLine = 2191
+; CursorPosition = 1015
+; FirstLine = 1007
 ; Folding = ----------------
 ; EnableUnicode
 ; EnableThread
