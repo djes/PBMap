@@ -26,8 +26,8 @@ DeclareModule PBMap
   #Red = 255
   
   ;-Show debug infos  
-  Global Verbose = 1
-  Global MyDebugLevel = 4
+  Global Verbose = 0
+  Global MyDebugLevel = 0
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -264,7 +264,7 @@ Module PBMap
   
   ;Send debug infos to stdout (allowing mixed debug infos with curl or other libs)
   Procedure MyDebug(msg.s, DbgLevel = 0)
-    If Verbose And MyDebugLevel >= DbgLevel
+    If Verbose And DbgLevel >= MyDebugLevel 
       PrintN(msg)
       ;Debug msg  
     EndIf
@@ -300,7 +300,7 @@ Module PBMap
   EndProcedure
   
   Procedure.i CurlReceiveHTTPToMemory(URL$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
-    Protected *Buffer, curl.i, Timeout.i, res.i
+    Protected *Buffer, curl.i, Timeout.i, res.i, respcode.l
     If Len(URL$)
       curl  = curl_easy_init()
       If curl
@@ -311,6 +311,10 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
+        If Verbose
+          curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
+        EndIf
+        curl_easy_setopt(curl, #CURLOPT_FAILONERROR, 1)
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
           If Len(ProxyPort$)
@@ -340,7 +344,10 @@ Module PBMap
           EndIf        
           ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
         Else
-          MyDebug("CURL problem", 4)
+          curl_easy_getinfo(curl, #CURLINFO_HTTP_CODE, @respcode)
+          MyDebug("CURL : HTTP ERROR " + Str(respcode) , 8)
+          curl_easy_cleanup(curl)
+          ProcedureReturn #False
         EndIf
         curl_easy_cleanup(curl)
       Else
@@ -357,10 +364,10 @@ Module PBMap
   EndProcedure
   
   Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
-    Protected *Buffer, curl.i, Timeout.i, res.i
+    Protected *Buffer, curl.i, Timeout.i, res.i, respcode.l
     Protected FileHandle.i
-    MyDebug("CurlReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + " " + ProxyPort$ + " " + ProxyUser$, 4)
-    MyDebug(" to file : " + DestFileName$, 4)
+    MyDebug("CurlReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + " " + ProxyPort$ + " " + ProxyUser$, 8)
+    MyDebug(" to file : " + DestFileName$, 8)
     FileHandle = CreateFile(#PB_Any, DestFileName$)
     If FileHandle And Len(URL$)
       curl  = curl_easy_init()
@@ -371,21 +378,24 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
-        curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)        
-        curl_easy_setopt(curl, #CURLOPT_VERBOSE, 0)
+        curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
+        If Verbose
+          curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
+        EndIf
+        curl_easy_setopt(curl, #CURLOPT_FAILONERROR, 1)
         ;curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 60)
         If Len(ProxyURL$)
           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
           If Len(ProxyPort$)
             ProxyURL$ + ":" + ProxyPort$
           EndIf
-          MyDebug( ProxyURL$)
+          MyDebug(ProxyURL$, 8)
           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
           If Len(ProxyUser$)
             If Len(ProxyPassword$)
               ProxyUser$ + ":" + ProxyPassword$
             EndIf
-            MyDebug( ProxyUser$)
+            MyDebug(ProxyUser$, 8)
             curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
           EndIf
         EndIf
@@ -393,11 +403,15 @@ Module PBMap
         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
         res = curl_easy_perform(curl)
         If res <> #CURLE_OK
-          MyDebug("CURL problem", 4)
+          curl_easy_getinfo(curl, #CURLINFO_HTTP_CODE, @respcode)
+          MyDebug("CURL : HTTP ERROR " + Str(respcode) , 8)
+          CloseFile(FileHandle)
+          curl_easy_cleanup(curl)
+          ProcedureReturn #False
         EndIf
         curl_easy_cleanup(curl)
       Else
-        MyDebug("Can't init CURL", 4)
+        MyDebug("Can't init CURL", 8)
       EndIf
       CloseFile(FileHandle)
       ProcedureReturn FileSize(DestFileName$)
@@ -895,7 +909,7 @@ Module PBMap
         *Tile\RetryNb = 0
       Else 
         MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
-        Delay(1000)
+        Delay(5000)
         *Tile\RetryNb - 1
       EndIf
     Until *Tile\RetryNb <= 0
@@ -908,19 +922,11 @@ Module PBMap
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
-<<<<<<< HEAD
-    Protected img.i
-    Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
-    If *timg
-      MyDebug("Key : " + key + " found in memory cache!", 3)
-      img = PBMap\MemCache\Images()\nImage
-=======
     Protected img.i = -1
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
       MyDebug("Key : " + key + " found in memory cache!", 3)
       img = *timg\nImage
->>>>>>> refs/remotes/origin/tilewip
       If img <> -1
         MyDebug("Image : " + img + " found in memory cache!", 3)
         ;*** Cache management
@@ -931,10 +937,9 @@ Module PBMap
         ProcedureReturn *timg
       EndIf
     Else
-      AddMapElement(PBMap\MemCache\Images(), key)
-      PushMapPosition(PBMap\MemCache\Images())
+      ;PushMapPosition(PBMap\MemCache\Images())
       ;*** Cache management
-      ; if cache size exceeds limit, try to delete the oldest tile used
+      ; if cache size exceeds limit, try to delete the oldest tile used (first in the list)
       Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
       Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
       MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 4)
@@ -950,27 +955,24 @@ Module PBMap
           CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
         EndIf
       Wend
-      PopMapPosition(PBMap\MemCache\Images())
+      LastElement(PBMap\MemCache\ImagesTimeStack())
+      ;PopMapPosition(PBMap\MemCache\Images())
+      AddMapElement(PBMap\MemCache\Images(), key)
       AddElement(PBMap\MemCache\ImagesTimeStack())
-      MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
+      ;MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
       MyDebug("Key : " + key + " added in memory cache!", 3)
       *timg = PBMap\MemCache\Images()
       *timg\nImage = -1
     EndIf
-<<<<<<< HEAD
-    *timg = PBMap\MemCache\Images()
-    If PBMap\MemCache\Images()\Tile = 0 ; Check if a loading thread is not running
-=======
     If *timg\Tile = 0 ; Check if a loading thread is not running
->>>>>>> refs/remotes/origin/tilewip
       MyDebug("Trying to load from HDD " + CacheFile, 3)
       img = GetTileFromHDD(CacheFile.s)
       If img <> -1
         MyDebug("Key : " + key + " found on HDD", 3)
         *timg\nImage = img
-        *timg\Alpha = 0
+        *timg\Alpha = 256
         ProcedureReturn *timg
       EndIf
       MyDebug("Key : " + key + " not found on HDD", 3)
@@ -980,10 +982,7 @@ Module PBMap
         With *NewTile
           *timg\Tile = *NewTile
           *timg\Alpha = 0
-<<<<<<< HEAD
-=======
           ;*timg\nImage = -1    
->>>>>>> refs/remotes/origin/tilewip
           ;New tile parameters
           \key = key
           \URL = URL
@@ -1044,25 +1043,17 @@ Module PBMap
           *timg = GetTile(key, URL, CacheFile)
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
-<<<<<<< HEAD
-            If *timg\Alpha < 240
-              *timg\Alpha + 16
-=======
-            If *timg\Alpha < 224
-              *timg\Alpha = (*timg\Alpha + 32) & $FF
+            If *timg\Alpha <= 224
+              DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
+              *timg\Alpha + 32
               PBMap\Redraw = #True
->>>>>>> refs/remotes/origin/tilewip
             Else
-              *timg\Alpha = 255
-            EndIf
+              DrawVectorImage(ImageID(*timg\nImage), 255)
+              *timg\Alpha = 256
+            EndIf 
           Else 
             MovePathCursor(px, py)
-<<<<<<< HEAD
-            DrawVectorImage(ImageID(PBMap\ImgLoading))
-=======
             DrawVectorImage(ImageID(PBMap\ImgLoading), 255)
->>>>>>> refs/remotes/origin/tilewip
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
@@ -2003,9 +1994,9 @@ Module PBMap
               CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
             EndIf 
           EndIf
-          PBMap\Redraw = #True
           PBMap\MoveStartingPoint\x = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) 
           PBMap\MoveStartingPoint\y = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+          PBMap\Redraw = #True
         Else
           LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
           MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
@@ -2018,6 +2009,7 @@ Module PBMap
               LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
                 PBMap\Markers()\Focus = #True
+                PBMap\Redraw = #True
               Else
                 ;If CtrlKey = #False
                 PBMap\Markers()\Focus = #False
@@ -2032,7 +2024,7 @@ Module PBMap
                   If ListSize(\Track()) > 0
                     If \Visible
                       StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-                      ;Draw tracks
+                      ;Simulate tracks drawing
                       ForEach \Track()
                         LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                         If ListIndex(\Track()) = 0
@@ -2043,6 +2035,7 @@ Module PBMap
                       Next
                       If IsInsideStroke(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX), GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY), \StrokeWidth)
                         \Focus = #True
+                         PBMap\Redraw = #True
                       Else
                         \Focus = #False
                       EndIf
@@ -2052,9 +2045,7 @@ Module PBMap
                 Next
               EndIf
             EndWith
-            
           EndIf
-          PBMap\Redraw = #True
         EndIf
       Case #PB_EventType_LeftButtonUp
         PBMap\MoveStartingPoint\x = - 1
@@ -2160,6 +2151,12 @@ CompilerIf #PB_Compiler_IsMainFile
     #StringGeoLocationQuery
   EndEnumeration
   
+  ;Menu events
+  Enumeration
+    #MenuEventLonLatStringEnter
+    #MenuEventGeoLocationStringEnter
+  EndEnumeration
+  
   Structure Location
     Longitude.d
     Latitude.d
@@ -2247,7 +2244,7 @@ CompilerIf #PB_Compiler_IsMainFile
     TextGadget(#TextGeoLocationQuery, 530, 435, 150, 15, "Enter an address")
     StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
-    AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+    AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
     CompilerIf #PB_Compiler_OS = #PB_OS_Linux
       Define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
@@ -2255,11 +2252,7 @@ CompilerIf #PB_Compiler_IsMainFile
     CompilerElse
       Define Dummy = -1
     CompilerEndIf
-<<<<<<< HEAD
     ;***
-      
-=======
->>>>>>> refs/remotes/origin/tilewip
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define OpenSeaMap = 0, Degrees = 1
@@ -2305,11 +2298,9 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_Focus
-                  AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+                  AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventLonLatStringEnter)
                 Case #PB_EventType_LostFocus
                   RemoveKeyboardShortcut(#Window_0, #PB_Shortcut_Return)
-                  PBMap::SetLocation(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)))                     ; Change the PBMap coordinates
-                  PBMap::Refresh()
               EndSelect
             Case #Gdt_AddMarker
               PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", "Test", RGBA(Random(255), Random(255), Random(255), 255))
@@ -2339,21 +2330,27 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #StringGeoLocationQuery
               Select EventType()
               Case #PB_EventType_Focus
-                AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, 1)
+                AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
               Case #PB_EventType_LostFocus
                 RemoveKeyboardShortcut(#Window_0, #PB_Shortcut_Return)
-                PBMap::NominatimGeoLocationQuery(GetGadgetText(#StringGeoLocationQuery))
-                PBMap::Refresh()
             EndSelect
         EndSelect
       Case #PB_Event_SizeWindow
         ResizeAll()
       Case #PB_Event_Menu
+        ;Receive "enter" key events
         Select EventMenu()
-          Case 1
+          Case #MenuEventGeoLocationStringEnter
+            If GetGadgetText(#StringGeoLocationQuery) <> ""
+              PBMap::NominatimGeoLocationQuery(GetGadgetText(#StringGeoLocationQuery))
+              PBMap::Refresh()
+            EndIf
             ;*** TODO : code to change when the SetActiveGadget(-1) will be fixed
             SetActiveGadget(Dummy)
             ;***
+          Case  #MenuEventLonLatStringEnter
+            PBMap::SetLocation(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)))                     ; Change the PBMap coordinates
+            PBMap::Refresh()
         EndSelect
     EndSelect
     Until Quit = #True
@@ -2363,17 +2360,10 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-<<<<<<< HEAD
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1037
-; FirstLine = 997
-=======
 
-; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 1015
-; FirstLine = 1007
->>>>>>> refs/remotes/origin/tilewip
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 10
 ; Folding = ----------------
-; EnableUnicode
 ; EnableThread
 ; EnableXP
+; EnableUnicode
