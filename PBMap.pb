@@ -2338,6 +2338,4 @@ CompilerEndIf
 ; CursorPosition = 1015
 ; FirstLine = 1007
 ; Folding = ----------------
-; EnableUnicode
 ; EnableThread
-; EnableXP
