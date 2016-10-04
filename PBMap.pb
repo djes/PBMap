@@ -26,8 +26,8 @@ DeclareModule PBMap
   #Red = 255
   
   ;-Show debug infos  
-  Global Verbose = 0
-  Global MyDebugLevel = 5
+  Global Verbose = 1
+  Global MyDebugLevel = 4
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -908,16 +908,24 @@ Module PBMap
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
+<<<<<<< HEAD
     Protected img.i
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
       MyDebug("Key : " + key + " found in memory cache!", 3)
       img = PBMap\MemCache\Images()\nImage
+=======
+    Protected img.i = -1
+    Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
+    If *timg
+      MyDebug("Key : " + key + " found in memory cache!", 3)
+      img = *timg\nImage
+>>>>>>> refs/remotes/origin/tilewip
       If img <> -1
         MyDebug("Image : " + img + " found in memory cache!", 3)
         ;*** Cache management
         ; Move the newly used element to the last position of the time stack
-        SelectElement(PBMap\MemCache\ImagesTimeStack(), PBMap\MemCache\Images()\TimeStackPosition)
+        SelectElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPosition)
         MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
         ;***
         ProcedureReturn *timg
@@ -944,13 +952,19 @@ Module PBMap
       Wend
       PopMapPosition(PBMap\MemCache\Images())
       AddElement(PBMap\MemCache\ImagesTimeStack())
+      MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
       MyDebug("Key : " + key + " added in memory cache!", 3)
-      PBMap\MemCache\Images()\nImage = -1
+      *timg = PBMap\MemCache\Images()
+      *timg\nImage = -1
     EndIf
+<<<<<<< HEAD
     *timg = PBMap\MemCache\Images()
     If PBMap\MemCache\Images()\Tile = 0 ; Check if a loading thread is not running
+=======
+    If *timg\Tile = 0 ; Check if a loading thread is not running
+>>>>>>> refs/remotes/origin/tilewip
       MyDebug("Trying to load from HDD " + CacheFile, 3)
       img = GetTileFromHDD(CacheFile.s)
       If img <> -1
@@ -966,6 +980,10 @@ Module PBMap
         With *NewTile
           *timg\Tile = *NewTile
           *timg\Alpha = 0
+<<<<<<< HEAD
+=======
+          ;*timg\nImage = -1    
+>>>>>>> refs/remotes/origin/tilewip
           ;New tile parameters
           \key = key
           \URL = URL
@@ -1027,19 +1045,29 @@ Module PBMap
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
             DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
+<<<<<<< HEAD
             If *timg\Alpha < 240
               *timg\Alpha + 16
+=======
+            If *timg\Alpha < 224
+              *timg\Alpha = (*timg\Alpha + 32) & $FF
+              PBMap\Redraw = #True
+>>>>>>> refs/remotes/origin/tilewip
             Else
               *timg\Alpha = 255
             EndIf
           Else 
             MovePathCursor(px, py)
+<<<<<<< HEAD
             DrawVectorImage(ImageID(PBMap\ImgLoading))
+=======
+            DrawVectorImage(ImageID(PBMap\ImgLoading), 255)
+>>>>>>> refs/remotes/origin/tilewip
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
           MovePathCursor(px, py)
-          DrawVectorImage(ImageID(PBMap\ImgNothing))
+          DrawVectorImage(ImageID(PBMap\ImgNothing), 255)
           ;EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
@@ -1539,6 +1567,8 @@ Module PBMap
     ;***
     ; Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+    VectorSourceColor(RGBA(150, 150, 150, 255))
+    FillVectorOutput()
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
     ForEach PBMap\Layers()
@@ -2225,8 +2255,11 @@ CompilerIf #PB_Compiler_IsMainFile
     CompilerElse
       Define Dummy = -1
     CompilerEndIf
+<<<<<<< HEAD
     ;***
       
+=======
+>>>>>>> refs/remotes/origin/tilewip
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define OpenSeaMap = 0, Degrees = 1
@@ -2330,9 +2363,17 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
+<<<<<<< HEAD
 ; IDE Options = PureBasic 5.50 (Windows - x64)
 ; CursorPosition = 1037
 ; FirstLine = 997
+=======
+
+; IDE Options = PureBasic 5.42 LTS (Windows - x64)
+; CursorPosition = 1015
+; FirstLine = 1007
+>>>>>>> refs/remotes/origin/tilewip
 ; Folding = ----------------
+; EnableUnicode
 ; EnableThread
 ; EnableXP
