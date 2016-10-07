@@ -116,8 +116,8 @@ Module PBMap
   
   Structure DrawingParameters
     Canvas.i
-    CenterX.i                                     ; Gadget center in screen relative pixels
-    CenterY.i
+    CenterX.d                                     ; Gadget center in screen relative pixels
+    CenterY.d
     GeographicCoordinates.GeographicCoordinates   ; Real center
     TileCoordinates.Coordinates                   ; Center coordinates in tile.decimal
     Bounds.BoundingBox                            ; Drawing boundaries in lat/lon
@@ -763,8 +763,8 @@ Module PBMap
     Protected cx.d  = PBMap\Drawing\CenterX
     Protected dpx.d = PBMap\PixelCoordinates\x
     Protected LatRad.d = Radian(*Location\Latitude)
-    Protected px = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    Protected py = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
+    Protected px.d = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
+    Protected py.d = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
     If dpx - px >= tilemax / 2
       ;Debug "c1"
@@ -823,10 +823,6 @@ Module PBMap
     Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
     Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
     Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
-    If LatSE > LatNW
-      Debug "WTF"
-      CallDebugger
-    EndIf
     If Lat >= LatSE And Lat <= LatNW
       If *Drawing\Width >= 360
         ProcedureReturn #True
@@ -1170,7 +1166,7 @@ Module PBMap
     StrokePath(1)  
   EndProcedure   
   
-  Procedure DrawTrackPointer(x.i, y.i, dist.l)
+  Procedure DrawTrackPointer(x.d, y.d, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1189,7 +1185,7 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
-  Procedure DrawTrackPointerFirst(x.i, y.i, dist.l)
+  Procedure DrawTrackPointerFirst(x.d, y.d, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1536,6 +1532,7 @@ Module PBMap
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
+    Protected PixelCenter.PixelCoordinates
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
     Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
@@ -1546,20 +1543,38 @@ Module PBMap
     *Drawing\GeographicCoordinates\Latitude = PBMap\GeographicCoordinates\Latitude
     *Drawing\GeographicCoordinates\Longitude = PBMap\GeographicCoordinates\Longitude
     LatLon2TileXY(*Drawing\GeographicCoordinates, *Drawing\TileCoordinates, PBMap\Zoom)
+    LatLon2Pixel(*Drawing\GeographicCoordinates, @PixelCenter, PBMap\Zoom)
     ; Pixel shift, aka position in the tile
     Px = *Drawing\TileCoordinates\x 
     Py = *Drawing\TileCoordinates\y
     *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
     *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
     ;Drawing boundaries  
-    nx = *Drawing\CenterX / ts ;How many tiles around the point
-    ny = *Drawing\CenterY / ts
-    NW\x = Px - nx - 1
-    NW\y = Py - ny - 1
-    SE\x = Px + nx + 2 
-    SE\y = Py + ny + 2
-    TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
-    TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+     nx = *Drawing\CenterX / ts ;How many tiles around the point
+     ny = *Drawing\CenterY / ts
+     NW\x = Px - nx - 1
+     NW\y = Py - ny - 1
+     SE\x = Px + nx + 2 
+     SE\y = Py + ny + 2
+     TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
+     TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+;      nx = PixelCenter\x - *Drawing\CenterX 
+;      ny = PixelCenter\y - *Drawing\CenterY
+;     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+;     RotateCoordinates(PixelCenter\x, PixelCenter\y, PBMap\Angle)
+;     NW\x = ConvertCoordinateX(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+;     NW\y = ConvertCoordinateY(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+;     nx + GadgetWidth(PBMap\Gadget)
+;     ny + GadgetHeight(PBMap\Gadget)
+;     SE\x = ConvertCoordinateX(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+;     SE\y = ConvertCoordinateY(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+;     StopVectorDrawing()
+;     Pixel2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
+;     Pixel2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+;     Debug *Drawing\Bounds\NorthWest\Latitude
+;     Debug *Drawing\Bounds\NorthWest\Longitude
+;     Debug *Drawing\Bounds\SouthEast\Latitude
+;     Debug *Drawing\Bounds\SouthEast\Longitude
     *Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ;Calculus without clipping
     *Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
     ;***
@@ -1895,12 +1910,12 @@ Module PBMap
     Protected Pixel.PixelCoordinates
     Static CtrlKey
     PBMap\Moving = #False
-    CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\CenterX
-    CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\CenterY
+    MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\CenterX
+    MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\CenterY
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-    RotateCoordinates(PBMap\Drawing\CenterX, PBMap\Drawing\CenterY, PBMap\Angle)
-    CanvasMouseX = ConvertCoordinateX(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
-    CanvasMouseY = ConvertCoordinateY(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    RotateCoordinates(0, 0, PBMap\Angle)
+    CanvasMouseX = ConvertCoordinateX(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    CanvasMouseY = ConvertCoordinateY(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
     StopVectorDrawing()
     Select EventType()
       Case #PB_EventType_Focus
@@ -2428,8 +2443,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 2094
-; FirstLine = 2070
+; CursorPosition = 766
+; FirstLine = 670
 ; Folding = -----------------
 ; EnableThread
 ; EnableXP
