@@ -90,8 +90,8 @@ Module PBMap
   EnableExplicit
     
   Structure PixelCoordinates
-    x.i
-    y.i
+    x.d
+    y.d
   EndStructure
   
   Structure Coordinates
@@ -1170,7 +1170,7 @@ Module PBMap
     StrokePath(1)  
   EndProcedure   
   
-  Procedure TrackPointer(x.i, y.i, dist.l)
+  Procedure DrawTrackPointer(x.i, y.i, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1189,7 +1189,7 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
-  Procedure TrackPointerFirst(x.i, y.i, dist.l)
+  Procedure DrawTrackPointerFirst(x.i, y.i, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1260,9 +1260,9 @@ Module PBMap
               ForEach \Track()
                 LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                 If ListIndex(\Track()) = 0
-                  MovePathCursor(Pixel\X, Pixel\Y)
+                  MovePathCursor(Pixel\x, Pixel\y)
                 Else
-                  AddPathLine(Pixel\X, Pixel\Y)    
+                  AddPathLine(Pixel\x, Pixel\y)    
                 EndIf
               Next
               ;           \BoundingBox\x = PathBoundsX()
@@ -1300,11 +1300,13 @@ Module PBMap
                 LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
                 If Int(km) <> memKm
                   memKm = Int(km)
+                  RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
                   If Int(km) = 0
-                    TrackPointerFirst(Pixel\X , Pixel\Y, Int(km))
+                    DrawTrackPointerFirst(Pixel\x , Pixel\y, Int(km))
                   Else
-                    TrackPointer(Pixel\X , Pixel\Y, Int(km))
-                  EndIf  
+                    DrawTrackPointer(Pixel\x , Pixel\y, Int(km))
+                  EndIf
+                  RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
                 EndIf
               Next
             EndIf
@@ -1486,12 +1488,14 @@ Module PBMap
     ForEach PBMap\Markers()
       If IsInDrawingBoundaries(*Drawing, @PBMap\Markers()\GeographicCoordinates)
         LatLon2PixelRel(PBMap\Markers()\GeographicCoordinates, @Pixel, PBMap\Zoom)
-        If Pixel\X >= 0 And Pixel\Y >= 0 And Pixel\X < GadgetWidth(PBMap\Gadget) And Pixel\Y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
+        If Pixel\x >= 0 And Pixel\y >= 0 And Pixel\x < GadgetWidth(PBMap\Gadget) And Pixel\y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
+          RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
           If PBMap\Markers()\CallBackPointer > 0
-            CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\X, Pixel\Y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
+            CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\x, Pixel\y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
           Else
-            DrawMarker(Pixel\X, Pixel\Y, ListIndex(PBMap\Markers()), @PBMap\Markers())
+            DrawMarker(Pixel\x, Pixel\y, ListIndex(PBMap\Markers()), @PBMap\Markers())
           EndIf
+          RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
         EndIf 
       EndIf 
     Next
@@ -1768,14 +1772,8 @@ Module PBMap
     ProcedureReturn PBMap\Mode
   EndProcedure
   
-  ;Zoom on x, y position relative to the canvas gadget
-  Procedure SetZoomOnPosition(x, y, zoom)
-    Protected MouseX.d, MouseY.d
-    Protected OldPx.d, OldPy.d, OldMx.d, OldMy.d, Px.d, Py.d
-    Protected CenterX = GadgetWidth(PBMap\Gadget) / 2
-    Protected CenterY = GadgetHeight(PBMap\Gadget) / 2
-    x - CenterX 
-    y - CenterY
+  ;Zoom on x, y pixel position from the center
+  Procedure ZoomOnPixel(x, y, zoom)
     ;*** First : Zoom
     PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : ProcedureReturn : EndIf
@@ -1797,7 +1795,16 @@ Module PBMap
     EndIf      
   EndProcedure  
   
-  ;Go to x, y position relative to the canvas gadget
+  ;Zoom on x, y position relative to the canvas gadget
+  Procedure ZoomOnPixelRel(x, y, zoom)
+    Protected CenterX = GadgetWidth(PBMap\Gadget) / 2
+    Protected CenterY = GadgetHeight(PBMap\Gadget) / 2
+    x - CenterX 
+    y - CenterY
+    ZoomOnPixel(x, y, zoom)
+  EndProcedure  
+  
+  ;Go to x, y position relative to the canvas gadget left up
   Procedure GotoPixelRel(x, y)
     Protected CenterX = GadgetWidth(PBMap\Gadget) / 2
     Protected CenterY = GadgetHeight(PBMap\Gadget) / 2
@@ -1806,6 +1813,19 @@ Module PBMap
     LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
     PBMap\PixelCoordinates\x + x
     PBMap\PixelCoordinates\y + y
+    Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
+    ; Start drawing
+    PBMap\Redraw = #True
+    ; If CallBackLocation send Location to function
+    If PBMap\CallBackLocation > 0
+      CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
+    EndIf      
+  EndProcedure  
+  
+  ;Go to x, y position relative to the canvas gadget
+  Procedure GotoPixel(x, y)
+    PBMap\PixelCoordinates\x = x
+    PBMap\PixelCoordinates\y = y
     Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
     ; Start drawing
     PBMap\Redraw = #True
@@ -1869,20 +1889,23 @@ Module PBMap
   EndProcedure
 
   Procedure CanvasEvents()
-    Protected MouseX.d, MouseY.d, OldMX.d, OldMY.d
+    Protected CanvasMouseX.d, CanvasMouseY.d, MouseX.d, MouseY.d
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     Protected key.s, Touch.i
     Protected Pixel.PixelCoordinates
     Static CtrlKey
     PBMap\Moving = #False
-    MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)
-    MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)
+    CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\CenterX
+    CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\CenterY
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
     RotateCoordinates(PBMap\Drawing\CenterX, PBMap\Drawing\CenterY, PBMap\Angle)
-    MouseX = ConvertCoordinateX(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
-    MouseY = ConvertCoordinateY(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    CanvasMouseX = ConvertCoordinateX(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    CanvasMouseY = ConvertCoordinateY(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
     StopVectorDrawing()
     Select EventType()
+      Case #PB_EventType_Focus
+        PBMap\Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
+        PBMap\Drawing\CenterY = GadgetHeight(PBMap\Gadget) / 2
       Case #PB_EventType_KeyUp  
         Select GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Key)
           Case #PB_Shortcut_Delete
@@ -1928,8 +1951,8 @@ Module PBMap
         EndIf
       Case #PB_EventType_LeftDoubleClick
         LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-        MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + MouseX
-        MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + MouseY
+        MouseX = PBMap\PixelCoordinates\x  + CanvasMouseX
+        MouseY = PBMap\PixelCoordinates\y  + CanvasMouseY
         ;Clip MouseX to the map range (in X, the map is infinite)
         MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
         Touch = #False
@@ -1949,23 +1972,23 @@ Module PBMap
           EndIf
         Next
         If Not Touch
-          GotoPixelRel(MouseX, MouseY)
+          GotoPixel(MouseX, MouseY)
         EndIf
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
           ;Relative zoom (centered on the mouse)
-          SetZoomOnPosition(MouseX, MouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+          ZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
         Else
           ;Absolute zoom (centered on the center of the map)
           SetZoom(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
         EndIf        
       Case #PB_EventType_LeftButtonDown
-        LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-        OldMX = MouseX : OldMY = MouseY
-        MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + MouseX
-        MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + MouseY
+        ;LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+        ;Mem cursor Coord
+        PBMap\MoveStartingPoint\x = CanvasMouseX
+        PBMap\MoveStartingPoint\y = CanvasMouseY
         ;Clip MouseX to the map range (in X, the map is infinite)
-        MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
+        PBMap\MoveStartingPoint\x = Mod(Mod(PBMap\MoveStartingPoint\x, MapWidth) + MapWidth, MapWidth)
         If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
           PBMap\EditMarker = #False
           ;Check if we select marker(s)
@@ -1990,15 +2013,14 @@ Module PBMap
             EndIf
           Next
         EndIf
-        ;Mem cursor Coord
-        PBMap\MoveStartingPoint\x = OldMX
-        PBMap\MoveStartingPoint\y = OldMY
       Case #PB_EventType_MouseMove
         PBMap\Moving = #True
+        ; Drag
         If PBMap\MoveStartingPoint\x <> - 1
-          OldMX = MouseX : OldMY = MouseY
-          MouseX = MouseX - PBMap\MoveStartingPoint\x
-          MouseY = MouseY - PBMap\MoveStartingPoint\y
+          MouseX = CanvasMouseX - PBMap\MoveStartingPoint\x
+          MouseY = CanvasMouseY - PBMap\MoveStartingPoint\y
+          PBMap\MoveStartingPoint\x = CanvasMouseX
+          PBMap\MoveStartingPoint\y = CanvasMouseY
           ;Move selected markers
           If PBMap\EditMarker And (PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT)
             ForEach PBMap\Markers()
@@ -2022,14 +2044,12 @@ Module PBMap
               CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
             EndIf 
           EndIf
-          PBMap\MoveStartingPoint\x = OldMX
-          PBMap\MoveStartingPoint\y = OldMY
           PBMap\Redraw = #True
         Else
+          ; Touch test
           LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
-          OldMX = MouseX : OldMY = MouseY
-          MouseX = PBMap\PixelCoordinates\x - GadgetWidth(PBMap\Gadget) / 2 + MouseX
-          MouseY = PBMap\PixelCoordinates\y - GadgetHeight(PBMap\Gadget) / 2 + MouseY
+          MouseX = PBMap\PixelCoordinates\x + CanvasMouseX 
+          MouseY = PBMap\PixelCoordinates\y + CanvasMouseY 
           ;Clip MouseX to the map range (in X, the map is infinite)
           MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
           If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT Or PBMap\Mode = #MODE_EDIT
@@ -2039,10 +2059,10 @@ Module PBMap
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
                 PBMap\Markers()\Focus = #True
                 PBMap\Redraw = #True
-              Else
+              ElseIf PBMap\Markers()\Focus
                 ;If CtrlKey = #False
                 PBMap\Markers()\Focus = #False
-                ;EndIf  
+                PBMap\Redraw = #True
               EndIf
             Next
             ;Check if mouse touch tracks           
@@ -2056,18 +2076,19 @@ Module PBMap
                       RotateCoordinates(PBMap\Drawing\CenterX, PBMap\Drawing\CenterY, PBMap\Angle)
                       ;Simulate tracks drawing
                       ForEach \Track()
-                        LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
+                        LatLon2Pixel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                         If ListIndex(\Track()) = 0
-                          MovePathCursor(Pixel\X, Pixel\Y)
+                          MovePathCursor(Pixel\x, Pixel\y)
                         Else
-                          AddPathLine(Pixel\X, Pixel\Y)    
+                          AddPathLine(Pixel\x, Pixel\y)    
                         EndIf
                       Next
-                      If IsInsideStroke(OldMX, OldMY, \StrokeWidth)
+                      If IsInsideStroke(MouseX, MouseY, \StrokeWidth)
                         \Focus = #True
-                         PBMap\Redraw = #True
-                      Else
+                        PBMap\Redraw = #True
+                      ElseIf \Focus
                         \Focus = #False
+                        PBMap\Redraw = #True
                       EndIf
                       StopVectorDrawing()
                     EndIf  
@@ -2112,6 +2133,8 @@ Module PBMap
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
     BindEvent(#PB_Event_Timer, @TimerEvents())
+    PBMap\Drawing\CenterX = GadgetWidth(PBMap\Gadget) / 2
+    PBMap\Drawing\CenterX = GadgetHeight(PBMap\Gadget) / 2
   EndProcedure
   
   ; Creates a canvas and attach our map
@@ -2405,9 +2428,9 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 95
-; FirstLine = 81
-; Folding = ----------------
+; CursorPosition = 1891
+; FirstLine = 2070
+; Folding = -----------------
 ; EnableThread
 ; EnableXP
 ; EnableUnicode
