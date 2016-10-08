@@ -112,12 +112,14 @@ Module PBMap
   Structure BoundingBox 
     NorthWest.GeographicCoordinates
     SouthEast.GeographicCoordinates 
+    BottomLeft.PixelCoordinates
+    TopRight.PixelCoordinates   
   EndStructure
   
   Structure DrawingParameters
     Canvas.i
-    CenterX.i                                     ; Gadget center in screen relative pixels
-    CenterY.i
+    CenterX.d                                     ; Gadget center in screen relative pixels
+    CenterY.d
     GeographicCoordinates.GeographicCoordinates   ; Real center
     TileCoordinates.Coordinates                   ; Center coordinates in tile.decimal
     Bounds.BoundingBox                            ; Drawing boundaries in lat/lon
@@ -763,8 +765,8 @@ Module PBMap
     Protected cx.d  = PBMap\Drawing\CenterX
     Protected dpx.d = PBMap\PixelCoordinates\x
     Protected LatRad.d = Radian(*Location\Latitude)
-    Protected px = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    Protected py = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
+    Protected px.d = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
+    Protected py.d = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
     ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
     If dpx - px >= tilemax / 2
       ;Debug "c1"
@@ -800,6 +802,7 @@ Module PBMap
     ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
   EndProcedure
   
+  ; No more used, see LatLon2PixelRel
   Procedure GetPixelCoordFromLocation(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) ; TODO to Optimize 
     Protected mapWidth.l    = Pow(2, Zoom + 8)
     Protected mapHeight.l   = Pow(2, Zoom + 8)
@@ -819,14 +822,21 @@ Module PBMap
     *Pixel\y=GadgetHeight(PBMap\Gadget)/2 - (y2-y1)
   EndProcedure
   
+  Procedure IsInDrawingPixelBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+    Protected Pixel.PixelCoordinates
+    LatLon2Pixel(*Position, @Pixel, PBMap\Zoom)
+    If Pixel\x >= *Drawing\Bounds\BottomLeft\x And Pixel\y <= *Drawing\Bounds\BottomLeft\y And Pixel\x <= *Drawing\Bounds\TopRight\x And Pixel\y >= *Drawing\Bounds\TopRight\y
+      ProcedureReturn #True
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+    
+  ;TODO : rotation fix
   Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
     Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
     Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
     Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
-    If LatSE > LatNW
-      Debug "WTF"
-      CallDebugger
-    EndIf
     If Lat >= LatSE And Lat <= LatNW
       If *Drawing\Width >= 360
         ProcedureReturn #True
@@ -1170,7 +1180,7 @@ Module PBMap
     StrokePath(1)  
   EndProcedure   
   
-  Procedure DrawTrackPointer(x.i, y.i, dist.l)
+  Procedure DrawTrackPointer(x.d, y.d, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1189,7 +1199,7 @@ Module PBMap
     DrawVectorText(Str(dist))
   EndProcedure
   
-  Procedure DrawTrackPointerFirst(x.i, y.i, dist.l)
+  Procedure DrawTrackPointerFirst(x.d, y.d, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
     MovePathCursor(x,y)
@@ -1250,7 +1260,7 @@ Module PBMap
             ;Check visibility
             \Visible = #False
             ForEach \Track()
-              If IsInDrawingBoundaries(*Drawing, @PBMap\TracksList()\Track())
+              If IsInDrawingPixelBoundaries(*Drawing, @PBMap\TracksList()\Track())
                 \Visible = #True
                 Break
               EndIf
@@ -1486,17 +1496,15 @@ Module PBMap
   Procedure DrawMarkers(*Drawing.DrawingParameters)
     Protected Pixel.PixelCoordinates
     ForEach PBMap\Markers()
-      If IsInDrawingBoundaries(*Drawing, @PBMap\Markers()\GeographicCoordinates)
-        LatLon2PixelRel(PBMap\Markers()\GeographicCoordinates, @Pixel, PBMap\Zoom)
-        If Pixel\x >= 0 And Pixel\y >= 0 And Pixel\x < GadgetWidth(PBMap\Gadget) And Pixel\y < GadgetHeight(PBMap\Gadget) ; Only if visible ^_^
-          RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
-          If PBMap\Markers()\CallBackPointer > 0
-            CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\x, Pixel\y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
-          Else
-            DrawMarker(Pixel\x, Pixel\y, ListIndex(PBMap\Markers()), @PBMap\Markers())
-          EndIf
-          RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
-        EndIf 
+      If IsInDrawingPixelBoundaries(*Drawing, @PBMap\Markers()\GeographicCoordinates)
+        LatLon2PixelRel(@PBMap\Markers()\GeographicCoordinates, @Pixel, PBMap\Zoom)
+        RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
+        If PBMap\Markers()\CallBackPointer > 0
+          CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\x, Pixel\y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
+        Else
+          DrawMarker(Pixel\x, Pixel\y, ListIndex(PBMap\Markers()), @PBMap\Markers())
+        EndIf
+        RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
       EndIf 
     Next
   EndProcedure 
@@ -1536,6 +1544,7 @@ Module PBMap
   ;-*** Main drawing
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
+    Protected PixelCenter.PixelCoordinates
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
     Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
@@ -1546,22 +1555,41 @@ Module PBMap
     *Drawing\GeographicCoordinates\Latitude = PBMap\GeographicCoordinates\Latitude
     *Drawing\GeographicCoordinates\Longitude = PBMap\GeographicCoordinates\Longitude
     LatLon2TileXY(*Drawing\GeographicCoordinates, *Drawing\TileCoordinates, PBMap\Zoom)
+    LatLon2Pixel(*Drawing\GeographicCoordinates, @PixelCenter, PBMap\Zoom)
     ; Pixel shift, aka position in the tile
     Px = *Drawing\TileCoordinates\x 
     Py = *Drawing\TileCoordinates\y
     *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
     *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
     ;Drawing boundaries  
-    nx = *Drawing\CenterX / ts ;How many tiles around the point
-    ny = *Drawing\CenterY / ts
-    NW\x = Px - nx - 1
-    NW\y = Py - ny - 1
-    SE\x = Px + nx + 2 
-    SE\y = Py + ny + 2
-    TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
-    TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
-    *Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ;Calculus without clipping
-    *Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
+;      nx = *Drawing\CenterX / ts ;How many tiles around the point
+;      ny = *Drawing\CenterY / ts
+;      NW\x = Px - nx - 1
+;      NW\y = Py - ny - 1
+;      SE\x = Px + nx + 2 
+;      SE\y = Py + ny + 2
+;      TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
+;      TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+     ;TODO : rotation fix
+    nx = PixelCenter\x - *Drawing\CenterX 
+    ny = PixelCenter\y + *Drawing\CenterY
+    StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+    RotateCoordinates(PixelCenter\x, PixelCenter\y, PBMap\Angle)
+    *Drawing\Bounds\BottomLeft\x = ConvertCoordinateX(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+    *Drawing\Bounds\BottomLeft\y = ConvertCoordinateY(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+    nx + GadgetWidth(PBMap\Gadget)
+    ny - GadgetHeight(PBMap\Gadget)
+    *Drawing\Bounds\TopRight\x = ConvertCoordinateX(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+    *Drawing\Bounds\TopRight\y = ConvertCoordinateY(nx, ny, #PB_Coordinate_Device, #PB_Coordinate_User)
+    StopVectorDrawing()
+    Pixel2LatLon(*Drawing\Bounds\BottomLeft, *Drawing\Bounds\SouthEast, PBMap\Zoom)
+    Pixel2LatLon(*Drawing\Bounds\TopRight, *Drawing\Bounds\NorthWest, PBMap\Zoom)
+;      Debug *Drawing\Bounds\NorthWest\Latitude
+;      Debug *Drawing\Bounds\NorthWest\Longitude
+;      Debug *Drawing\Bounds\SouthEast\Latitude
+;      Debug *Drawing\Bounds\SouthEast\Longitude
+    ;*Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ;Calculus without clipping
+    ;*Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
     ;***
     ; Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
@@ -1895,12 +1923,12 @@ Module PBMap
     Protected Pixel.PixelCoordinates
     Static CtrlKey
     PBMap\Moving = #False
-    CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\CenterX
-    CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\CenterY
+    MouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\CenterX
+    MouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\CenterY
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-    RotateCoordinates(PBMap\Drawing\CenterX, PBMap\Drawing\CenterY, PBMap\Angle)
-    CanvasMouseX = ConvertCoordinateX(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
-    CanvasMouseY = ConvertCoordinateY(CanvasMouseX, CanvasMouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    RotateCoordinates(0, 0, PBMap\Angle)
+    CanvasMouseX = ConvertCoordinateX(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    CanvasMouseY = ConvertCoordinateY(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
     StopVectorDrawing()
     Select EventType()
       Case #PB_EventType_Focus
@@ -2427,10 +2455,10 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 
-; IDE Options = PureBasic 5.50 (Windows - x64)
-; CursorPosition = 1891
-; FirstLine = 2070
+; IDE Options = PureBasic 5.42 LTS (Windows - x64)
+; CursorPosition = 2430
+; FirstLine = 2401
 ; Folding = -----------------
+; EnableUnicode
 ; EnableThread
 ; EnableXP
-; EnableUnicode
