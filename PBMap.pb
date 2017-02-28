@@ -307,6 +307,9 @@ Module PBMap
         PBMap\Options\HDDCachePath = Value
       Case "maxmemcache"
         PBMap\Options\MaxMemCache = Val(Value)
+      Case "cleancache"
+        DeleteDirectory(PBMap\Options\HDDCachePath, "",#PB_FileSystem_Recursive)
+        MyDebug("Cache : "+PBMap\Options\HDDCachePath+" cleaned"
       Case "wheelmouserelative"
         SelBool(WheelMouseRelative)
       Case "showdegrees"
@@ -327,6 +330,7 @@ Module PBMap
         SelBool(ShowMarkersLegend)      
       Case "trackshowkms"
         SelBool(TrackShowKms)
+      
     EndSelect
   EndProcedure
   
@@ -437,7 +441,7 @@ Module PBMap
     Protected DirName.s = PBMap\Options\HDDCachePath + LayerName + "\"
     If FileSize(DirName) <> -2
       If CreateDirectory(DirName) = #False ; Creates a directory based on the layer name
-        Error("Can't create the following cache directory : " + DirName)
+        Error("Can't create the following Layer cache directory : " + DirName)
       Else
         MyDebug(DirName + " successfully created", 4)
       EndIf
@@ -654,34 +658,34 @@ Module PBMap
     Protected nImage.i = -1
     Protected FileSize.i, timg 
     HTTPProxy(PBMap\Options\ProxyURL+":"+PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    FileSize= ReceiveHTTPFile(TileURL,CacheFile)
-    If FileSize > 0
-      MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-      nImage = GetTileFromHDD(CacheFile)
-    Else
-      MyDebug("Problem loading from web " + TileURL, 3)
-    EndIf
+    ;FileSize= ReceiveHTTPFile(TileURL,CacheFile)
+    ;If FileSize > 0
+    ;  MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+    ;  nImage = GetTileFromHDD(CacheFile)
+    ;Else
+    ;  MyDebug("Problem loading from web " + TileURL, 3)
+    ;EndIf
     ; **** IMPORTANT NOTICE
     ; I'm (djes) now using Curl only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
     ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
     ; More than that, the original Purebasic Receive library is still not Proxy enabled.
-    ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-    ;       If *Buffer
-    ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-    ;         If IsImage(nImage)
-    ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
-    ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-    ;           Else
-    ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
-    ;           EndIf
-    ;           FreeMemory(*Buffer)
-    ;         Else
-    ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
-    ;           nImage = -1
-    ;         EndIf
-    ;       Else
-    ;         MyDebug(" Problem loading from web " + TileURL, 3)
-    ;       EndIf
+           *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
+           If *Buffer
+             nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
+             If IsImage(nImage)
+               If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
+                 MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+               Else
+                 MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
+               EndIf
+               FreeMemory(*Buffer)
+             Else
+               MyDebug("Can't catch image loaded from web " + TileURL, 3)
+               nImage = -1
+             EndIf
+           Else
+             MyDebug(" Problem loading from web " + TileURL, 3)
+           EndIf
     ; ****
     ProcedureReturn nImage
   EndProcedure
@@ -808,7 +812,14 @@ Module PBMap
           key = PBMap\Layers()\Name + Str(kq)
           ; Creates the cache tree based on the OSM tree+Layer : layer/zoom/x/y.png
           ; Creates the sub-directory based on the zoom
-          Protected DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name + "\" + Str(PBMap\Zoom)
+                            
+          Protected DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name
+          If FileSize(DirName) <> -2
+            If CreateDirectory(DirName) = #False 
+              Error("Can't create the following Layer cache directory : " + DirName)
+            EndIf
+          EndIf 
+          DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name + "\" + Str(PBMap\Zoom)
           If FileSize(DirName) <> -2
             If CreateDirectory(DirName) = #False 
               Error("Can't create the following cache directory : " + DirName)
@@ -1685,9 +1696,10 @@ CompilerIf #PB_Compiler_IsMainFile
     
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
-    PBMap::SetOption("Proxy", "1")
-    ;PBMap::SetOption("ProxyUrl", "monproxy")
-    ;PBMap::SetOption("proxyport","0000")        
+    ;PBMap::SetOption("Proxy", "1")
+    ;PBMap::SetOption("ProxyUrl", "myproxy")
+    ;PBMap::SetOption("proxyport","3128")       
+    PBMap::SetOption("CleanCache","1")              ;Delete all files in HDD cache Directory
     PBMap::SetOption("ShowDegrees", "1")
     PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetOption("ShowScale", "1")
@@ -1696,7 +1708,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
-    PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
+    PBMap::SetLocation(49.0446828398, 2.0349812508,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", -1, @MyMarker())  ; To add a marker with a customised GFX
     
@@ -1751,11 +1763,10 @@ CompilerIf #PB_Compiler_IsMainFile
   EndIf
   
 CompilerEndIf
-; IDE Options = PureBasic 5.60 beta 5 (Windows - x86)
-; CursorPosition = 1688
-; FirstLine = 1671
+; IDE Options = PureBasic 5.60 beta 7 (Windows - x86)
+; CursorPosition = 1699
+; FirstLine = 1683
 ; Folding = -------------
 ; EnableThread
 ; EnableXP
-; DisableDebugger
 ; EnableUnicode
