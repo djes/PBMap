@@ -1,6 +1,10 @@
 # PBMap
-Purebasic open source tiled map software.
-Created to develop and test tiles applications in PureBasic.
+Open source tiled map software.
+
+To develop tiled map applications in PureBasic.
+
+Based on OpenStreetMap services
+OSM copyright : http://www.openstreetmap.org/copyright
 
 This code is free !
 
