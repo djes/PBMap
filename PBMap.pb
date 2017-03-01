@@ -88,7 +88,7 @@ DeclareModule PBMap
   Declare.i GetMode()
   Declare SetMode(Mode.i = #MODE_DEFAULT)
   Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
-  Declare.i CleanCache()  
+  Declare.i ClearDiskCache()  
 EndDeclareModule
 
 Module PBMap 
@@ -175,7 +175,6 @@ Module PBMap
     HDDCachePath.s                                 ; Path where to load and save tiles downloaded from server
     DefaultOSMServer.s                             ; Base layer OSM server
     WheelMouseRelative.i
-;    UseCurl.i                                      ; Use native PB http functions or specific included curl library functions
     ScaleUnit.i                                    ; Scale unit to use for measurements
     Proxy.i                                        ; Proxy ON/OFF
     ProxyURL.s
@@ -290,155 +289,8 @@ Module PBMap
   EndProcedure
   
   ;- *** GetText - Translation purpose
+  ;TODO use this for all text
   IncludeFile "gettext.pbi"
-  
-;   ;- *** CURL specific
-;   ; (program has To be compiled in console format for curl debug infos)
-;   
-;   IncludeFile "libcurl.pbi" ; https://github.com/deseven/pbsamples/tree/master/crossplatform/libcurl
-;   
-;   Global *ReceiveHTTPToMemoryBuffer, ReceiveHTTPToMemoryBufferPtr.i, ReceivedData.s
-;   
-;   ProcedureC ReceiveHTTPWriteToMemoryFunction(*ptr, Size.i, NMemB.i, *Stream)
-;     Protected SizeProper.i  = Size & 255
-;     Protected NMemBProper.i = NMemB
-;     If *ReceiveHTTPToMemoryBuffer = 0
-;       *ReceiveHTTPToMemoryBuffer = AllocateMemory(SizeProper * NMemBProper)
-;       If *ReceiveHTTPToMemoryBuffer = 0
-;         Error("Curl : Problem allocating memory")
-;       EndIf
-;     Else
-;       *ReceiveHTTPToMemoryBuffer = ReAllocateMemory(*ReceiveHTTPToMemoryBuffer, MemorySize(*ReceiveHTTPToMemoryBuffer) + SizeProper * NMemBProper)
-;       If *ReceiveHTTPToMemoryBuffer = 0
-;         Error("Curl : Problem reallocating memory")
-;       EndIf  
-;     EndIf
-;     CopyMemory(*ptr, *ReceiveHTTPToMemoryBuffer + ReceiveHTTPToMemoryBufferPtr, SizeProper * NMemBProper)
-;     ReceiveHTTPToMemoryBufferPtr + SizeProper * NMemBProper
-;     ProcedureReturn SizeProper * NMemBProper
-;   EndProcedure
-;   
-;   Procedure.i CurlReceiveHTTPToMemory(URL$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
-;     Protected *Buffer, curl.i, Timeout.i, res.i, respcode.l
-;     If Len(URL$)
-;       curl  = curl_easy_init()
-;       If curl
-;         Timeout = 3
-;         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
-;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
-;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
-;         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
-;         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
-;         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
-;         If PBMap\Options\Verbose
-;           curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
-;         EndIf
-;         curl_easy_setopt(curl, #CURLOPT_FAILONERROR, 1)
-;         If Len(ProxyURL$)
-;           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
-;           If Len(ProxyPort$)
-;             ProxyURL$ + ":" + ProxyPort$
-;           EndIf
-;           ; Debug ProxyURL$
-;           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
-;           If Len(ProxyUser$)
-;             If Len(ProxyPassword$)
-;               ProxyUser$ + ":" + ProxyPassword$
-;             EndIf
-;             ;Debug ProxyUser$
-;             curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
-;           EndIf
-;         EndIf
-;         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToMemoryFunction())
-;         res = curl_easy_perform(curl)
-;         If res = #CURLE_OK
-;           *Buffer = AllocateMemory(ReceiveHTTPToMemoryBufferPtr)
-;           If *Buffer
-;             CopyMemory(*ReceiveHTTPToMemoryBuffer, *Buffer, ReceiveHTTPToMemoryBufferPtr)
-;             FreeMemory(*ReceiveHTTPToMemoryBuffer)
-;             *ReceiveHTTPToMemoryBuffer = #Null
-;             ReceiveHTTPToMemoryBufferPtr = 0
-;           Else
-;             MyDebug("Problem allocating buffer", 4)         
-;           EndIf        
-;           ;curl_easy_cleanup(curl) ;Was its original place but moved below as it seems more logical to me.
-;         Else
-;           curl_easy_getinfo(curl, #CURLINFO_HTTP_CODE, @respcode)
-;           MyDebug("CURL : HTTP ERROR " + Str(respcode) , 8)
-;           curl_easy_cleanup(curl)
-;           ProcedureReturn #False
-;         EndIf
-;         curl_easy_cleanup(curl)
-;       Else
-;         MyDebug("Can't Init CURL", 4)
-;       EndIf      
-;     EndIf
-;     ; Debug "Curl Buffer : " + Str(*Buffer)
-;     ProcedureReturn *Buffer
-;   EndProcedure
-;   
-;   ;Curl write callback (needed for win32 dll)
-;   ProcedureC ReceiveHTTPWriteToFileFunction(*ptr, Size.i, NMemB.i, FileHandle.i)
-;     ProcedureReturn WriteData(FileHandle, *ptr, Size * NMemB)    
-;   EndProcedure
-;   
-;   Procedure.i CurlReceiveHTTPToFile(URL$, DestFileName$, ProxyURL$="", ProxyPort$="", ProxyUser$="", ProxyPassword$="")
-;     Protected *Buffer, curl.i, Timeout.i, res.i, respcode.l
-;     Protected FileHandle.i
-;     MyDebug("CurlReceiveHTTPToFile from " + URL$ + " " + ProxyURL$ + " " + ProxyPort$ + " " + ProxyUser$, 8)
-;     MyDebug(" to file : " + DestFileName$, 8)
-;     FileHandle = CreateFile(#PB_Any, DestFileName$)
-;     If FileHandle And Len(URL$)
-;       curl  = curl_easy_init()
-;       If curl
-;         Timeout = 120
-;         curl_easy_setopt(curl, #CURLOPT_URL, str2curl(URL$))
-;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYPEER, 0)
-;         curl_easy_setopt(curl, #CURLOPT_SSL_VERIFYHOST, 0)
-;         curl_easy_setopt(curl, #CURLOPT_HEADER, 0)   
-;         curl_easy_setopt(curl, #CURLOPT_FOLLOWLOCATION, 1)
-;         curl_easy_setopt(curl, #CURLOPT_TIMEOUT, Timeout)
-;         If PBMap\Options\Verbose
-;           curl_easy_setopt(curl, #CURLOPT_VERBOSE, 1)
-;         EndIf
-;         curl_easy_setopt(curl, #CURLOPT_FAILONERROR, 1)
-;         ;curl_easy_setopt(curl, #CURLOPT_CONNECTTIMEOUT, 60)
-;         If Len(ProxyURL$)
-;           ;curl_easy_setopt(curl, #CURLOPT_HTTPPROXYTUNNEL, #True)
-;           If Len(ProxyPort$)
-;             ProxyURL$ + ":" + ProxyPort$
-;           EndIf
-;           MyDebug(ProxyURL$, 8)
-;           curl_easy_setopt(curl, #CURLOPT_PROXY, str2curl(ProxyURL$))
-;           If Len(ProxyUser$)
-;             If Len(ProxyPassword$)
-;               ProxyUser$ + ":" + ProxyPassword$
-;             EndIf
-;             MyDebug(ProxyUser$, 8)
-;             curl_easy_setopt(curl, #CURLOPT_PROXYUSERPWD, str2curl(ProxyUser$))
-;           EndIf
-;         EndIf
-;         curl_easy_setopt(curl, #CURLOPT_WRITEDATA, FileHandle)
-;         curl_easy_setopt(curl, #CURLOPT_WRITEFUNCTION, @ReceiveHTTPWriteToFileFunction())
-;         res = curl_easy_perform(curl)
-;         If res <> #CURLE_OK
-;           curl_easy_getinfo(curl, #CURLINFO_HTTP_CODE, @respcode)
-;           MyDebug("CURL : HTTP ERROR " + Str(respcode) , 8)
-;           CloseFile(FileHandle)
-;           curl_easy_cleanup(curl)
-;           ProcedureReturn #False
-;         EndIf
-;         curl_easy_cleanup(curl)
-;       Else
-;         MyDebug("Can't init CURL", 8)
-;       EndIf
-;       CloseFile(FileHandle)
-;       ProcedureReturn FileSize(DestFileName$)
-;     EndIf
-;     ProcedureReturn #False
-;   EndProcedure
-;   
-;   ;- ***
   
   Procedure TechnicalImagesCreation()
     ;"Loading" image
@@ -531,8 +383,6 @@ Module PBMap
         SelBool(Verbose)
       Case "warning"
         SelBool(Warning)
-;      Case "usecurl"
-;        SelBool(UseCurl)
       Case "wheelmouserelative"
         SelBool(WheelMouseRelative)
       Case "showdegrees"
@@ -586,7 +436,6 @@ Module PBMap
       WritePreferenceInteger("MaxMemCache", \MaxMemCache)
       WritePreferenceInteger("Verbose", \Verbose)
       WritePreferenceInteger("Warning", \Warning)
-;      WritePreferenceInteger("UseCurl", \UseCurl)
       WritePreferenceInteger("ShowDegrees", \ShowDegrees)
       WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
       WritePreferenceInteger("ShowScale", \ShowScale)
@@ -644,7 +493,6 @@ Module PBMap
       \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
       \Verbose            = ReadPreferenceInteger("Verbose", #True)
       \Warning            = ReadPreferenceInteger("Warning", #False)
-;      \UseCurl            = ReadPreferenceInteger("UseCurl", #True)
       \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
       \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
       \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
@@ -708,9 +556,6 @@ Module PBMap
       Next
       Delay(10)
     Until MapSize(PBMap\MemCache\Images()) = 0
-;    If PBMap\Options\UseCurl
-;      curl_global_cleanup()
-;    EndIf
   EndProcedure
   
   Macro Min(a,b)
@@ -900,26 +745,16 @@ Module PBMap
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileSize.i, timg
-;    If PBMap\Options\UseCurl 
-;      FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-;      If FileSize > 0
-;        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-;        nImage = GetTileFromHDD(CacheFile)
-;      Else
-;        MyDebug("Problem loading from web " + TileURL, 3)
-;      EndIf
-;    Else
-      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-      FileSize = ReceiveHTTPFile(TileURL, CacheFile)
-      If FileSize > 0
-        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-        nImage = GetTileFromHDD(CacheFile)
-      Else
-        MyDebug("Problem loading from web " + TileURL, 3)
-      EndIf
-;    EndIf
-    ; **** IMPORTANT NOTICE
-    ; I'm (djes) now using Curl only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
+    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    FileSize = ReceiveHTTPFile(TileURL, CacheFile)
+    If FileSize > 0
+      MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+      nImage = GetTileFromHDD(CacheFile)
+    Else
+      MyDebug("Problem loading from web " + TileURL, 3)
+    EndIf
+    ; **** IMPORTANT NOTICE (please not remove)
+    ; I'm (djes) now using Curl (actually, just normal pb) only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
     ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
     ; More than that, the original Purebasic Receive library is still not Proxy enabled.
     ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
@@ -1898,19 +1733,14 @@ Module PBMap
     Protected Size.i
     Protected Query.s = "http://nominatim.openstreetmap.org/search/" + 
                         URLEncoder(Address) + 
-                        ;"Unter%20den%20Linden%201%20Berlin" +
-    "?format=json&addressdetails=0&polygon=0&limit=1"
+                        "?format=json&addressdetails=0&polygon=0&limit=1"
     Protected JSONFileName.s = PBMap\Options\HDDCachePath + "nominatimresponse.json"
     ;    Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
     ;     Debug *Buffer
     ;     Debug MemorySize(*Buffer)
     ;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
-;    If PBMap\Options\UseCurl 
-;      Size = CurlReceiveHTTPToFile(Query, JSONFileName, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-;    Else
-      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-      Size = ReceiveHTTPFile(Query, JSONFileName)
-;    EndIf
+    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    Size = ReceiveHTTPFile(Query, JSONFileName)
     If LoadJSON(0, JSONFileName) = 0
       ;Demivec's code
       MyDebug( JSONErrorMessage() + " at position " +
@@ -1981,7 +1811,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure.i CleanCache()
+  Procedure.i ClearDiskCache()
     If PBMap\Options\Warning
       Protected Result.i = MessageRequester("Warning", "You will clear all cache content in " + PBMap\Options\HDDCachePath + ". Are you sure ?",#PB_MessageRequester_YesNo)
       If Result = #PB_MessageRequester_No     ; Quit if "no" selected
@@ -1989,11 +1819,11 @@ Module PBMap
       EndIf
     EndIf
     If DeleteDirectory(PBMap\Options\HDDCachePath, "", #PB_FileSystem_Recursive)
-      MyDebug("Cache in : " + PBMap\Options\HDDCachePath + " cleaned")
+      MyDebug("Cache in : " + PBMap\Options\HDDCachePath + " cleared")
       CreateDirectoryEx(PBMap\Options\HDDCachePath)
       ProcedureReturn #True
     Else
-      MyDebug("Can't clean cache in " + PBMap\Options\HDDCachePath)
+      MyDebug("Can't clear cache in " + PBMap\Options\HDDCachePath)
       ProcedureReturn #False
     EndIf
   EndProcedure
@@ -2278,9 +2108,6 @@ Module PBMap
     If PBMap\Options\DefaultOSMServer <> "" 
       AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
     EndIf
-;    If PBMap\Options\UseCurl 
-;      curl_global_init(#CURL_GLOBAL_WIN32)
-;    EndIf
     TechnicalImagesCreation()
     SetLocation(0, 0)
   EndProcedure
@@ -2319,7 +2146,8 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
     #Gdt_Degrees
-    #Gdt_EditMode
+    #Gdt_EditMode 
+    #Gdt_ClearDiskCache
     #TextGeoLocationQuery
     #StringGeoLocationQuery
   EndEnumeration
@@ -2388,6 +2216,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#TextGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#StringGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     PBMap::Refresh()
@@ -2419,8 +2248,9 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
     ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
     ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 435, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 450, 150, 20, "")
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 430, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 465, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 480, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2440,12 +2270,11 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "0") : Degrees = 0
     PBMap::SetOption("ShowDebugInfos", "0")
-    PBMap::SetOption("ShowScale", "1")
+    PBMap::SetOption("ShowScale", "1")    
+    PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")
-;    PBMap::SetOption("UseCurl", "0")  
     PBMap::SetOption("ColourFocus", "$FFFF00AA")    
-    ;PBMap::CleanCache()
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
@@ -2468,12 +2297,12 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::SetLocation(0, 10* -360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
             Case #Gdt_Right
               PBMap::SetLocation(0, 10* 360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
-            ;Case #Gdt_RotateLeft
-            ;  PBMAP::SetAngle(-5,#PB_Relative) 
-            ;  PBMap::Refresh()
-            ;Case #Gdt_RotateRight
-            ;  PBMAP::SetAngle(5,#PB_Relative) 
-            ;  PBMap::Refresh()
+              ;Case #Gdt_RotateLeft
+              ;  PBMAP::SetAngle(-5,#PB_Relative) 
+              ;  PBMap::Refresh()
+              ;Case #Gdt_RotateRight
+              ;  PBMAP::SetAngle(5,#PB_Relative) 
+              ;  PBMap::Refresh()
             Case #Button_4
               PBMap::SetZoom(1)
             Case #Button_5
@@ -2513,6 +2342,8 @@ CompilerIf #PB_Compiler_IsMainFile
                 PBMap::SetMode(PBMap::#MODE_DEFAULT)
                 SetGadgetState(#Gdt_EditMode, 0)
               EndIf
+            Case #Gdt_ClearDiskCache
+              PBMap::ClearDiskCache()
             Case #StringGeoLocationQuery
               Select EventType()
                 Case #PB_EventType_Focus
@@ -2548,8 +2379,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 190
-; FirstLine = 117
+; CursorPosition = 2250
+; FirstLine = 2260
 ; Folding = -----------------
 ; EnableThread
 ; EnableXP
