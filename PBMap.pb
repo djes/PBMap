@@ -16,15 +16,17 @@ CompilerIf #PB_Compiler_Thread = #False
   End
 CompilerEndIf 
 
+CompilerIf #PB_Compiler_OS = #PB_OS_Linux
+ #Red = 255
+compilerEndif
+
 EnableExplicit
 
 InitNetwork()
 UsePNGImageDecoder()
 UsePNGImageEncoder()
 
-DeclareModule PBMap
-  #Red = 255
-  
+DeclareModule PBMap  
   ;-Show debug infos  
   Global Verbose = 0
   Global MyDebugLevel = 0
@@ -164,6 +166,7 @@ Module PBMap
     HDDCachePath.s                                 ; Path where to load and save tiles downloaded from server
     DefaultOSMServer.s                             ; Base layer OSM server
     WheelMouseRelative.i
+    UseCurl.i                                      ; Use native PB http functions or specific included curl library functions
     ScaleUnit.i                                    ; Scale unit to use for measurements
     Proxy.i                                        ; Proxy ON/OFF
     ProxyURL.s
@@ -243,7 +246,7 @@ Module PBMap
     Moving.i
     Dirty.i                                        ; To signal that drawing need a refresh
     
-    List TracksList.Tracks()
+    List TracksList.Tracks()                       ; To display a GPX track
     List Markers.Marker()                          ; To diplay marker
     EditMarker.l
     
@@ -513,6 +516,14 @@ Module PBMap
         PBMap\Options\HDDCachePath = Value
       Case "maxmemcache"
         PBMap\Options\MaxMemCache = Val(Value)
+      Case "cleancache"
+        if DeleteDirectory(PBMap\Options\HDDCachePath, "", #PB_FileSystem_Recursive)
+          MyDebug("Cache : " + PBMap\Options\HDDCachePath + " cleaned")
+        else
+          MyDebug("Can't clean cache in " + PBMap\Options\HDDCachePath)
+        endif
+      Case "usecurl"
+        SelBool(UseCurl)
       Case "wheelmouserelative"
         SelBool(WheelMouseRelative)
       Case "showdegrees"
@@ -564,6 +575,7 @@ Module PBMap
     PreferenceGroup("OPTIONS")   
     WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
     WritePreferenceInteger("MaxMemCache", \MaxMemCache)
+    WritePreferenceInteger("UseCurl", \UseCurl)
     WritePreferenceInteger("ShowDegrees", \ShowDegrees)
     WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
     WritePreferenceInteger("ShowScale", \ShowScale)
@@ -619,6 +631,7 @@ Module PBMap
     PreferenceGroup("OPTIONS")   
     \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
     \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
+    \UseCurl            = ReadPreferenceInteger("UseCurl", #True)
     \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
     \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
     \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
@@ -689,8 +702,10 @@ Module PBMap
         EndIf
       Next
       Delay(10)
-    Until MapSize(PBMap\MemCache\Images()) = 0 
-    curl_global_cleanup()
+    Until MapSize(PBMap\MemCache\Images()) = 0
+    If PBMap\Options\Curl
+      curl_global_cleanup()
+    endif
   EndProcedure
   
   Macro Min(a,b)
@@ -880,14 +895,25 @@ Module PBMap
   Procedure.i GetTileFromWeb(TileURL.s, CacheFile.s)
     Protected *Buffer
     Protected nImage.i = -1
-    Protected FileSize.i, timg 
-    FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    If FileSize > 0
-      MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-      nImage = GetTileFromHDD(CacheFile)
+    Protected FileSize.i, timg
+    If PBMap\Options\Curl 
+      FileSize = CurlReceiveHTTPToFile(TileURL, CacheFile, PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+      If FileSize > 0
+        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+        nImage = GetTileFromHDD(CacheFile)
+      Else
+        MyDebug("Problem loading from web " + TileURL, 3)
+      EndIf
     Else
-      MyDebug("Problem loading from web " + TileURL, 3)
-    EndIf
+      HTTPProxy(PBMap\Options\ProxyURL+":"+PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+      FileSize = ReceiveHTTPFile(TileURL, CacheFile)
+      If FileSize > 0
+        MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+        nImage = GetTileFromHDD(CacheFile)
+      Else
+        MyDebug("Problem loading from web " + TileURL, 3)
+      EndIf
+    Endif
     ; **** IMPORTANT NOTICE
     ; I'm (djes) now using Curl only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
     ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
@@ -922,7 +948,7 @@ Module PBMap
         *Tile\RetryNb = 0
       Else 
         MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
-        Delay(5000)
+        Delay(2000)
         *Tile\RetryNb - 1
       EndIf
     Until *Tile\RetryNb <= 0
@@ -1310,13 +1336,11 @@ Module PBMap
                 LatLon2PixelRel(@PBMap\TracksList()\Track(), @Pixel, PBMap\Zoom)
                 If Int(km) <> memKm
                   memKm = Int(km)
-                  RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
                   If Int(km) = 0
                     DrawTrackPointerFirst(Pixel\x , Pixel\y, Int(km))
                   Else
                     DrawTrackPointer(Pixel\x , Pixel\y, Int(km))
                   EndIf
-                  RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
                 EndIf
               Next
             EndIf
@@ -1498,13 +1522,11 @@ Module PBMap
     ForEach PBMap\Markers()
       If IsInDrawingPixelBoundaries(*Drawing, @PBMap\Markers()\GeographicCoordinates)
         LatLon2PixelRel(@PBMap\Markers()\GeographicCoordinates, @Pixel, PBMap\Zoom)
-        RotateCoordinates(Pixel\x, Pixel\y, -PBMap\Angle)
         If PBMap\Markers()\CallBackPointer > 0
           CallFunctionFast(PBMap\Markers()\CallBackPointer, Pixel\x, Pixel\y, PBMap\Markers()\Focus, PBMap\Markers()\Selected)
         Else
           DrawMarker(Pixel\x, Pixel\y, ListIndex(PBMap\Markers()), @PBMap\Markers())
         EndIf
-        RotateCoordinates(Pixel\x, Pixel\y, PBMap\Angle)
       EndIf 
     Next
   EndProcedure 
@@ -1513,9 +1535,9 @@ Module PBMap
     ; Display how many images in cache
     VectorFont(FontID(PBMap\Font), 16)
     VectorSourceColor(RGBA(0, 0, 0, 80))
-    MovePathCursor(50,50)
+    MovePathCursor(50, 50)
     DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
-    MovePathCursor(50,70)
+    MovePathCursor(50, 70)
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
       If PBMap\MemCache\Images()\Tile <> 0
@@ -1525,11 +1547,11 @@ Module PBMap
       EndIf
     Next
     DrawVectorText(Str(ThreadCounter))    
-    MovePathCursor(50,90)
+    MovePathCursor(50, 90)
     DrawVectorText(Str(PBMap\Zoom))
-    MovePathCursor(50,110)
+    MovePathCursor(50, 110)
     DrawVectorText(StrD(*Drawing\Bounds\NorthWest\Latitude) + "," + StrD(*Drawing\Bounds\NorthWest\Longitude))  
-    MovePathCursor(50,130)
+    MovePathCursor(50, 130)
     DrawVectorText(StrD(*Drawing\Bounds\SouthEast\Latitude) + "," + StrD(*Drawing\Bounds\SouthEast\Longitude))  
   EndProcedure
   
