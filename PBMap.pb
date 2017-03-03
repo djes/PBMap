@@ -12,7 +12,7 @@
 ;******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
-  MessageRequester("Warning !!","You must enable ThreadSafe support in compiler options",#PB_MessageRequester_Ok )
+  MessageRequester("Warning !", "You must enable ThreadSafe support in compiler options", #PB_MessageRequester_Ok )
   End
 CompilerEndIf 
 
@@ -22,22 +22,13 @@ InitNetwork()
 UsePNGImageDecoder()
 UsePNGImageEncoder()
 
+;- Module declaration
+
 DeclareModule PBMap  
-  ;-Show debug infos 
-  Global MyDebugLevel = 0
-  
+   
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
     #Red = 255
   CompilerEndIf
-  
-  Global slash.s
-  
-  CompilerSelect #PB_Compiler_OS
-    CompilerCase #PB_OS_Windows
-      slash = "\"
-    CompilerDefault
-      slash = "/"
-  CompilerEndSelect
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -49,7 +40,10 @@ DeclareModule PBMap
   
   #MARKER_EDIT_EVENT = #PB_Event_FirstCustomValue
   
-  ;-Declarations
+  #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
+  #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
+  #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+   
   Declare InitPBMap(window)
   Declare SetOption(Option.s, Value.s)
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
@@ -57,16 +51,24 @@ DeclareModule PBMap
   Declare.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
   Declare DeleteLayer(Nb.i)
   Declare BindMapGadget(Gadget.i)
-  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
-  Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
-  Declare Drawing()
-  Declare SetAngle(Angle.d, Mode = #PB_Absolute) 
-  Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
-  Declare ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
-  Declare ZoomToTracks(*Tracks)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
+  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Declare.d GetLatitude()
+  Declare.d GetLongitude()
+  Declare.d GetMouseLatitude()
+  Declare.d GetMouseLongitude()
+  Declare.d GetAngle()
+  Declare.i GetZoom()
+  Declare.i GetMode()
+  Declare SetMode(Mode.i = #MODE_DEFAULT)
   Declare SetMapScaleUnit(ScaleUnit=PBMAP::#SCALE_KM) 
+  Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
+  Declare SetAngle(Angle.d, Mode = #PB_Absolute) 
+  Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
+  Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+  Declare SetZoomToTracks(*Tracks)
+  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
   Declare.i LoadGpxFile(file.s);  
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
@@ -76,24 +78,18 @@ DeclareModule PBMap
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
   Declare DeleteSelectedMarkers()
+  Declare Drawing()
   Declare Quit()
   Declare Error(msg.s)
   Declare Refresh()
-  Declare.d GetLatitude()
-  Declare.d GetLongitude()
-  Declare.d MouseLatitude()
-  Declare.d MouseLongitude()
-  Declare.d GetAngle()
-  Declare.i GetZoom()
-  Declare.i GetMode()
-  Declare SetMode(Mode.i = #MODE_DEFAULT)
-  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
   Declare.i ClearDiskCache()  
 EndDeclareModule
 
 Module PBMap 
   
   EnableExplicit
+  
+  ;-*** Structures
   
   Structure GeographicCoordinates
     Longitude.d
@@ -110,7 +106,6 @@ Module PBMap
     y.d
   EndStructure
   
-  ;- Tile Structure
   Structure Tile
     nImage.i
     key.s
@@ -225,7 +220,7 @@ Module PBMap
     StrokeWidth.i
   EndStructure
   
-  ;-PBMap Structure
+  ;- PBMap 
   Structure PBMap
     Window.i                                       ; Parent Window
     Gadget.i                                       ; Canvas Gadget Id 
@@ -267,14 +262,37 @@ Module PBMap
     
   EndStructure
   
-  #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
-  #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
-  #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+  ;-*** Global variables
   
-  ;-Global variables
+  ;-Show debug infos 
+  Global MyDebugLevel = 0
+  
   Global PBMap.PBMap, Null.i
+  Global slash.s
   
-  ;Shows an error msg and terminates the program
+  CompilerSelect #PB_Compiler_OS
+    CompilerCase #PB_OS_Windows
+      Global slash = "\"
+    CompilerDefault
+      Global slash = "/"
+  CompilerEndSelect  
+  
+  ;- *** GetText - Translation purpose
+  
+  ;TODO use this for all text
+  IncludeFile "gettext.pbi"
+      
+  ;-*** Misc tools
+  
+  Macro Min(a, b)
+    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
+  EndMacro
+  
+  Macro Max(a, b)
+    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
+  EndMacro
+  
+   ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
     MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
     End
@@ -288,9 +306,49 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;- *** GetText - Translation purpose
-  ;TODO use this for all text
-  IncludeFile "gettext.pbi"
+  ;(c) ts-soft http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
+  CompilerSelect #PB_Compiler_OS
+    CompilerCase #PB_OS_Windows
+      #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
+      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ;(0x8000)
+      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192;(0x2000)
+      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072;(0x20000)
+      #FILE_ATTRIBUTE_VIRTUAL              =  65536;(0x10000)
+      #FILE_ATTRIBUTE_DONTSETFLAGS = ~(#FILE_ATTRIBUTE_DIRECTORY|
+                                       #FILE_ATTRIBUTE_SPARSE_FILE|
+                                       #FILE_ATTRIBUTE_OFFLINE|
+                                       #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED|
+                                       #FILE_ATTRIBUTE_VIRTUAL|
+                                       0)
+      Macro SetFileAttributesEx(Name, Attribs)
+        SetFileAttributes(Name, Attribs & #FILE_ATTRIBUTE_DONTSETFLAGS)
+      EndMacro
+    CompilerDefault
+      Macro SetFileAttributesEx(Name, Attribs)
+        SetFileAttributes(Name, Attribs)
+      EndMacro
+  CompilerEndSelect
+  
+  Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
+    Protected i, c, tmp.s
+    If Right(DirectoryName, 1) = slash
+      DirectoryName = Left(DirectoryName, Len(DirectoryName) -1)
+    EndIf
+    c = CountString(DirectoryName, slash) + 1
+    For i = 1 To c
+      tmp + StringField(DirectoryName, i, slash)
+      If FileSize(tmp) <> -2
+        CreateDirectory(tmp)
+      EndIf
+      tmp + slash
+    Next
+    If FileAttribute <> #PB_Default
+      SetFileAttributesEx(DirectoryName, FileAttribute)
+    EndIf
+    If FileSize(DirectoryName) = -2
+      ProcedureReturn #True
+    EndIf
+  EndProcedure
   
   Procedure TechnicalImagesCreation()
     ;"Loading" image
@@ -329,19 +387,181 @@ Module PBMap
     EndIf
   EndProcedure  
   
+  Procedure.d Distance(x1.d, y1.d, x2.d, y2.d)
+    Protected Result.d
+    Result = Sqr( (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
+    ProcedureReturn Result
+  EndProcedure
+  
+  ;*** Converts coords to tile.decimal
+  ;Warning, structures used in parameters are not tested
+  Procedure LatLon2TileXY(*Location.GeographicCoordinates, *Coords.Coordinates, Zoom)
+    Protected n.d = Pow(2.0, Zoom)
+    Protected LatRad.d = Radian(*Location\Latitude)
+    *Coords\x = n * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
+    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
+    MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
+    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
+  EndProcedure
+  
+  ;*** Converts tile.decimal to coords
+  ;Warning, structures used in parameters are not tested
+  Procedure TileXY2LatLon(*Coords.Coordinates, *Location.GeographicCoordinates, Zoom)
+    Protected n.d = Pow(2.0, Zoom)
+    ;Ensures the longitude to be in the range [-180;180[
+    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
+  EndProcedure
+  
+  Procedure Pixel2LatLon(*Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
+    Protected n.d = PBMap\TileSize * Pow(2.0, Zoom)
+    ;Ensures the longitude to be in the range [-180;180[
+    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
+  EndProcedure
+  
+  ;Ensures the longitude to be in the range [-180;180[
+  Procedure.d ClipLongitude(Longitude.d)
+    ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
+  EndProcedure
+  
+  ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
+  Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
+    Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
+    Protected LatRad.d = Radian(*Location\Latitude)
+    *Pixel\x = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
+    *Pixel\y = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
+  EndProcedure   
+  
+  ;Lat Lon coordinates 2 pixel relative to the center of view
+  Procedure LatLon2PixelRel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
+    Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
+    Protected cx.d  = PBMap\Drawing\RadiusX
+    Protected dpx.d = PBMap\PixelCoordinates\x
+    Protected LatRad.d = Radian(*Location\Latitude)
+    Protected px.d = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
+    Protected py.d = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
+    ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
+    If dpx - px >= tilemax / 2
+      ;Debug "c1"
+      *Pixel\x = cx + (px - dpx + tilemax)
+    ElseIf px - dpx > tilemax / 2
+      ;Debug "c2"
+      *Pixel\x = cx + (px - dpx - tilemax)
+    ElseIf px - dpx < 0
+      ;Debug "c3"
+      *Pixel\x = cx - (dpx - px)
+    Else
+      ;Debug "c0"
+      *Pixel\x = cx + (px - dpx) 
+    EndIf
+    *Pixel\y = PBMap\Drawing\RadiusY + (py - PBMap\PixelCoordinates\y) 
+  EndProcedure
+  
+  Procedure.d Pixel2Lon(x)
+    Protected NewX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + x) / PBMap\TileSize
+    Protected n.d = Pow(2.0, PBMap\Zoom)
+    ; double mod is to ensure the longitude to be in the range [-180;180[
+    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
+  EndProcedure
+  
+  Procedure.d Pixel2Lat(y)
+    Protected NewY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + y) / PBMap\TileSize
+    Protected n.d = Pow(2.0, PBMap\Zoom)
+    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
+  EndProcedure
+  
+  ; HaversineAlgorithm 
+  ; http://andrew.hedges.name/experiments/haversine/
+  Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
+    Protected eQuatorialEarthRadius.d = 6378.1370;6372.795477598;
+    Protected dlong.d = (*posB\Longitude - *posA\Longitude);
+    Protected dlat.d = (*posB\Latitude - *posA\Latitude)   ;
+    Protected alpha.d=dlat/2
+    Protected beta.d=dlong/2
+    Protected a.d = Sin(Radian(alpha)) * Sin(Radian(alpha)) + Cos(Radian(*posA\Latitude)) * Cos(Radian(*posB\Latitude)) * Sin(Radian(beta)) * Sin(Radian(beta)) 
+    Protected c.d = ASin(Min(1,Sqr(a)));
+    Protected distance.d = 2*eQuatorialEarthRadius * c     
+    ProcedureReturn distance                                                                                                        ;
+  EndProcedure
+  
+  Procedure.d HaversineInM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
+    ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
+  EndProcedure
+  
+  ; No more used, see LatLon2PixelRel
+  Procedure GetPixelCoordFromLocation(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) ; TODO to Optimize 
+    Protected mapWidth.l    = Pow(2, Zoom + 8)
+    Protected mapHeight.l   = Pow(2, Zoom + 8)
+    Protected x1.l,y1.l
+    x1 = (*Location\Longitude+180)*(mapWidth/360)
+    ; convert from degrees To radians
+    Protected latRad.d = *Location\Latitude*#PI/180;
+    Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
+    y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
+    Protected x2.l, y2.l
+    x2 = (PBMap\GeographicCoordinates\Longitude+180)*(mapWidth/360)
+    ; convert from degrees To radians
+    latRad = PBMap\GeographicCoordinates\Latitude*#PI/180;
+    mercN = Log(Tan((#PI/4)+(latRad/2)))        
+    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
+    *Pixel\x=PBMap\Drawing\RadiusX  - (x2-x1)
+    *Pixel\y=PBMap\Drawing\RadiusY - (y2-y1)
+  EndProcedure
+  
+  Procedure IsInDrawingPixelBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+    Protected Pixel.PixelCoordinates
+    LatLon2PixelRel(*Position, @Pixel, PBMap\Zoom)
+    If Pixel\x >= 0 And Pixel\y >= 0 And Pixel\x < *Drawing\RadiusX * 2 And Pixel\y < *Drawing\RadiusY * 2
+      ProcedureReturn #True
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
+  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+    Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
+    Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
+    Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
+    If Lat >= LatSE And Lat <= LatNW
+      If *Drawing\Width >= 360
+        ProcedureReturn #True
+      Else
+        If LonNW < LonSE      
+          If Lon >= LonNW And Lon <= LonSE
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf  
+        Else
+          If (Lon >= -180 And Lon <= LonSE) Or (Lon >= LonNW And Lon <= 180)
+            ProcedureReturn #True
+          Else
+            ProcedureReturn #False
+          EndIf
+        EndIf
+      EndIf
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure  
+  
   ;TODO : best cleaning of the string from bad behaviour
   Procedure.s StringCheck(String.s)
     ProcedureReturn Trim(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(String, Chr(0)), Chr(32)), Chr(39)), Chr(33)), Chr(34)), "@"), "/"), "\"), "$"), "%"))
   EndProcedure
-  
-  Macro SelBool(Name)
-    Select UCase(Value)
-      Case "0", "FALSE", "DISABLE"
-        PBMap\Options\Name = #False
-      Default
-        PBMap\Options\Name = #True
-    EndSelect
-  EndMacro
   
   Procedure.i ColourString2Value(Value.s)
     ;TODO : better string check
@@ -363,6 +583,17 @@ Module PBMap
       ProcedureReturn Val(Value)
     EndIf
   EndProcedure  
+  
+  ;-*** Options
+  
+  Macro SelBool(Name)
+    Select UCase(Value)
+      Case "0", "FALSE", "DISABLE"
+        PBMap\Options\Name = #False
+      Default
+        PBMap\Options\Name = #True
+    EndSelect
+  EndMacro
   
   Procedure SetOption(Option.s, Value.s)
     Option = StringCheck(Option)
@@ -513,6 +744,8 @@ Module PBMap
     EndWith  
   EndProcedure
   
+  ;-*** Layers
+  
   Procedure.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
     Protected *Ptr = AddElement(PBMap\Layers())
     If *Ptr
@@ -532,199 +765,9 @@ Module PBMap
     FirstElement(PBMap\Layers())
     SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
   EndProcedure
-  
-  Procedure Quit()
-    PBMap\Drawing\End = #True
-    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
-    Protected TimeCounter = ElapsedMilliseconds()
-    Repeat
-      ForEach PBMap\MemCache\Images()
-        If PBMap\MemCache\Images()\Tile <> 0         
-          If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            PBMap\MemCache\Images()\Tile\RetryNb = 0
-            If ElapsedMilliseconds() - TimeCounter > 2000
-              ;Should not occur
-              KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            EndIf
-          Else
-            FreeMemory(PBMap\MemCache\Images()\Tile)
-            PBMap\MemCache\Images()\Tile = 0
-          EndIf
-        Else
-          DeleteMapElement(PBMap\MemCache\Images())
-        EndIf
-      Next
-      Delay(10)
-    Until MapSize(PBMap\MemCache\Images()) = 0
-  EndProcedure
-  
-  Macro Min(a,b)
-    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
-  EndMacro
-  
-  Macro Max(a,b)
-    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
-  EndMacro
-  
-  Procedure.d Distance(x1.d, y1.d, x2.d, y2.d)
-    Protected Result.d
-    Result = Sqr( (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
-    ProcedureReturn Result
-  EndProcedure
-  
-  ;*** Converts coords to tile.decimal
-  ;Warning, structures used in parameters are not tested
-  Procedure LatLon2TileXY(*Location.GeographicCoordinates, *Coords.Coordinates, Zoom)
-    Protected n.d = Pow(2.0, Zoom)
-    Protected LatRad.d = Radian(*Location\Latitude)
-    *Coords\x = n * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
-    MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
-    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
-  EndProcedure
-  
-  ;*** Converts tile.decimal to coords
-  ;Warning, structures used in parameters are not tested
-  Procedure TileXY2LatLon(*Coords.Coordinates, *Location.GeographicCoordinates, Zoom)
-    Protected n.d = Pow(2.0, Zoom)
-    ;Ensures the longitude to be in the range [-180;180[
-    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
-    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
-    If *Location\Latitude <= -89 
-      *Location\Latitude = -89 
-    EndIf
-    If *Location\Latitude >= 89
-      *Location\Latitude = 89 
-    EndIf
-  EndProcedure
-  
-  Procedure Pixel2LatLon(*Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
-    Protected n.d = PBMap\TileSize * Pow(2.0, Zoom)
-    ;Ensures the longitude to be in the range [-180;180[
-    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
-    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
-    If *Location\Latitude <= -89 
-      *Location\Latitude = -89 
-    EndIf
-    If *Location\Latitude >= 89
-      *Location\Latitude = 89 
-    EndIf
-  EndProcedure
-  
-  ;Ensures the longitude to be in the range [-180;180[
-  Procedure.d ClipLongitude(Longitude.d)
-    ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
-  EndProcedure
-  
-  ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
-  Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
-    Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
-    Protected LatRad.d = Radian(*Location\Latitude)
-    *Pixel\x = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    *Pixel\y = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
-  EndProcedure   
-  
-  ;Lat Lon coordinates 2 pixel relative to the center of view
-  Procedure LatLon2PixelRel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
-    Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
-    Protected cx.d  = PBMap\Drawing\RadiusX
-    Protected dpx.d = PBMap\PixelCoordinates\x
-    Protected LatRad.d = Radian(*Location\Latitude)
-    Protected px.d = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
-    Protected py.d = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
-    ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
-    If dpx - px >= tilemax / 2
-      ;Debug "c1"
-      *Pixel\x = cx + (px - dpx + tilemax)
-    ElseIf px - dpx > tilemax / 2
-      ;Debug "c2"
-      *Pixel\x = cx + (px - dpx - tilemax)
-    ElseIf px - dpx < 0
-      ;Debug "c3"
-      *Pixel\x = cx - (dpx - px)
-    Else
-      ;Debug "c0"
-      *Pixel\x = cx + (px - dpx) 
-    EndIf
-    *Pixel\y = PBMap\Drawing\RadiusY + (py - PBMap\PixelCoordinates\y) 
-  EndProcedure
-  
-  ; HaversineAlgorithm 
-  ; http://andrew.hedges.name/experiments/haversine/
-  Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
-    Protected eQuatorialEarthRadius.d = 6378.1370;6372.795477598;
-    Protected dlong.d = (*posB\Longitude - *posA\Longitude);
-    Protected dlat.d = (*posB\Latitude - *posA\Latitude)   ;
-    Protected alpha.d=dlat/2
-    Protected beta.d=dlong/2
-    Protected a.d = Sin(Radian(alpha)) * Sin(Radian(alpha)) + Cos(Radian(*posA\Latitude)) * Cos(Radian(*posB\Latitude)) * Sin(Radian(beta)) * Sin(Radian(beta)) 
-    Protected c.d = ASin(Min(1,Sqr(a)));
-    Protected distance.d = 2*eQuatorialEarthRadius * c     
-    ProcedureReturn distance                                                                                                        ;
-  EndProcedure
-  
-  Procedure.d HaversineInM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
-    ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
-  EndProcedure
-  
-  ; No more used, see LatLon2PixelRel
-  Procedure GetPixelCoordFromLocation(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) ; TODO to Optimize 
-    Protected mapWidth.l    = Pow(2, Zoom + 8)
-    Protected mapHeight.l   = Pow(2, Zoom + 8)
-    Protected x1.l,y1.l
-    x1 = (*Location\Longitude+180)*(mapWidth/360)
-    ; convert from degrees To radians
-    Protected latRad.d = *Location\Latitude*#PI/180;
-    Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
-    y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
-    Protected x2.l, y2.l
-    x2 = (PBMap\GeographicCoordinates\Longitude+180)*(mapWidth/360)
-    ; convert from degrees To radians
-    latRad = PBMap\GeographicCoordinates\Latitude*#PI/180;
-    mercN = Log(Tan((#PI/4)+(latRad/2)))        
-    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
-    *Pixel\x=PBMap\Drawing\RadiusX  - (x2-x1)
-    *Pixel\y=PBMap\Drawing\RadiusY - (y2-y1)
-  EndProcedure
-  
-  Procedure IsInDrawingPixelBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
-    Protected Pixel.PixelCoordinates
-    LatLon2PixelRel(*Position, @Pixel, PBMap\Zoom)
-    If Pixel\x >= 0 And Pixel\y >= 0 And Pixel\x < *Drawing\RadiusX * 2 And Pixel\y < *Drawing\RadiusY * 2
-      ProcedureReturn #True
-    Else
-      ProcedureReturn #False
-    EndIf
-  EndProcedure
-  
-  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
-    Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
-    Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
-    Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
-    If Lat >= LatSE And Lat <= LatNW
-      If *Drawing\Width >= 360
-        ProcedureReturn #True
-      Else
-        If LonNW < LonSE      
-          If Lon >= LonNW And Lon <= LonSE
-            ProcedureReturn #True
-          Else
-            ProcedureReturn #False
-          EndIf  
-        Else
-          If (Lon >= -180 And Lon <= LonSE) Or (Lon >= LonNW And Lon <= 180)
-            ProcedureReturn #True
-          Else
-            ProcedureReturn #False
-          EndIf
-        EndIf
-      EndIf
-    Else
-      ProcedureReturn #False
-    EndIf
-  EndProcedure  
-  
+    
   ;-*** These are threaded
+  
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
     If FileSize(CacheFile) > 0
@@ -803,10 +846,10 @@ Module PBMap
     Protected img.i = -1
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
-      MyDebug("Key : " + key + " found in memory cache!", 3)
+      MyDebug("Key : " + key + " found in memory cache", 3)
       img = *timg\nImage
       If img <> -1
-        MyDebug("Image : " + img + " found in memory cache!", 3)
+        MyDebug("Image : " + img + " found in memory cache", 3)
         ;*** Cache management
         ; Move the newly used element to the last position of the time stack
         SelectElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPosition)
@@ -840,7 +883,7 @@ Module PBMap
       ;MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
-      MyDebug("Key : " + key + " added in memory cache!", 3)
+      MyDebug("Key : " + key + " added in memory cache", 3)
       *timg = PBMap\MemCache\Images()
       *timg\nImage = -1
     EndIf
@@ -1063,6 +1106,8 @@ Module PBMap
     StrokePath(1)  
   EndProcedure   
   
+  ;-*** Tracks
+  
   Procedure DrawTrackPointer(x.d, y.d, dist.l)
     Protected color.l
     color=RGBA(0, 0, 0, 255)
@@ -1237,11 +1282,12 @@ Module PBMap
           Wend
         EndIf
       Next 
-      ZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
+      SetZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
       ProcedureReturn *NewTrack  
     EndIf
   EndProcedure
   
+  ;-*** Markers
   
   Procedure ClearMarkers()
     ClearList(PBMap\Markers())
@@ -1279,7 +1325,6 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;-*** Marker Edit
   Procedure MarkerIdentifierChange()
     Protected *Marker.Marker = GetGadgetData(EventGadget())
     If GetGadgetText(EventGadget()) <> *Marker\Identifier
@@ -1316,7 +1361,6 @@ Module PBMap
       SetActiveWindow(*Marker\EditWindow)
     EndIf
   EndProcedure
-  ;-***
   
   Procedure DrawMarker(x.i, y.i, Nb.i, *Marker.Marker)
     Protected Text.s
@@ -1388,6 +1432,8 @@ Module PBMap
     Next
   EndProcedure 
   
+  ;-*** Main drawing stuff
+  
   Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
     VectorFont(FontID(PBMap\Font), 16)
@@ -1419,8 +1465,7 @@ Module PBMap
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
     DrawVectorText(Text)
   EndProcedure
-  
-  ;-*** Main drawing
+    
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected PixelCenter.PixelCoordinates
@@ -1489,27 +1534,16 @@ Module PBMap
     ;Drawing()
   EndProcedure
   
-  Procedure.d Pixel2Lon(x)
-    Protected NewX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + x) / PBMap\TileSize
-    Protected n.d = Pow(2.0, PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180;180[
-    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
-  EndProcedure
-  
-  Procedure.d Pixel2Lat(y)
-    Protected NewY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + y) / PBMap\TileSize
-    Protected n.d = Pow(2.0, PBMap\Zoom)
-    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
-  EndProcedure
-  
-  Procedure.d MouseLongitude()
+  ;-*** Misc functions
+   
+  Procedure.d GetMouseLongitude()
     Protected MouseX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ; double mod is to ensure the longitude to be in the range [-180;180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
-  Procedure.d MouseLatitude()
+  Procedure.d GetMouseLatitude()
     Protected MouseY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * MouseY / n))))
@@ -1549,7 +1583,7 @@ Module PBMap
     EndIf 
   EndProcedure
   
-  Procedure ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+  Procedure SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
     Protected DeltaX.d = MaxX - MinX                            ;assumption ! In original code DeltaX have no source
@@ -1576,7 +1610,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure  ZoomToTracks(*Tracks.Tracks)
+  Procedure  SetZoomToTracks(*Tracks.Tracks)
     Protected MinY.d, MaxY.d, MinX.d, MaxX.d
     If ListSize(*Tracks\Track()) > 0
       With *Tracks\Track()
@@ -1596,7 +1630,7 @@ Module PBMap
             MaxY = \Latitude
           EndIf
         Next 
-        ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+        SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
       EndWith
     EndIf
   EndProcedure
@@ -1659,7 +1693,7 @@ Module PBMap
   EndProcedure
   
   ;Zoom on x, y pixel position from the center
-  Procedure ZoomOnPixel(x, y, zoom)
+  Procedure SetZoomOnPixel(x, y, zoom)
     ;*** First : Zoom
     PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : ProcedureReturn : EndIf
@@ -1682,8 +1716,8 @@ Module PBMap
   EndProcedure  
   
   ;Zoom on x, y position relative to the canvas gadget
-  Procedure ZoomOnPixelRel(x, y, zoom)
-    ZoomOnPixel(x - PBMap\Drawing\RadiusX, y - PBMap\Drawing\RadiusY, zoom)
+  Procedure SetZoomOnPixelRel(x, y, zoom)
+    SetZoomOnPixel(x - PBMap\Drawing\RadiusX, y - PBMap\Drawing\RadiusY, zoom)
   EndProcedure  
   
   ;Go to x, y position relative to the canvas gadget left up
@@ -1760,54 +1794,10 @@ Module PBMap
         *ReturnPosition\Latitude = ValD(lat)
         *ReturnPosition\Longitude = ValD(lon)
       EndIf
-      If lat<> "" And lon <> "" 
-        ZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
+      If lat <> "" And lon <> "" 
+        SetZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
         ;SetLocation(Position\Latitude, Position\Longitude)
       EndIf
-    EndIf
-  EndProcedure
-  
-  ;(c) ts-soft http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
-  CompilerSelect #PB_Compiler_OS
-    CompilerCase #PB_OS_Windows
-      #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
-      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ;(0x8000)
-      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192;(0x2000)
-      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072;(0x20000)
-      #FILE_ATTRIBUTE_VIRTUAL              =  65536;(0x10000)
-      #FILE_ATTRIBUTE_DONTSETFLAGS = ~(#FILE_ATTRIBUTE_DIRECTORY|
-                                       #FILE_ATTRIBUTE_SPARSE_FILE|
-                                       #FILE_ATTRIBUTE_OFFLINE|
-                                       #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED|
-                                       #FILE_ATTRIBUTE_VIRTUAL|
-                                       0)
-      Macro SetFileAttributesEx(Name, Attribs)
-        SetFileAttributes(Name, Attribs & #FILE_ATTRIBUTE_DONTSETFLAGS)
-      EndMacro
-    CompilerDefault
-      Macro SetFileAttributesEx(Name, Attribs)
-        SetFileAttributes(Name, Attribs)
-      EndMacro
-  CompilerEndSelect
-  
-  Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
-    Protected i, c, tmp.s
-    If Right(DirectoryName, 1) = slash
-      DirectoryName = Left(DirectoryName, Len(DirectoryName) -1)
-    EndIf
-    c = CountString(DirectoryName, slash) + 1
-    For i = 1 To c
-      tmp + StringField(DirectoryName, i, slash)
-      If FileSize(tmp) <> -2
-        CreateDirectory(tmp)
-      EndIf
-      tmp + slash
-    Next
-    If FileAttribute <> #PB_Default
-      SetFileAttributesEx(DirectoryName, FileAttribute)
-    EndIf
-    If FileSize(DirectoryName) = -2
-      ProcedureReturn #True
     EndIf
   EndProcedure
   
@@ -1827,6 +1817,8 @@ Module PBMap
       ProcedureReturn #False
     EndIf
   EndProcedure
+  
+  ;-*** Main PBMap functions
   
   Procedure CanvasEvents()
     Protected CanvasMouseX.d, CanvasMouseY.d, MouseX.d, MouseY.d
@@ -1918,7 +1910,7 @@ Module PBMap
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
           ;Relative zoom (centered on the mouse)
-          ZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+          SetZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
         Else
           ;Absolute zoom (centered on the center of the map)
           SetZoom(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
@@ -2086,6 +2078,31 @@ Module PBMap
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
     EndIf
     BindMapGadget(PBMap\Gadget)
+  EndProcedure
+  
+  Procedure Quit()
+    PBMap\Drawing\End = #True
+    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+    Protected TimeCounter = ElapsedMilliseconds()
+    Repeat
+      ForEach PBMap\MemCache\Images()
+        If PBMap\MemCache\Images()\Tile <> 0         
+          If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            PBMap\MemCache\Images()\Tile\RetryNb = 0
+            If ElapsedMilliseconds() - TimeCounter > 2000
+              ;Should not occur
+              KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            EndIf
+          Else
+            FreeMemory(PBMap\MemCache\Images()\Tile)
+            PBMap\MemCache\Images()\Tile = 0
+          EndIf
+        Else
+          DeleteMapElement(PBMap\MemCache\Images())
+        EndIf
+      Next
+      Delay(10)
+    Until MapSize(PBMap\MemCache\Images()) = 0
   EndProcedure
   
   Procedure InitPBMap(Window)
@@ -2379,8 +2396,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 2250
-; FirstLine = 2260
+; CursorPosition = 267
+; FirstLine = 1960
 ; Folding = -----------------
 ; EnableThread
 ; EnableXP
