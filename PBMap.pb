@@ -20,7 +20,9 @@ EnableExplicit
 
 InitNetwork()
 UsePNGImageDecoder()
+UseJPEGImageDecoder()
 UsePNGImageEncoder()
+UseJPEGImageEncoder()
 
 ;- Module declaration
 
@@ -49,8 +51,11 @@ DeclareModule PBMap
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
-  Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s, APP_CODE.s, ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
-  Declare DeleteLayer(Nb.i)
+  Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+  Declare IsLayer(Name.s)
+  Declare DeleteLayer(Name.s)
+  Declare EnableLayer(Name.s)
+  Declare DisableLayer(Name.s)
   Declare BindMapGadget(Gadget.i)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
@@ -196,6 +201,9 @@ Module PBMap
     ColourFocus.i
     ColourSelected.i
     ColourTrackDefault.i
+    ;HERE specific
+    appid.s
+    appcode.s
   EndStructure
   
   Structure Layer
@@ -203,6 +211,7 @@ Module PBMap
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
     LayerType.i                                    ; OSM : 0 ; Here : 1
+    Enabled.i
     ;> HERE specific params
     APP_ID.s
     APP_CODE.s
@@ -216,7 +225,7 @@ Module PBMap
     lg2.s
     ;<
   EndStructure
-  
+    
   Structure Box
     x1.i
     y1.i
@@ -250,7 +259,8 @@ Module PBMap
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
     
-    List Layers.Layer()                            ; 
+    List LayersList.Layer()
+    Map *Layers.Layer() 
     
     Angle.d
     ZoomMin.i                                      ; Min Zoom supported by server
@@ -279,7 +289,7 @@ Module PBMap
   ;-*** Global variables
   
   ;-Show debug infos 
-  Global MyDebugLevel = 0
+  Global MyDebugLevel = 2
   
   Global PBMap.PBMap, Null.i
   Global slash.s
@@ -620,6 +630,10 @@ Module PBMap
         PBMap\Options\ProxyPort = Value
       Case "proxyuser"        
         PBMap\Options\ProxyUser = Value
+      Case "appid"        
+        PBMap\Options\appid = Value
+      Case "appcode"        
+        PBMap\Options\appcode = Value
       Case "tilescachepath"
         PBMap\Options\HDDCachePath = Value
       Case "maxmemcache"
@@ -672,6 +686,9 @@ Module PBMap
       WritePreferenceString("ProxyURL", \ProxyURL)
       WritePreferenceString("ProxyPort", \ProxyPort)
       WritePreferenceString("ProxyUser", \ProxyUser)
+      PreferenceGroup("HERE")
+      WritePreferenceString("APP_ID", \appid)
+      WritePreferenceString("APP_CODE", \appcode)
       PreferenceGroup("URL")
       WritePreferenceString("DefaultOSMServer", \DefaultOSMServer)
       PreferenceGroup("PATHS")
@@ -718,6 +735,9 @@ Module PBMap
     ;     WritePreferenceString("ProxyPort", "myproxyport")
     ;     WritePreferenceString("ProxyUser", "myproxyname")       
     ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
+    ;     PreferenceGroup("HERE")
+    ;     WritePreferenceString("APP_ID", "myhereid")       ;TODO !Warning! !not encoded!
+    ;     WritePreferenceString("APP_CODE", "myherecode")   ;TODO !Warning! !not encoded!
     ;     ClosePreferences()
     With PBMap\Options
       PreferenceGroup("PROXY")       
@@ -726,8 +746,11 @@ Module PBMap
         \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
         \ProxyPort        = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
         \ProxyUser        = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-        \ProxyPassword    = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
+        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ;InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
       EndIf
+      PreferenceGroup("HERE")  
+        \appid            = ReadPreferenceString("APP_ID", "")    ;InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
+        \appcode          = ReadPreferenceString("APP_CODE", "")  ;InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
       PreferenceGroup("URL")
       \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
       
@@ -760,33 +783,56 @@ Module PBMap
   
   ;-*** Layers
   
-  Procedure.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
-    Protected *Ptr = AddElement(PBMap\Layers())
+  ;Add a layer to a list (to get things ordered) and to a map (to access things easily)
+  Procedure.i AddLayer(Name.s, Order.i)
+    Protected *Ptr = 0
+    *Ptr = AddMapElement(PBMap\Layers(), Name)
     If *Ptr
-      PBMap\Layers()\Name = LayerName
-      PBMap\Layers()\Order = Order
-      PBMap\Layers()\ServerURL = ServerURL
-      PBMap\Layers()\LayerType = 0
-      SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      PBMap\Layers() = AddElement(PBMap\LayersList()) ; This map element is a ptr to a linked list element
+      If PBMap\Layers()
+        PBMap\LayersList()\Name  = Name
+        PBMap\LayersList()\Order = Order
+        ProcedureReturn PBMap\Layers()
+      Else
+        *Ptr = 0
+      EndIf
+    EndIf
+    ProcedureReturn *Ptr
+  EndProcedure
+  
+  ; "OpenStreetMap" layer
+  Procedure.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order)
+    If *Ptr
+      *Ptr\ServerURL = ServerURL
+      *Ptr\LayerType = 0 ; OSM
+      *Ptr\Enabled = #True
+      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
       ProcedureReturn *Ptr
     Else
       ProcedureReturn #False
     EndIf
   EndProcedure
   
+  ; "Here" layer
   ;see there for parameters : https://developer.here.com/rest-apis/documentation/enterprise-map-tile/topics/resource-base-maptile.html
   ;you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
   ;use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
-  Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s, APP_CODE.s, ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
-    Protected *Ptr = AddElement(PBMap\Layers())
+  Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order)
     If *Ptr
-      With PBMap\Layers()
-        \Name = LayerName
-        \Order = Order
+      With *Ptr;PBMap\Layers()
         \ServerURL = ServerURL
         \path = path
         \ressource = ressource
-        \LayerType = 1
+        \LayerType = 1 ; HERE
+        \Enabled = #True
+        If APP_ID = ""
+          APP_ID = PBMap\Options\appid
+        EndIf
+        If APP_CODE = ""
+          APP_CODE = PBMap\Options\appcode
+        EndIf
         \APP_CODE = APP_CODE
         \APP_ID = APP_ID
         \format = format
@@ -796,20 +842,35 @@ Module PBMap
         \param = param
         \scheme = scheme
       EndWith     
-      SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
       ProcedureReturn *Ptr
     Else
       ProcedureReturn #False
     EndIf
   EndProcedure
   
-  Procedure DeleteLayer(*Ptr)
-    ChangeCurrentElement(PBMap\Layers(), *Ptr)
-    DeleteElement(PBMap\Layers())
-    FirstElement(PBMap\Layers())
-    SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+  Procedure.i IsLayer(Name.s)
+    ProcedureReturn FindMapElement(PBMap\Layers(), Name)
   EndProcedure
-    
+  
+  Procedure DeleteLayer(Name.s)
+    FindMapElement(PBMap\Layers(), Name)
+    Protected *Ptr = PBMap\Layers()
+    ;Free the list element
+    ChangeCurrentElement(PBMap\LayersList(), *Ptr)
+    DeleteElement(PBMap\LayersList())
+    ;Free the map element
+    DeleteMapElement(PBMap\Layers())
+  EndProcedure
+  
+  Procedure EnableLayer(Name.s)
+    PBMap\Layers(Name)\Enabled = #True
+  EndProcedure
+  
+  Procedure DisableLayer(Name.s)
+    PBMap\Layers(Name)\Enabled = #False
+  EndProcedure
+  
   ;-*** These are threaded
   
   Procedure.i GetTileFromHDD(CacheFile.s)
@@ -964,7 +1025,7 @@ Module PBMap
     ProcedureReturn *timg 
   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters, Layer)
+  Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
     Protected x.i, y.i,kq.q
     Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
     Protected ty = Int(*Drawing\TileCoordinates\y)
@@ -974,7 +1035,7 @@ Module PBMap
     Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
     Protected HereLoadBalancing.b                           ;Here is providing a load balancing system
-    SelectElement(PBMap\Layers(), Layer)
+    FindMapElement(PBMap\Layers(), LayerName)
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
@@ -987,9 +1048,9 @@ Module PBMap
         tiley = ty + y 
         If tiley >= 0 And tiley < tilemax
           kq = (PBMap\Zoom << 8) | (tilex << 16) | (tiley << 36)
-          key = PBMap\Layers()\Name + Str(kq)
+          key = LayerName + Str(kq)
           ; Creates the cache tree based on the OSM tree+Layer : layer/zoom/x/y.png
-          Protected DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name
+          Protected DirName.s = PBMap\Options\HDDCachePath + LayerName
           If FileSize(DirName) <> -2
             If CreateDirectory(DirName) = #False ; Creates a directory based on the layer name
               Error("Can't create the following layer directory : " + DirName)
@@ -1015,21 +1076,23 @@ Module PBMap
               MyDebug(DirName + " successfully created", 4)
             EndIf
           EndIf
-          With PBMap\Layers()
-          Select \LayerType
-            Case 0 ;OSM
-              URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
-            Case 1 ;Here
-              HereLoadBalancing = 1 + ((tiley + tilex) % 4)
-              ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
-              URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
-              If \param <> ""
-                URL + "&" + \param
-              EndIf
-          EndSelect          
+          With PBMap\LayersList()
+            Select \LayerType
+              Case 0 ;OSM
+                URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + ".png" 
+              Case 1 ;Here
+                HereLoadBalancing = 1 + ((tiley + tilex) % 4)
+                ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
+                URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code=" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
+                If \param <> ""
+                  URL + "&" + \param
+                EndIf
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + "." + \format 
+            EndSelect          
           EndWith
-          ; Tile cache name based on y
-          CacheFile = DirName + slash + Str(tiley) + ".png" 
           *timg = GetTile(key, URL, CacheFile)
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
@@ -1527,6 +1590,7 @@ Module PBMap
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected PixelCenter.PixelCoordinates
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
+    Protected LayerOrder.i = 0
     Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
     PBMap\Redraw = #False
@@ -1561,8 +1625,10 @@ Module PBMap
     FillVectorOutput()
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
-    ForEach PBMap\Layers()
-      DrawTiles(*Drawing, ListIndex(PBMap\Layers())) 
+    ForEach PBMap\LayersList()
+      If PBMap\LayersList()\Enabled
+        DrawTiles(*Drawing, PBMap\LayersList()\Name)
+      EndIf
     Next   
     If PBMap\Options\ShowTrack
       DrawTracks(*Drawing)
@@ -2220,6 +2286,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_LoadGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
+    #Gdt_AddHereMap
     #Gdt_Degrees
     #Gdt_EditMode 
     #Gdt_ClearDiskCache
@@ -2289,6 +2356,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2321,11 +2389,12 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 430, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 465, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 480, 150, 20, "")
+    ButtonGadget(#Gdt_AddHereMap, 530, 370, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 400, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 430, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 460, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 495, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 510, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2338,7 +2407,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;***
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
-    Define OpenSeaMap = 0, Degrees = 1
+    Define Degrees = 1
     Define *Track
     
     ;Our main gadget
@@ -2349,7 +2418,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")
-    PBMap::SetOption("ColourFocus", "$FFFF00AA")    
+    PBMap::SetOption("ColourFocus", "$FFFF00AA") 
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
@@ -2395,15 +2464,23 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Gdt_AddMarker
               PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", "Test", RGBA(Random(255), Random(255), Random(255), 255))
             Case #Gdt_AddOpenseaMap
-              If OpenSeaMap = 0
-                OpenSeaMap = PBMap::AddOSMServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
-                SetGadgetState(#Gdt_AddOpenseaMap, 1)
-              Else
-                PBMap::DeleteLayer(OpenSeaMap)
-                OpenSeaMap = 0
+              If PBMap::IsLayer("OpenSeaMap")
+                PBMap::DeleteLayer("OpenSeaMap")
                 SetGadgetState(#Gdt_AddOpenseaMap, 0)
+              Else
+                PBMap::AddOSMServerLayer("OpenSeaMap", 3, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 3
+                SetGadgetState(#Gdt_AddOpenseaMap, 1)
               EndIf
-              PBMAP::Refresh()
+              PBMap::Refresh()
+            Case #Gdt_AddHereMap
+              If PBMap::IsLayer("Here")
+                PBMap::DeleteLayer("Here")
+                SetGadgetState(#Gdt_AddHereMap, 0)
+              Else
+                PBMap::AddHereServerLayer("Here", 2) ; Add a here overlay map on layer nb 2
+                SetGadgetState(#Gdt_AddHereMap, 1)
+              EndIf
+              PBMap::Refresh()
             Case #Gdt_Degrees
               Degrees = 1 - Degrees
               PBMap::SetOption("ShowDegrees", Str(Degrees))
@@ -2452,11 +2529,10 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-
-; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 1037
-; FirstLine = 1000
-; Folding = -----------------
+; IDE Options = PureBasic 5.50 (Windows - x64)
+; CursorPosition = 2530
+; FirstLine = 2476
+; Folding = ------------------
 ; EnableThread
 ; EnableXP
 ; EnableUnicode
