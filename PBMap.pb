@@ -20,7 +20,9 @@ EnableExplicit
 
 InitNetwork()
 UsePNGImageDecoder()
+UseJPEGImageDecoder()
 UsePNGImageEncoder()
+UseJPEGImageEncoder()
 
 ;- Module declaration
 
@@ -50,7 +52,9 @@ DeclareModule PBMap
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
   Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s, APP_CODE.s, ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
-  Declare DeleteLayer(Nb.i)
+  Declare DeleteLayer(*Ptr)
+  Declare EnableLayer(*Ptr)
+  Declare DisableLayer(*Ptr)
   Declare BindMapGadget(Gadget.i)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
@@ -203,6 +207,7 @@ Module PBMap
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
     LayerType.i                                    ; OSM : 0 ; Here : 1
+    Enabled.i
     ;> HERE specific params
     APP_ID.s
     APP_CODE.s
@@ -760,13 +765,15 @@ Module PBMap
   
   ;-*** Layers
   
+  ; "OpenStreetMap" layer
   Procedure.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
     Protected *Ptr = AddElement(PBMap\Layers())
     If *Ptr
       PBMap\Layers()\Name = LayerName
       PBMap\Layers()\Order = Order
       PBMap\Layers()\ServerURL = ServerURL
-      PBMap\Layers()\LayerType = 0
+      PBMap\Layers()\LayerType = 0 ; OSM
+      PBMap\Layers()\Enabled = #True
       SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
       ProcedureReturn *Ptr
     Else
@@ -774,6 +781,7 @@ Module PBMap
     EndIf
   EndProcedure
   
+  ; "Here" layer
   ;see there for parameters : https://developer.here.com/rest-apis/documentation/enterprise-map-tile/topics/resource-base-maptile.html
   ;you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
   ;use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
@@ -786,7 +794,8 @@ Module PBMap
         \ServerURL = ServerURL
         \path = path
         \ressource = ressource
-        \LayerType = 1
+        \LayerType = 1 ; HERE
+        \Enabled = #True
         \APP_CODE = APP_CODE
         \APP_ID = APP_ID
         \format = format
@@ -806,10 +815,24 @@ Module PBMap
   Procedure DeleteLayer(*Ptr)
     ChangeCurrentElement(PBMap\Layers(), *Ptr)
     DeleteElement(PBMap\Layers())
-    FirstElement(PBMap\Layers())
     SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+    FirstElement(PBMap\Layers())
   EndProcedure
-    
+  
+  Procedure EnableLayer(*Ptr)
+    PushListPosition(PBMap\Layers())
+    ChangeCurrentElement(PBMap\Layers(), *Ptr)
+    PBMap\Layers()\Enabled = #True
+    PopListPosition(PBMap\Layers())
+  EndProcedure
+  
+  Procedure DisableLayer(*Ptr)
+    PushListPosition(PBMap\Layers())
+    ChangeCurrentElement(PBMap\Layers(), *Ptr)
+    PBMap\Layers()\Enabled = #False
+    PopListPosition(PBMap\Layers())
+  EndProcedure
+  
   ;-*** These are threaded
   
   Procedure.i GetTileFromHDD(CacheFile.s)
@@ -1016,20 +1039,22 @@ Module PBMap
             EndIf
           EndIf
           With PBMap\Layers()
-          Select \LayerType
-            Case 0 ;OSM
-              URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
-            Case 1 ;Here
-              HereLoadBalancing = 1 + ((tiley + tilex) % 4)
-              ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
-              URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
-              If \param <> ""
-                URL + "&" + \param
-              EndIf
-          EndSelect          
+            Select \LayerType
+              Case 0 ;OSM
+                URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + ".png" 
+              Case 1 ;Here
+                HereLoadBalancing = 1 + ((tiley + tilex) % 4)
+                ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
+                URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code=" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
+                If \param <> ""
+                  URL + "&" + \param
+                EndIf
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + "." + \format 
+            EndSelect          
           EndWith
-          ; Tile cache name based on y
-          CacheFile = DirName + slash + Str(tiley) + ".png" 
           *timg = GetTile(key, URL, CacheFile)
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
@@ -1562,7 +1587,9 @@ Module PBMap
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
     ForEach PBMap\Layers()
-      DrawTiles(*Drawing, ListIndex(PBMap\Layers())) 
+      If PBMap\Layers()\Enabled
+        DrawTiles(*Drawing, ListIndex(PBMap\Layers())) 
+      EndIf
     Next   
     If PBMap\Options\ShowTrack
       DrawTracks(*Drawing)
@@ -2220,6 +2247,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_LoadGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
+    #Gdt_AddHereMap
     #Gdt_Degrees
     #Gdt_EditMode 
     #Gdt_ClearDiskCache
@@ -2289,6 +2317,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2321,11 +2350,12 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 430, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 465, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 480, 150, 20, "")
+    ButtonGadget(#Gdt_AddHereMap, 530, 370, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 400, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 430, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 460, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 495, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 510, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2338,7 +2368,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;***
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
-    Define OpenSeaMap = 0, Degrees = 1
+    Define OpenSeaMap = 0, HereMap = 0, Degrees = 1
     Define *Track
     
     ;Our main gadget
@@ -2349,13 +2379,14 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")
-    PBMap::SetOption("ColourFocus", "$FFFF00AA")    
+    PBMap::SetOption("ColourFocus", "$FFFF00AA") 
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", "", -1, @MyMarker())  ; To add a marker with a customised GFX
+    ;PBMap::AddHereServerLayer("Here", 3, "2WbegPQlhdWwkwF6rtBP", "Js2e6a82ovHndsSOu5vziw")
     
     Repeat
       Event = WaitWindowEvent()
@@ -2396,14 +2427,24 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", "Test", RGBA(Random(255), Random(255), Random(255), 255))
             Case #Gdt_AddOpenseaMap
               If OpenSeaMap = 0
-                OpenSeaMap = PBMap::AddOSMServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
+                OpenSeaMap = PBMap::AddOSMServerLayer("OpenSeaMap", 3, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 3
                 SetGadgetState(#Gdt_AddOpenseaMap, 1)
               Else
                 PBMap::DeleteLayer(OpenSeaMap)
                 OpenSeaMap = 0
                 SetGadgetState(#Gdt_AddOpenseaMap, 0)
               EndIf
-              PBMAP::Refresh()
+              PBMap::Refresh()
+            Case #Gdt_AddHereMap
+              If HereMap = 0
+                HereMap = PBMap::AddHereServerLayer("Here", 2, "2WbegPQlhdWwkwF6rtBP", "Js2e6a82ovHndsSOu5vziw") ; Add a here overlay map on layer nb 2
+                SetGadgetState(#Gdt_AddHereMap, 1)
+              Else
+                PBMap::DeleteLayer(HereMap)
+                HereMap = 0
+                SetGadgetState(#Gdt_AddHereMap, 0)
+              EndIf
+              PBMap::Refresh()
             Case #Gdt_Degrees
               Degrees = 1 - Degrees
               PBMap::SetOption("ShowDegrees", Str(Degrees))
@@ -2452,11 +2493,11 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-
 ; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 1037
-; FirstLine = 1000
-; Folding = -----------------
+; CursorPosition = 769
+; FirstLine = 751
+; Folding = ------------------
 ; EnableThread
 ; EnableXP
+; DisableDebugger
 ; EnableUnicode
