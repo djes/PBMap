@@ -12,7 +12,7 @@
 ;******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
-  MessageRequester("Warning !!","You must enable ThreadSafe support in compiler options",#PB_MessageRequester_Ok )
+  MessageRequester("Warning !", "You must enable ThreadSafe support in compiler options", #PB_MessageRequester_Ok )
   End
 CompilerEndIf 
 
@@ -20,24 +20,17 @@ EnableExplicit
 
 InitNetwork()
 UsePNGImageDecoder()
+UseJPEGImageDecoder()
 UsePNGImageEncoder()
+UseJPEGImageEncoder()
+
+;- Module declaration
 
 DeclareModule PBMap  
-  ;-Show debug infos 
-  Global MyDebugLevel = 0
-  
+   
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
     #Red = 255
   CompilerEndIf
-  
-  Global slash.s
-  
-  CompilerSelect #PB_Compiler_OS
-    CompilerCase #PB_OS_Windows
-      slash = "\"
-    CompilerDefault
-      slash = "/"
-  CompilerEndSelect
   
   #SCALE_NAUTICAL = 1 
   #SCALE_KM = 0 
@@ -49,24 +42,39 @@ DeclareModule PBMap
   
   #MARKER_EDIT_EVENT = #PB_Event_FirstCustomValue
   
-  ;-Declarations
+  #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
+  #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
+  #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+   
   Declare InitPBMap(window)
   Declare SetOption(Option.s, Value.s)
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
-  Declare.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
-  Declare DeleteLayer(Nb.i)
+  Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
+  Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+  Declare IsLayer(Name.s)
+  Declare DeleteLayer(Name.s)
+  Declare EnableLayer(Name.s)
+  Declare DisableLayer(Name.s)
   Declare BindMapGadget(Gadget.i)
-  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
-  Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
-  Declare Drawing()
-  Declare SetAngle(Angle.d, Mode = #PB_Absolute) 
-  Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
-  Declare ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
-  Declare ZoomToTracks(*Tracks)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
+  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Declare.d GetLatitude()
+  Declare.d GetLongitude()
+  Declare.d GetMouseLatitude()
+  Declare.d GetMouseLongitude()
+  Declare.d GetAngle()
+  Declare.i GetZoom()
+  Declare.i GetMode()
+  Declare SetMode(Mode.i = #MODE_DEFAULT)
   Declare SetMapScaleUnit(ScaleUnit=PBMAP::#SCALE_KM) 
+  Declare SetLocation(latitude.d, longitude.d, Zoom = -1, mode.i = #PB_Absolute)
+  Declare SetAngle(Angle.d, Mode = #PB_Absolute) 
+  Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
+  Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+  Declare SetZoomToTracks(*Tracks)
+  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
   Declare.i LoadGpxFile(file.s);  
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
@@ -76,24 +84,18 @@ DeclareModule PBMap
   Declare ClearMarkers()
   Declare DeleteMarker(*Ptr)
   Declare DeleteSelectedMarkers()
+  Declare Drawing()
   Declare Quit()
   Declare Error(msg.s)
   Declare Refresh()
-  Declare.d GetLatitude()
-  Declare.d GetLongitude()
-  Declare.d MouseLatitude()
-  Declare.d MouseLongitude()
-  Declare.d GetAngle()
-  Declare.i GetZoom()
-  Declare.i GetMode()
-  Declare SetMode(Mode.i = #MODE_DEFAULT)
-  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
   Declare.i ClearDiskCache()  
 EndDeclareModule
 
 Module PBMap 
   
   EnableExplicit
+  
+  ;-*** Structures
   
   Structure GeographicCoordinates
     Longitude.d
@@ -110,7 +112,6 @@ Module PBMap
     y.d
   EndStructure
   
-  ;- Tile Structure
   Structure Tile
     nImage.i
     key.s
@@ -200,14 +201,31 @@ Module PBMap
     ColourFocus.i
     ColourSelected.i
     ColourTrackDefault.i
+    ;HERE specific
+    appid.s
+    appcode.s
   EndStructure
   
   Structure Layer
     Order.i                                        ; Layer nb
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
+    LayerType.i                                    ; OSM : 0 ; Here : 1
+    Enabled.i
+    ;> HERE specific params
+    APP_ID.s
+    APP_CODE.s
+    path.s
+    ressource.s
+    param.s 
+    id.s 
+    scheme.s
+    format.s
+    lg.s
+    lg2.s
+    ;<
   EndStructure
-  
+    
   Structure Box
     x1.i
     y1.i
@@ -225,7 +243,7 @@ Module PBMap
     StrokeWidth.i
   EndStructure
   
-  ;-PBMap Structure
+  ;- PBMap 
   Structure PBMap
     Window.i                                       ; Parent Window
     Gadget.i                                       ; Canvas Gadget Id 
@@ -241,7 +259,8 @@ Module PBMap
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
     
-    List Layers.Layer()                            ; 
+    List LayersList.Layer()
+    Map *Layers.Layer() 
     
     Angle.d
     ZoomMin.i                                      ; Min Zoom supported by server
@@ -253,7 +272,7 @@ Module PBMap
     
     Mode.i                                         ; User mode : 0 (default)->hand (moving map) and select markers, 1->hand, 2->select only (moving objects), 3->drawing (todo) 
     Redraw.i
-    Moving.i
+    Dragging.i
     Dirty.i                                        ; To signal that drawing need a refresh
     
     List TracksList.Tracks()                       ; To display a GPX track
@@ -267,14 +286,37 @@ Module PBMap
     
   EndStructure
   
-  #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
-  #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
-  #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+  ;-*** Global variables
   
-  ;-Global variables
+  ;-Show debug infos 
+  Global MyDebugLevel = 0
+  
   Global PBMap.PBMap, Null.i
+  Global slash.s
   
-  ;Shows an error msg and terminates the program
+  CompilerSelect #PB_Compiler_OS
+    CompilerCase #PB_OS_Windows
+      Global slash = "\"
+    CompilerDefault
+      Global slash = "/"
+  CompilerEndSelect  
+  
+  ;- *** GetText - Translation purpose
+  
+  ;TODO use this for all text
+  IncludeFile "gettext.pbi"
+      
+  ;-*** Misc tools
+  
+  Macro Min(a, b)
+    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
+  EndMacro
+  
+  Macro Max(a, b)
+    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
+  EndMacro
+  
+   ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
     MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
     End
@@ -288,9 +330,49 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;- *** GetText - Translation purpose
-  ;TODO use this for all text
-  IncludeFile "gettext.pbi"
+  ;(c) ts-soft http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
+  CompilerSelect #PB_Compiler_OS
+    CompilerCase #PB_OS_Windows
+      #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
+      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ;(0x8000)
+      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192;(0x2000)
+      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072;(0x20000)
+      #FILE_ATTRIBUTE_VIRTUAL              =  65536;(0x10000)
+      #FILE_ATTRIBUTE_DONTSETFLAGS = ~(#FILE_ATTRIBUTE_DIRECTORY|
+                                       #FILE_ATTRIBUTE_SPARSE_FILE|
+                                       #FILE_ATTRIBUTE_OFFLINE|
+                                       #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED|
+                                       #FILE_ATTRIBUTE_VIRTUAL|
+                                       0)
+      Macro SetFileAttributesEx(Name, Attribs)
+        SetFileAttributes(Name, Attribs & #FILE_ATTRIBUTE_DONTSETFLAGS)
+      EndMacro
+    CompilerDefault
+      Macro SetFileAttributesEx(Name, Attribs)
+        SetFileAttributes(Name, Attribs)
+      EndMacro
+  CompilerEndSelect
+  
+  Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
+    Protected i, c, tmp.s
+    If Right(DirectoryName, 1) = slash
+      DirectoryName = Left(DirectoryName, Len(DirectoryName) -1)
+    EndIf
+    c = CountString(DirectoryName, slash) + 1
+    For i = 1 To c
+      tmp + StringField(DirectoryName, i, slash)
+      If FileSize(tmp) <> -2
+        CreateDirectory(tmp)
+      EndIf
+      tmp + slash
+    Next
+    If FileAttribute <> #PB_Default
+      SetFileAttributesEx(DirectoryName, FileAttribute)
+    EndIf
+    If FileSize(DirectoryName) = -2
+      ProcedureReturn #True
+    EndIf
+  EndProcedure
   
   Procedure TechnicalImagesCreation()
     ;"Loading" image
@@ -328,243 +410,6 @@ Module PBMap
       StopVectorDrawing() 
     EndIf
   EndProcedure  
-  
-  ;TODO : best cleaning of the string from bad behaviour
-  Procedure.s StringCheck(String.s)
-    ProcedureReturn Trim(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(String, Chr(0)), Chr(32)), Chr(39)), Chr(33)), Chr(34)), "@"), "/"), "\"), "$"), "%"))
-  EndProcedure
-  
-  Macro SelBool(Name)
-    Select UCase(Value)
-      Case "0", "FALSE", "DISABLE"
-        PBMap\Options\Name = #False
-      Default
-        PBMap\Options\Name = #True
-    EndSelect
-  EndMacro
-  
-  Procedure.i ColourString2Value(Value.s)
-    ;TODO : better string check
-    Protected Col.s = RemoveString(Value, " ")
-    If Left(Col, 1) = "$"
-      Protected r.i, g.i, b.i, a.i = 255
-      Select Len(Col)
-        Case 4 ;RGB  (eg : "$9BC"
-          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1))
-        Case 5 ;RGBA (eg : "$9BC5")
-          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1)) : a = Val("$"+Mid(Col, 5, 1))
-        Case 7 ;RRGGBB (eg : "$95B4C2")
-          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2))
-        Case 9 ;RRGGBBAA (eg : "$95B4C249")
-          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2)) : a = Val("$"+Mid(Col, 8, 2))
-      EndSelect
-      ProcedureReturn RGBA(r, g, b, a)
-    Else
-      ProcedureReturn Val(Value)
-    EndIf
-  EndProcedure  
-  
-  Procedure SetOption(Option.s, Value.s)
-    Option = StringCheck(Option)
-    Select LCase(Option)
-      Case "proxy"
-        SelBool(Proxy)
-      Case "proxyurl"
-        PBMap\Options\ProxyURL = Value
-      Case "proxyport"        
-        PBMap\Options\ProxyPort = Value
-      Case "proxyuser"        
-        PBMap\Options\ProxyUser = Value
-      Case "tilescachepath"
-        PBMap\Options\HDDCachePath = Value
-      Case "maxmemcache"
-        PBMap\Options\MaxMemCache = Val(Value)
-      Case "verbose"
-        SelBool(Verbose)
-      Case "warning"
-        SelBool(Warning)
-      Case "wheelmouserelative"
-        SelBool(WheelMouseRelative)
-      Case "showdegrees"
-        SelBool(ShowDegrees)
-      Case "showdebuginfos"
-        SelBool(ShowDebugInfos)
-      Case "showscale"
-        SelBool(ShowScale)
-      Case "showmarkers"
-        SelBool(ShowMarkers)
-      Case "showpointer"
-        SelBool(ShowPointer)
-      Case "showtrack"
-        SelBool(ShowTrack)
-      Case "showmarkersnb"
-        SelBool(ShowMarkersNb)      
-      Case "showmarkerslegend"
-        SelBool(ShowMarkersLegend)      
-      Case "showtrackkms"
-        SelBool(ShowTrackKms)
-      Case "strokewidthtrackdefault"
-        SelBool(StrokeWidthTrackDefault)
-      Case "colourfocus"
-        PBMap\Options\ColourFocus = ColourString2Value(Value)
-      Case "colourselected"
-        PBMap\Options\ColourSelected = ColourString2Value(Value)
-      Case "colourtrackdefault"
-        PBMap\Options\ColourTrackDefault = ColourString2Value(Value)
-    EndSelect
-  EndProcedure
-  
-  ;By default, save options in the user's home directory
-  Procedure SaveOptions(PreferencesFile.s = "PBMap.prefs")
-    If PreferencesFile = "PBMap.prefs"
-      CreatePreferences(GetHomeDirectory() + "PBMap.prefs")      
-    Else
-      CreatePreferences(PreferencesFile)     
-    EndIf
-    With PBMap\Options
-      PreferenceGroup("PROXY")
-      WritePreferenceInteger("Proxy", \Proxy)
-      WritePreferenceString("ProxyURL", \ProxyURL)
-      WritePreferenceString("ProxyPort", \ProxyPort)
-      WritePreferenceString("ProxyUser", \ProxyUser)
-      PreferenceGroup("URL")
-      WritePreferenceString("DefaultOSMServer", \DefaultOSMServer)
-      PreferenceGroup("PATHS")
-      WritePreferenceString("TilesCachePath", \HDDCachePath)
-      PreferenceGroup("OPTIONS")
-      WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
-      WritePreferenceInteger("MaxMemCache", \MaxMemCache)
-      WritePreferenceInteger("Verbose", \Verbose)
-      WritePreferenceInteger("Warning", \Warning)
-      WritePreferenceInteger("ShowDegrees", \ShowDegrees)
-      WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
-      WritePreferenceInteger("ShowScale", \ShowScale)
-      WritePreferenceInteger("ShowMarkers", \ShowMarkers)
-      WritePreferenceInteger("ShowPointer", \ShowPointer)
-      WritePreferenceInteger("ShowTrack", \ShowTrack)
-      WritePreferenceInteger("ShowTrackKms", \ShowTrackKms)
-      WritePreferenceInteger("ShowMarkersNb", \ShowMarkersNb)
-      WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
-      PreferenceGroup("DRAWING")  
-      WritePreferenceInteger("StrokeWidthTrackDefault", \StrokeWidthTrackDefault)
-      ;Colours;
-      WritePreferenceInteger("ColourFocus", \ColourFocus)
-      WritePreferenceInteger("ColourSelected", \ColourSelected)
-      WritePreferenceInteger("ColourTrackDefault", \ColourTrackDefault)
-      ClosePreferences()
-    EndWith
-  EndProcedure
-  
-  Procedure LoadOptions(PreferencesFile.s = "PBMap.prefs")
-    If PreferencesFile = "PBMap.prefs"
-      OpenPreferences(GetHomeDirectory() + "PBMap.prefs")      
-    Else
-      OpenPreferences(PreferencesFile)     
-    EndIf
-    ;Use this to create and customize your preferences file for the first time
-    ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
-    ;     ;Or this to modify
-    ;     ;OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
-    ;     ;Or this 
-    ;     ;RunProgram("notepad.exe",  GetHomeDirectory() + "PBMap.prefs", GetHomeDirectory())
-    ;     PreferenceGroup("PROXY")
-    ;     WritePreferenceInteger("Proxy", #True)
-    ;     WritePreferenceString("ProxyURL", "myproxy.fr")
-    ;     WritePreferenceString("ProxyPort", "myproxyport")
-    ;     WritePreferenceString("ProxyUser", "myproxyname")       
-    ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
-    ;     ClosePreferences()
-    With PBMap\Options
-      PreferenceGroup("PROXY")       
-      \Proxy              = ReadPreferenceInteger("Proxy", #False)
-      If \Proxy
-        \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
-        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
-        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-        \ProxyPassword    = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
-      EndIf
-      PreferenceGroup("URL")
-      \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
-      
-      PreferenceGroup("PATHS")
-      \HDDCachePath       = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory() + "PBMap" + slash)
-      PreferenceGroup("OPTIONS")   
-      \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
-      \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
-      \Verbose            = ReadPreferenceInteger("Verbose", #True)
-      \Warning            = ReadPreferenceInteger("Warning", #False)
-      \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
-      \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
-      \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
-      \ShowMarkers        = ReadPreferenceInteger("ShowMarkers", #True)
-      \ShowPointer        = ReadPreferenceInteger("ShowPointer", #True)
-      \ShowTrack          = ReadPreferenceInteger("ShowTrack", #True)
-      \ShowTrackKms       = ReadPreferenceInteger("ShowTrackKms", #False)
-      \ShowMarkersNb      = ReadPreferenceInteger("ShowMarkersNb", #True)
-      \ShowMarkersLegend  = ReadPreferenceInteger("ShowMarkersLegend", #False)
-      PreferenceGroup("DRAWING")   
-      \StrokeWidthTrackDefault = ReadPreferenceInteger("StrokeWidthTrackDefault", 10)
-      PreferenceGroup("COLOURS")
-      \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
-      \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
-      \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
-      \TimerInterval      = 20
-      ClosePreferences()
-    EndWith  
-  EndProcedure
-  
-  Procedure.i AddMapServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/", TileSize = 256, ZoomMin = 0, ZoomMax = 18)
-    Protected *Ptr = AddElement(PBMap\Layers())
-    If *Ptr
-      PBMap\Layers()\Name = LayerName
-      PBMap\Layers()\Order = Order
-      PBMap\Layers()\ServerURL = ServerURL
-      SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
-      ProcedureReturn *Ptr
-    Else
-      ProcedureReturn #False
-    EndIf
-  EndProcedure
-  
-  Procedure DeleteLayer(*Ptr)
-    ChangeCurrentElement(PBMap\Layers(), *Ptr)
-    DeleteElement(PBMap\Layers())
-    FirstElement(PBMap\Layers())
-    SortStructuredList(PBMap\Layers(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
-  EndProcedure
-  
-  Procedure Quit()
-    PBMap\Drawing\End = #True
-    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
-    Protected TimeCounter = ElapsedMilliseconds()
-    Repeat
-      ForEach PBMap\MemCache\Images()
-        If PBMap\MemCache\Images()\Tile <> 0         
-          If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            PBMap\MemCache\Images()\Tile\RetryNb = 0
-            If ElapsedMilliseconds() - TimeCounter > 2000
-              ;Should not occur
-              KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            EndIf
-          Else
-            FreeMemory(PBMap\MemCache\Images()\Tile)
-            PBMap\MemCache\Images()\Tile = 0
-          EndIf
-        Else
-          DeleteMapElement(PBMap\MemCache\Images())
-        EndIf
-      Next
-      Delay(10)
-    Until MapSize(PBMap\MemCache\Images()) = 0
-  EndProcedure
-  
-  Macro Min(a,b)
-    (Bool((a) <= (b)) * (a) + Bool((b) < (a)) * (b))
-  EndMacro
-  
-  Macro Max(a,b)
-    (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
-  EndMacro
   
   Procedure.d Distance(x1.d, y1.d, x2.d, y2.d)
     Protected Result.d
@@ -649,6 +494,19 @@ Module PBMap
     *Pixel\y = PBMap\Drawing\RadiusY + (py - PBMap\PixelCoordinates\y) 
   EndProcedure
   
+  Procedure.d Pixel2Lon(x)
+    Protected NewX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + x) / PBMap\TileSize
+    Protected n.d = Pow(2.0, PBMap\Zoom)
+    ; double mod is to ensure the longitude to be in the range [-180;180[
+    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
+  EndProcedure
+  
+  Procedure.d Pixel2Lat(y)
+    Protected NewY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + y) / PBMap\TileSize
+    Protected n.d = Pow(2.0, PBMap\Zoom)
+    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
+  EndProcedure
+  
   ; HaversineAlgorithm 
   ; http://andrew.hedges.name/experiments/haversine/
   Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
@@ -724,7 +582,297 @@ Module PBMap
     EndIf
   EndProcedure  
   
+  ;TODO : best cleaning of the string from bad behaviour
+  Procedure.s StringCheck(String.s)
+    ProcedureReturn Trim(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(String, Chr(0)), Chr(32)), Chr(39)), Chr(33)), Chr(34)), "@"), "/"), "\"), "$"), "%"))
+  EndProcedure
+  
+  Procedure.i ColourString2Value(Value.s)
+    ;TODO : better string check
+    Protected Col.s = RemoveString(Value, " ")
+    If Left(Col, 1) = "$"
+      Protected r.i, g.i, b.i, a.i = 255
+      Select Len(Col)
+        Case 4 ;RGB  (eg : "$9BC"
+          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1))
+        Case 5 ;RGBA (eg : "$9BC5")
+          r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1)) : a = Val("$"+Mid(Col, 5, 1))
+        Case 7 ;RRGGBB (eg : "$95B4C2")
+          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2))
+        Case 9 ;RRGGBBAA (eg : "$95B4C249")
+          r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2)) : a = Val("$"+Mid(Col, 8, 2))
+      EndSelect
+      ProcedureReturn RGBA(r, g, b, a)
+    Else
+      ProcedureReturn Val(Value)
+    EndIf
+  EndProcedure  
+  
+  ;-*** Options
+  
+  Macro SelBool(Name)
+    Select UCase(Value)
+      Case "0", "FALSE", "DISABLE"
+        PBMap\Options\Name = #False
+      Default
+        PBMap\Options\Name = #True
+    EndSelect
+  EndMacro
+  
+  Procedure SetOption(Option.s, Value.s)
+    Option = StringCheck(Option)
+    Select LCase(Option)
+      Case "proxy"
+        SelBool(Proxy)
+      Case "proxyurl"
+        PBMap\Options\ProxyURL = Value
+      Case "proxyport"        
+        PBMap\Options\ProxyPort = Value
+      Case "proxyuser"        
+        PBMap\Options\ProxyUser = Value
+      Case "appid"        
+        PBMap\Options\appid = Value
+      Case "appcode"        
+        PBMap\Options\appcode = Value
+      Case "tilescachepath"
+        PBMap\Options\HDDCachePath = Value
+      Case "maxmemcache"
+        PBMap\Options\MaxMemCache = Val(Value)
+      Case "verbose"
+        SelBool(Verbose)
+      Case "warning"
+        SelBool(Warning)
+      Case "wheelmouserelative"
+        SelBool(WheelMouseRelative)
+      Case "showdegrees"
+        SelBool(ShowDegrees)
+      Case "showdebuginfos"
+        SelBool(ShowDebugInfos)
+      Case "showscale"
+        SelBool(ShowScale)
+      Case "showmarkers"
+        SelBool(ShowMarkers)
+      Case "showpointer"
+        SelBool(ShowPointer)
+      Case "showtrack"
+        SelBool(ShowTrack)
+      Case "showmarkersnb"
+        SelBool(ShowMarkersNb)      
+      Case "showmarkerslegend"
+        SelBool(ShowMarkersLegend)      
+      Case "showtrackkms"
+        SelBool(ShowTrackKms)
+      Case "strokewidthtrackdefault"
+        SelBool(StrokeWidthTrackDefault)
+      Case "colourfocus"
+        PBMap\Options\ColourFocus = ColourString2Value(Value)
+      Case "colourselected"
+        PBMap\Options\ColourSelected = ColourString2Value(Value)
+      Case "colourtrackdefault"
+        PBMap\Options\ColourTrackDefault = ColourString2Value(Value)
+    EndSelect
+  EndProcedure
+  
+  ;By default, save options in the user's home directory
+  Procedure SaveOptions(PreferencesFile.s = "PBMap.prefs")
+    If PreferencesFile = "PBMap.prefs"
+      CreatePreferences(GetHomeDirectory() + "PBMap.prefs")      
+    Else
+      CreatePreferences(PreferencesFile)     
+    EndIf
+    With PBMap\Options
+      PreferenceGroup("PROXY")
+      WritePreferenceInteger("Proxy", \Proxy)
+      WritePreferenceString("ProxyURL", \ProxyURL)
+      WritePreferenceString("ProxyPort", \ProxyPort)
+      WritePreferenceString("ProxyUser", \ProxyUser)
+      PreferenceGroup("HERE")
+      WritePreferenceString("APP_ID", \appid)
+      WritePreferenceString("APP_CODE", \appcode)
+      PreferenceGroup("URL")
+      WritePreferenceString("DefaultOSMServer", \DefaultOSMServer)
+      PreferenceGroup("PATHS")
+      WritePreferenceString("TilesCachePath", \HDDCachePath)
+      PreferenceGroup("OPTIONS")
+      WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
+      WritePreferenceInteger("MaxMemCache", \MaxMemCache)
+      WritePreferenceInteger("Verbose", \Verbose)
+      WritePreferenceInteger("Warning", \Warning)
+      WritePreferenceInteger("ShowDegrees", \ShowDegrees)
+      WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
+      WritePreferenceInteger("ShowScale", \ShowScale)
+      WritePreferenceInteger("ShowMarkers", \ShowMarkers)
+      WritePreferenceInteger("ShowPointer", \ShowPointer)
+      WritePreferenceInteger("ShowTrack", \ShowTrack)
+      WritePreferenceInteger("ShowTrackKms", \ShowTrackKms)
+      WritePreferenceInteger("ShowMarkersNb", \ShowMarkersNb)
+      WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
+      PreferenceGroup("DRAWING")  
+      WritePreferenceInteger("StrokeWidthTrackDefault", \StrokeWidthTrackDefault)
+      ;Colours;
+      WritePreferenceInteger("ColourFocus", \ColourFocus)
+      WritePreferenceInteger("ColourSelected", \ColourSelected)
+      WritePreferenceInteger("ColourTrackDefault", \ColourTrackDefault)
+      ClosePreferences()
+    EndWith
+  EndProcedure
+  
+  Procedure LoadOptions(PreferencesFile.s = "PBMap.prefs")
+    If PreferencesFile = "PBMap.prefs"
+      OpenPreferences(GetHomeDirectory() + "PBMap.prefs")      
+    Else
+      OpenPreferences(PreferencesFile)     
+    EndIf
+    ;Use this to create and customize your preferences file for the first time
+    ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
+    ;     ;Or this to modify
+    ;     ;OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
+    ;     ;Or this 
+    ;     ;RunProgram("notepad.exe",  GetHomeDirectory() + "PBMap.prefs", GetHomeDirectory())
+    ;     PreferenceGroup("PROXY")
+    ;     WritePreferenceInteger("Proxy", #True)
+    ;     WritePreferenceString("ProxyURL", "myproxy.fr")
+    ;     WritePreferenceString("ProxyPort", "myproxyport")
+    ;     WritePreferenceString("ProxyUser", "myproxyname")       
+    ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
+    ;     PreferenceGroup("HERE")
+    ;     WritePreferenceString("APP_ID", "myhereid")       ;TODO !Warning! !not encoded!
+    ;     WritePreferenceString("APP_CODE", "myherecode")   ;TODO !Warning! !not encoded!
+    ;     ClosePreferences()
+    With PBMap\Options
+      PreferenceGroup("PROXY")       
+      \Proxy              = ReadPreferenceInteger("Proxy", #False)
+      If \Proxy
+        \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
+        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
+        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
+        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ;InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
+      EndIf
+      PreferenceGroup("HERE")  
+        \appid            = ReadPreferenceString("APP_ID", "")    ;InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
+        \appcode          = ReadPreferenceString("APP_CODE", "")  ;InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
+      PreferenceGroup("URL")
+      \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
+      
+      PreferenceGroup("PATHS")
+      \HDDCachePath       = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory() + "PBMap" + slash)
+      PreferenceGroup("OPTIONS")   
+      \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
+      \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
+      \Verbose            = ReadPreferenceInteger("Verbose", #False)
+      \Warning            = ReadPreferenceInteger("Warning", #False)
+      \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
+      \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
+      \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
+      \ShowMarkers        = ReadPreferenceInteger("ShowMarkers", #True)
+      \ShowPointer        = ReadPreferenceInteger("ShowPointer", #True)
+      \ShowTrack          = ReadPreferenceInteger("ShowTrack", #True)
+      \ShowTrackKms       = ReadPreferenceInteger("ShowTrackKms", #False)
+      \ShowMarkersNb      = ReadPreferenceInteger("ShowMarkersNb", #True)
+      \ShowMarkersLegend  = ReadPreferenceInteger("ShowMarkersLegend", #False)
+      PreferenceGroup("DRAWING")   
+      \StrokeWidthTrackDefault = ReadPreferenceInteger("StrokeWidthTrackDefault", 10)
+      PreferenceGroup("COLOURS")
+      \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
+      \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
+      \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
+      \TimerInterval      = 20
+      ClosePreferences()
+    EndWith  
+  EndProcedure
+  
+  ;-*** Layers
+  
+  ;Add a layer to a list (to get things ordered) and to a map (to access things easily)
+  Procedure.i AddLayer(Name.s, Order.i)
+    Protected *Ptr = 0
+    *Ptr = AddMapElement(PBMap\Layers(), Name)
+    If *Ptr
+      PBMap\Layers() = AddElement(PBMap\LayersList()) ; This map element is a ptr to a linked list element
+      If PBMap\Layers()
+        PBMap\LayersList()\Name  = Name
+        PBMap\LayersList()\Order = Order
+        ProcedureReturn PBMap\Layers()
+      Else
+        *Ptr = 0
+      EndIf
+    EndIf
+    ProcedureReturn *Ptr
+  EndProcedure
+  
+  ; "OpenStreetMap" layer
+  Procedure.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order)
+    If *Ptr
+      *Ptr\ServerURL = ServerURL
+      *Ptr\LayerType = 0 ; OSM
+      *Ptr\Enabled = #True
+      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      ProcedureReturn *Ptr
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
+  ; "Here" layer
+  ;see there for parameters : https://developer.here.com/rest-apis/documentation/enterprise-map-tile/topics/resource-base-maptile.html
+  ;you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
+  ;use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
+  Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order)
+    If *Ptr
+      With *Ptr;PBMap\Layers()
+        \ServerURL = ServerURL
+        \path = path
+        \ressource = ressource
+        \LayerType = 1 ; HERE
+        \Enabled = #True
+        If APP_ID = ""
+          APP_ID = PBMap\Options\appid
+        EndIf
+        If APP_CODE = ""
+          APP_CODE = PBMap\Options\appcode
+        EndIf
+        \APP_CODE = APP_CODE
+        \APP_ID = APP_ID
+        \format = format
+        \id = id
+        \lg = lg
+        \lg2 = lg2
+        \param = param
+        \scheme = scheme
+      EndWith     
+      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      ProcedureReturn *Ptr
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
+  Procedure.i IsLayer(Name.s)
+    ProcedureReturn FindMapElement(PBMap\Layers(), Name)
+  EndProcedure
+  
+  Procedure DeleteLayer(Name.s)
+    FindMapElement(PBMap\Layers(), Name)
+    Protected *Ptr = PBMap\Layers()
+    ;Free the list element
+    ChangeCurrentElement(PBMap\LayersList(), *Ptr)
+    DeleteElement(PBMap\LayersList())
+    ;Free the map element
+    DeleteMapElement(PBMap\Layers())
+  EndProcedure
+  
+  Procedure EnableLayer(Name.s)
+    PBMap\Layers(Name)\Enabled = #True
+  EndProcedure
+  
+  Procedure DisableLayer(Name.s)
+    PBMap\Layers(Name)\Enabled = #False
+  EndProcedure
+  
   ;-*** These are threaded
+  
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
     If FileSize(CacheFile) > 0
@@ -745,13 +893,15 @@ Module PBMap
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileSize.i, timg
-    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
     FileSize = ReceiveHTTPFile(TileURL, CacheFile)
     If FileSize > 0
       MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
       nImage = GetTileFromHDD(CacheFile)
     Else
-      MyDebug("Problem loading from web " + TileURL, 3)
+      MyDebug("Problem loading from web " + TileURL + " as CacheFile " + CacheFile, 3)
     EndIf
     ; **** IMPORTANT NOTICE (please not remove)
     ; I'm (djes) now using Curl (actually, just normal pb) only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
@@ -803,10 +953,10 @@ Module PBMap
     Protected img.i = -1
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
-      MyDebug("Key : " + key + " found in memory cache!", 3)
+      MyDebug("Key : " + key + " found in memory cache", 3)
       img = *timg\nImage
       If img <> -1
-        MyDebug("Image : " + img + " found in memory cache!", 3)
+        MyDebug("Image : " + img + " found in memory cache", 3)
         ;*** Cache management
         ; Move the newly used element to the last position of the time stack
         SelectElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPosition)
@@ -840,7 +990,7 @@ Module PBMap
       ;MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
       ;***
-      MyDebug("Key : " + key + " added in memory cache!", 3)
+      MyDebug("Key : " + key + " added in memory cache", 3)
       *timg = PBMap\MemCache\Images()
       *timg\nImage = -1
     EndIf
@@ -877,7 +1027,7 @@ Module PBMap
     ProcedureReturn *timg 
   EndProcedure
   
-  Procedure DrawTiles(*Drawing.DrawingParameters, Layer)
+  Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
     Protected x.i, y.i,kq.q
     Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
     Protected ty = Int(*Drawing\TileCoordinates\y)
@@ -886,7 +1036,8 @@ Module PBMap
     Protected px, py, *timg.ImgMemCach, tilex, tiley, key.s
     Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
-    SelectElement(PBMap\Layers(), Layer)
+    Protected HereLoadBalancing.b                           ;Here is providing a load balancing system
+    FindMapElement(PBMap\Layers(), LayerName)
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
       For x = - nx - 1 To nx + 1
@@ -899,9 +1050,9 @@ Module PBMap
         tiley = ty + y 
         If tiley >= 0 And tiley < tilemax
           kq = (PBMap\Zoom << 8) | (tilex << 16) | (tiley << 36)
-          key = PBMap\Layers()\Name + Str(kq)
+          key = LayerName + Str(kq)
           ; Creates the cache tree based on the OSM tree+Layer : layer/zoom/x/y.png
-          Protected DirName.s = PBMap\Options\HDDCachePath + PBMap\Layers()\Name
+          Protected DirName.s = PBMap\Options\HDDCachePath + LayerName
           If FileSize(DirName) <> -2
             If CreateDirectory(DirName) = #False ; Creates a directory based on the layer name
               Error("Can't create the following layer directory : " + DirName)
@@ -927,9 +1078,23 @@ Module PBMap
               MyDebug(DirName + " successfully created", 4)
             EndIf
           EndIf
-          ; Tile cache name based on y
-          URL = PBMap\Layers()\ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
-          CacheFile = DirName + slash + Str(tiley) + ".png" 
+          With PBMap\LayersList()
+            Select \LayerType
+              Case 0 ;OSM
+                URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + ".png" 
+              Case 1 ;Here
+                HereLoadBalancing = 1 + ((tiley + tilex) % 4)
+                ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
+                URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code=" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
+                If \param <> ""
+                  URL + "&" + \param
+                EndIf
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + "." + \format 
+            EndSelect          
+          EndWith
           *timg = GetTile(key, URL, CacheFile)
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
@@ -1062,6 +1227,8 @@ Module PBMap
     Until x = nx1
     StrokePath(1)  
   EndProcedure   
+  
+  ;-*** Tracks
   
   Procedure DrawTrackPointer(x.d, y.d, dist.l)
     Protected color.l
@@ -1237,11 +1404,12 @@ Module PBMap
           Wend
         EndIf
       Next 
-      ZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
+      SetZoomToTracks(LastElement(PBMap\TracksList())) ; <-To center the view, and zoom on the tracks  
       ProcedureReturn *NewTrack  
     EndIf
   EndProcedure
   
+  ;-*** Markers
   
   Procedure ClearMarkers()
     ClearList(PBMap\Markers())
@@ -1279,7 +1447,6 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;-*** Marker Edit
   Procedure MarkerIdentifierChange()
     Protected *Marker.Marker = GetGadgetData(EventGadget())
     If GetGadgetText(EventGadget()) <> *Marker\Identifier
@@ -1316,7 +1483,6 @@ Module PBMap
       SetActiveWindow(*Marker\EditWindow)
     EndIf
   EndProcedure
-  ;-***
   
   Procedure DrawMarker(x.i, y.i, Nb.i, *Marker.Marker)
     Protected Text.s
@@ -1388,6 +1554,8 @@ Module PBMap
     Next
   EndProcedure 
   
+  ;-*** Main drawing stuff
+  
   Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
     VectorFont(FontID(PBMap\Font), 16)
@@ -1419,12 +1587,12 @@ Module PBMap
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
     DrawVectorText(Text)
   EndProcedure
-  
-  ;-*** Main drawing
+    
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected PixelCenter.PixelCoordinates
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
+    Protected LayerOrder.i = 0
     Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
     PBMap\Redraw = #False
@@ -1459,8 +1627,10 @@ Module PBMap
     FillVectorOutput()
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
-    ForEach PBMap\Layers()
-      DrawTiles(*Drawing, ListIndex(PBMap\Layers())) 
+    ForEach PBMap\LayersList()
+      If PBMap\LayersList()\Enabled
+        DrawTiles(*Drawing, PBMap\LayersList()\Name)
+      EndIf
     Next   
     If PBMap\Options\ShowTrack
       DrawTracks(*Drawing)
@@ -1489,27 +1659,16 @@ Module PBMap
     ;Drawing()
   EndProcedure
   
-  Procedure.d Pixel2Lon(x)
-    Protected NewX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + x) / PBMap\TileSize
-    Protected n.d = Pow(2.0, PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180;180[
-    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
-  EndProcedure
-  
-  Procedure.d Pixel2Lat(y)
-    Protected NewY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + y) / PBMap\TileSize
-    Protected n.d = Pow(2.0, PBMap\Zoom)
-    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
-  EndProcedure
-  
-  Procedure.d MouseLongitude()
+  ;-*** Misc functions
+   
+  Procedure.d GetMouseLongitude()
     Protected MouseX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ; double mod is to ensure the longitude to be in the range [-180;180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
-  Procedure.d MouseLatitude()
+  Procedure.d GetMouseLatitude()
     Protected MouseY.d = (PBMap\PixelCoordinates\y - PBMap\Drawing\RadiusY + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * MouseY / n))))
@@ -1549,7 +1708,7 @@ Module PBMap
     EndIf 
   EndProcedure
   
-  Procedure ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+  Procedure SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
     ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
     ;bounding box in long/lat coords (x=long, y=lat)
     Protected DeltaX.d = MaxX - MinX                            ;assumption ! In original code DeltaX have no source
@@ -1576,7 +1735,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure  ZoomToTracks(*Tracks.Tracks)
+  Procedure  SetZoomToTracks(*Tracks.Tracks)
     Protected MinY.d, MaxY.d, MinX.d, MaxX.d
     If ListSize(*Tracks\Track()) > 0
       With *Tracks\Track()
@@ -1596,7 +1755,7 @@ Module PBMap
             MaxY = \Latitude
           EndIf
         Next 
-        ZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
+        SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
       EndWith
     EndIf
   EndProcedure
@@ -1659,7 +1818,7 @@ Module PBMap
   EndProcedure
   
   ;Zoom on x, y pixel position from the center
-  Procedure ZoomOnPixel(x, y, zoom)
+  Procedure SetZoomOnPixel(x, y, zoom)
     ;*** First : Zoom
     PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : ProcedureReturn : EndIf
@@ -1682,8 +1841,8 @@ Module PBMap
   EndProcedure  
   
   ;Zoom on x, y position relative to the canvas gadget
-  Procedure ZoomOnPixelRel(x, y, zoom)
-    ZoomOnPixel(x - PBMap\Drawing\RadiusX, y - PBMap\Drawing\RadiusY, zoom)
+  Procedure SetZoomOnPixelRel(x, y, zoom)
+    SetZoomOnPixel(x - PBMap\Drawing\RadiusX, y - PBMap\Drawing\RadiusY, zoom)
   EndProcedure  
   
   ;Go to x, y position relative to the canvas gadget left up
@@ -1739,7 +1898,9 @@ Module PBMap
     ;     Debug *Buffer
     ;     Debug MemorySize(*Buffer)
     ;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
-    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
     Size = ReceiveHTTPFile(Query, JSONFileName)
     If LoadJSON(0, JSONFileName) = 0
       ;Demivec's code
@@ -1760,54 +1921,10 @@ Module PBMap
         *ReturnPosition\Latitude = ValD(lat)
         *ReturnPosition\Longitude = ValD(lon)
       EndIf
-      If lat<> "" And lon <> "" 
-        ZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
+      If lat <> "" And lon <> "" 
+        SetZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
         ;SetLocation(Position\Latitude, Position\Longitude)
       EndIf
-    EndIf
-  EndProcedure
-  
-  ;(c) ts-soft http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
-  CompilerSelect #PB_Compiler_OS
-    CompilerCase #PB_OS_Windows
-      #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
-      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ;(0x8000)
-      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192;(0x2000)
-      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072;(0x20000)
-      #FILE_ATTRIBUTE_VIRTUAL              =  65536;(0x10000)
-      #FILE_ATTRIBUTE_DONTSETFLAGS = ~(#FILE_ATTRIBUTE_DIRECTORY|
-                                       #FILE_ATTRIBUTE_SPARSE_FILE|
-                                       #FILE_ATTRIBUTE_OFFLINE|
-                                       #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED|
-                                       #FILE_ATTRIBUTE_VIRTUAL|
-                                       0)
-      Macro SetFileAttributesEx(Name, Attribs)
-        SetFileAttributes(Name, Attribs & #FILE_ATTRIBUTE_DONTSETFLAGS)
-      EndMacro
-    CompilerDefault
-      Macro SetFileAttributesEx(Name, Attribs)
-        SetFileAttributes(Name, Attribs)
-      EndMacro
-  CompilerEndSelect
-  
-  Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
-    Protected i, c, tmp.s
-    If Right(DirectoryName, 1) = slash
-      DirectoryName = Left(DirectoryName, Len(DirectoryName) -1)
-    EndIf
-    c = CountString(DirectoryName, slash) + 1
-    For i = 1 To c
-      tmp + StringField(DirectoryName, i, slash)
-      If FileSize(tmp) <> -2
-        CreateDirectory(tmp)
-      EndIf
-      tmp + slash
-    Next
-    If FileAttribute <> #PB_Default
-      SetFileAttributesEx(DirectoryName, FileAttribute)
-    EndIf
-    If FileSize(DirectoryName) = -2
-      ProcedureReturn #True
     EndIf
   EndProcedure
   
@@ -1828,13 +1945,14 @@ Module PBMap
     EndIf
   EndProcedure
   
+  ;-*** Main PBMap functions
+  
   Procedure CanvasEvents()
     Protected CanvasMouseX.d, CanvasMouseY.d, MouseX.d, MouseY.d
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     Protected key.s, Touch.i
     Protected Pixel.PixelCoordinates
     Static CtrlKey
-    PBMap\Moving = #False
     CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\RadiusX
     CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\RadiusY
     ; rotation wip
@@ -1918,13 +2036,14 @@ Module PBMap
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
           ;Relative zoom (centered on the mouse)
-          ZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
+          SetZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
         Else
           ;Absolute zoom (centered on the center of the map)
           SetZoom(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
         EndIf        
       Case #PB_EventType_LeftButtonDown
         ;LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+        PBMap\Dragging = #True
         ;Mem cursor Coord
         PBMap\MoveStartingPoint\x = CanvasMouseX
         PBMap\MoveStartingPoint\y = CanvasMouseY
@@ -1955,9 +2074,9 @@ Module PBMap
           Next
         EndIf
       Case #PB_EventType_MouseMove
-        PBMap\Moving = #True
         ; Drag
-        If PBMap\MoveStartingPoint\x <> - 1
+        If PBMap\Dragging
+;        If PBMap\MoveStartingPoint\x <> - 1
           MouseX = CanvasMouseX - PBMap\MoveStartingPoint\x
           MouseY = CanvasMouseY - PBMap\MoveStartingPoint\y
           PBMap\MoveStartingPoint\x = CanvasMouseX
@@ -2039,7 +2158,8 @@ Module PBMap
           EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
-        PBMap\MoveStartingPoint\x = - 1
+;        PBMap\MoveStartingPoint\x = - 1
+        PBMap\Dragging = #False
         PBMap\Redraw = #True
       Case #PB_MAP_REDRAW
         Debug "Redraw"
@@ -2088,11 +2208,36 @@ Module PBMap
     BindMapGadget(PBMap\Gadget)
   EndProcedure
   
+  Procedure Quit()
+    PBMap\Drawing\End = #True
+    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+    Protected TimeCounter = ElapsedMilliseconds()
+    Repeat
+      ForEach PBMap\MemCache\Images()
+        If PBMap\MemCache\Images()\Tile <> 0         
+          If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            PBMap\MemCache\Images()\Tile\RetryNb = 0
+            If ElapsedMilliseconds() - TimeCounter > 2000
+              ;Should not occur
+              KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
+            EndIf
+          Else
+            FreeMemory(PBMap\MemCache\Images()\Tile)
+            PBMap\MemCache\Images()\Tile = 0
+          EndIf
+        Else
+          DeleteMapElement(PBMap\MemCache\Images())
+        EndIf
+      Next
+      Delay(10)
+    Until MapSize(PBMap\MemCache\Images()) = 0
+  EndProcedure
+  
   Procedure InitPBMap(Window)
     Protected Result.i
     PBMap\ZoomMin = 0
     PBMap\ZoomMax = 18
-    PBMap\MoveStartingPoint\x = - 1
+    PBMap\Dragging = #False
     PBMap\TileSize = 256
     PBMap\Dirty = #False
     PBMap\EditMarker = #False
@@ -2106,7 +2251,7 @@ Module PBMap
     EndIf
     CreateDirectoryEx(PBMap\Options\HDDCachePath) 
     If PBMap\Options\DefaultOSMServer <> "" 
-      AddMapServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
+      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
     EndIf
     TechnicalImagesCreation()
     SetLocation(0, 0)
@@ -2145,6 +2290,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_LoadGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
+    #Gdt_AddHereMap
     #Gdt_Degrees
     #Gdt_EditMode 
     #Gdt_ClearDiskCache
@@ -2214,6 +2360,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2246,11 +2393,12 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
     ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 370, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 400, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 430, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 465, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 480, 150, 20, "")
+    ButtonGadget(#Gdt_AddHereMap, 530, 370, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 400, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 430, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 460, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 495, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 510, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2263,7 +2411,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ;***
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
-    Define OpenSeaMap = 0, Degrees = 1
+    Define Degrees = 1
     Define *Track
     
     ;Our main gadget
@@ -2274,7 +2422,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")
-    PBMap::SetOption("ColourFocus", "$FFFF00AA")    
+    PBMap::SetOption("ColourFocus", "$FFFF00AA") 
     PBMap::MapGadget(#Map, 10, 10, 512, 512)
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
@@ -2320,15 +2468,24 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Gdt_AddMarker
               PBMap::AddMarker(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)), "", "Test", RGBA(Random(255), Random(255), Random(255), 255))
             Case #Gdt_AddOpenseaMap
-              If OpenSeaMap = 0
-                OpenSeaMap = PBMap::AddMapServerLayer("OpenSeaMap", 2, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 2
-                SetGadgetState(#Gdt_AddOpenseaMap, 1)
-              Else
-                PBMap::DeleteLayer(OpenSeaMap)
-                OpenSeaMap = 0
+              If PBMap::IsLayer("OpenSeaMap")
+                PBMap::DeleteLayer("OpenSeaMap")
                 SetGadgetState(#Gdt_AddOpenseaMap, 0)
+              Else
+                PBMap::AddOSMServerLayer("OpenSeaMap", 3, "http://t1.openseamap.org/seamark/") ; Add a special osm overlay map on layer nb 3
+                SetGadgetState(#Gdt_AddOpenseaMap, 1)
               EndIf
-              PBMAP::Refresh()
+              PBMap::Refresh()
+            Case #Gdt_AddHereMap
+              If PBMap::IsLayer("Here")
+                PBMap::DeleteLayer("Here")
+                SetGadgetState(#Gdt_AddHereMap, 0)
+              Else
+                MessageRequester("Info", "Don't forget to register on HERE and change the line 2485 or edit options file")
+                PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
+                SetGadgetState(#Gdt_AddHereMap, 1)
+              EndIf
+              PBMap::Refresh()
             Case #Gdt_Degrees
               Degrees = 1 - Degrees
               PBMap::SetOption("ShowDegrees", Str(Degrees))
@@ -2377,11 +2534,11 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-
-; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 2250
-; FirstLine = 2260
-; Folding = -----------------
+; IDE Options = PureBasic 5.60 (Windows - x64)
+; CursorPosition = 2475
+; FirstLine = 2453
+; Folding = ------------------
 ; EnableThread
 ; EnableXP
+; DisableDebugger
 ; EnableUnicode
