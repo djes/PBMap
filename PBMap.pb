@@ -27,7 +27,7 @@ UseJPEGImageEncoder()
 ;- Module declaration
 
 DeclareModule PBMap  
-   
+  
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
     #Red = 255
   CompilerEndIf
@@ -45,9 +45,10 @@ DeclareModule PBMap
   #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
   #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
   #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
-   
+  
   Declare InitPBMap(window)
   Declare SetOption(Option.s, Value.s)
+  Declare.s GetOption(Option.s)
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
@@ -75,7 +76,7 @@ DeclareModule PBMap
   Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
   Declare SetZoomToTracks(*Tracks)
   Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
-  Declare.i LoadGpxFile(file.s);  
+  Declare.i LoadGpxFile(file.s)                                    ;  
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
@@ -225,7 +226,7 @@ Module PBMap
     lg2.s
     ;<
   EndStructure
-    
+  
   Structure Box
     x1.i
     y1.i
@@ -305,7 +306,7 @@ Module PBMap
   
   ;TODO use this for all text
   IncludeFile "gettext.pbi"
-      
+  
   ;-*** Misc tools
   
   Macro Min(a, b)
@@ -316,7 +317,7 @@ Module PBMap
     (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
   EndMacro
   
-   ;Shows an error msg and terminates the program
+  ;Shows an error msg and terminates the program
   Procedure Error(msg.s)
     MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
     End
@@ -353,6 +354,8 @@ Module PBMap
       EndMacro
   CompilerEndSelect
   
+  ;Creates a full tree
+  ;by Thomas (ts-soft) Schulz
   Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
     Protected i, c, tmp.s
     If Right(DirectoryName, 1) = slash
@@ -555,7 +558,7 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
+  Procedure.i IsInDrawingBoundaries(*Drawing.DrawingParameters, *Position.GeographicCoordinates)
     Protected Lat.d  = *Position\Latitude,                 Lon.d  = *Position\Longitude
     Protected LatNW.d = *Drawing\Bounds\NorthWest\Latitude, LonNW.d = *Drawing\Bounds\NorthWest\Longitude
     Protected LatSE.d = *Drawing\Bounds\SouthEast\Latitude, LonSE.d = *Drawing\Bounds\SouthEast\Longitude
@@ -606,9 +609,28 @@ Module PBMap
     Else
       ProcedureReturn Val(Value)
     EndIf
-  EndProcedure  
+  EndProcedure 
+  
+  Procedure.s Value2ColourString(Value.i)
+    ProcedureReturn "$" + StrU(Red(Value), #PB_Byte) + StrU(Green(Value), #PB_Byte) + StrU(Blue(Value), #PB_Byte)
+  EndProcedure
   
   ;-*** Options
+  
+  Procedure SetOptions()
+    With PBMap\Options
+      If \Proxy
+        HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+      EndIf
+      If \Verbose
+        OpenConsole()
+      EndIf
+      CreateDirectoryEx(\HDDCachePath)
+      If \DefaultOSMServer <> "" And IsLayer("OSM") = #False ;First time creation of the basis OSM layer
+        AddOSMServerLayer("OSM", 1, \DefaultOSMServer)
+      EndIf
+    EndWith
+  EndProcedure
   
   Macro SelBool(Name)
     Select UCase(Value)
@@ -671,6 +693,72 @@ Module PBMap
       Case "colourtrackdefault"
         PBMap\Options\ColourTrackDefault = ColourString2Value(Value)
     EndSelect
+    SetOptions()
+  EndProcedure
+  
+  Procedure.s GetBoolString(Value.i)
+    Select Value
+      Case #False
+        ProcedureReturn "0"
+      Default
+        ProcedureReturn "1"
+    EndSelect
+  EndProcedure
+  
+  Procedure.s GetOption(Option.s)
+    Option = StringCheck(Option)
+    With PBMap\Options
+      Select LCase(Option)
+      Case "proxy"
+        ProcedureReturn GetBoolString(\Proxy)
+      Case "proxyurl"
+        ProcedureReturn \ProxyURL
+      Case "proxyport"        
+        ProcedureReturn \ProxyPort
+      Case "proxyuser"        
+        ProcedureReturn \ProxyUser
+      Case "appid"        
+        ProcedureReturn \appid
+      Case "appcode"        
+        ProcedureReturn \appcode
+      Case "tilescachepath"
+        ProcedureReturn \HDDCachePath
+      Case "maxmemcache"
+        ProcedureReturn StrU(\MaxMemCache)
+      Case "verbose"
+        ProcedureReturn GetBoolString(\Verbose)
+      Case "warning"
+        ProcedureReturn GetBoolString(\Warning)
+      Case "wheelmouserelative"
+        ProcedureReturn GetBoolString(\WheelMouseRelative)
+      Case "showdegrees"
+        ProcedureReturn GetBoolString(\ShowDegrees)
+      Case "showdebuginfos"
+        ProcedureReturn GetBoolString(\ShowDebugInfos)
+      Case "showscale"
+        ProcedureReturn GetBoolString(\ShowScale)
+      Case "showmarkers"
+        ProcedureReturn GetBoolString(\ShowMarkers)
+      Case "showpointer"
+        ProcedureReturn GetBoolString(\ShowPointer)
+      Case "showtrack"
+        ProcedureReturn GetBoolString(\ShowTrack)
+      Case "showmarkersnb"
+        ProcedureReturn GetBoolString(\ShowMarkersNb)      
+      Case "showmarkerslegend"
+        ProcedureReturn GetBoolString(\ShowMarkersLegend)      
+      Case "showtrackkms"
+        ProcedureReturn GetBoolString(\ShowTrackKms)
+      Case "strokewidthtrackdefault"
+        ProcedureReturn GetBoolString(\StrokeWidthTrackDefault)
+      Case "colourfocus"
+        ProcedureReturn Value2ColourString(\ColourFocus)
+      Case "colourselected"
+        ProcedureReturn Value2ColourString(\ColourSelected)
+      Case "colourtrackdefault"
+        ProcedureReturn Value2ColourString(\ColourTrackDefault)
+    EndSelect
+    EndWith
   EndProcedure
   
   ;By default, save options in the user's home directory
@@ -749,8 +837,8 @@ Module PBMap
         \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ; = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
       EndIf
       PreferenceGroup("HERE")  
-        \appid            = ReadPreferenceString("APP_ID", "")    ; = InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
-        \appcode          = ReadPreferenceString("APP_CODE", "")  ; = InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
+      \appid            = ReadPreferenceString("APP_ID", "")    ; = InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
+      \appcode          = ReadPreferenceString("APP_CODE", "")  ; = InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
       PreferenceGroup("URL")
       \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
       
@@ -777,8 +865,9 @@ Module PBMap
       \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
       \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
       \TimerInterval      = 20
-      ClosePreferences()
-    EndWith  
+      ClosePreferences()         
+    EndWith
+    SetOptions()
   EndProcedure
   
   ;-*** Layers
@@ -1586,7 +1675,7 @@ Module PBMap
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
     DrawVectorText(Text)
   EndProcedure
-    
+  
   Procedure Drawing()
     Protected *Drawing.DrawingParameters = @PBMap\Drawing
     Protected PixelCenter.PixelCoordinates
@@ -1659,7 +1748,7 @@ Module PBMap
   EndProcedure
   
   ;-*** Misc functions
-   
+  
   Procedure.d GetMouseLongitude()
     Protected MouseX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
@@ -2075,7 +2164,7 @@ Module PBMap
       Case #PB_EventType_MouseMove
         ; Drag
         If PBMap\Dragging
-;        If PBMap\MoveStartingPoint\x <> - 1
+          ;        If PBMap\MoveStartingPoint\x <> - 1
           MouseX = CanvasMouseX - PBMap\MoveStartingPoint\x
           MouseY = CanvasMouseY - PBMap\MoveStartingPoint\y
           PBMap\MoveStartingPoint\x = CanvasMouseX
@@ -2157,7 +2246,7 @@ Module PBMap
           EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
-;        PBMap\MoveStartingPoint\x = - 1
+        ;        PBMap\MoveStartingPoint\x = - 1
         PBMap\Dragging = #False
         PBMap\Redraw = #True
       Case #PB_MAP_REDRAW
@@ -2188,16 +2277,6 @@ Module PBMap
   
   ; Could be called directly to attach our map to an existing canvas
   Procedure BindMapGadget(Gadget.i)
-    If PBMap\Options\Verbose
-      OpenConsole()
-    EndIf
-    If PBMap\Options\Proxy
-      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    EndIf
-    CreateDirectoryEx(PBMap\Options\HDDCachePath) 
-    If PBMap\Options\DefaultOSMServer <> "" 
-      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
-    EndIf
     PBMap\Gadget = Gadget
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
@@ -2208,16 +2287,6 @@ Module PBMap
   
   ; Creates a canvas and attach our map
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
-    If PBMap\Options\Verbose
-      OpenConsole()
-    EndIf
-    If PBMap\Options\Proxy
-      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    EndIf
-    CreateDirectoryEx(PBMap\Options\HDDCachePath) 
-    If PBMap\Options\DefaultOSMServer <> "" 
-      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
-    EndIf
     If Gadget = #PB_Any
       PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
@@ -2494,9 +2563,12 @@ CompilerIf #PB_Compiler_IsMainFile
                 PBMap::DeleteLayer("Here")
                 SetGadgetState(#Gdt_AddHereMap, 0)
               Else
-;                PBMap::AddHereServerLayer("Here", 2) ; Add a "HERE" overlay map on layer nb 2
-                MessageRequester("Info", "Don't forget to register on HERE and change the line 2485 or edit options file")
-                PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
+                If PBMap::GetOption("appid") <> "" And PBMap::GetOption("appcode") <> ""
+                  PBMap::AddHereServerLayer("Here", 2) ; Add a "HERE" overlay map on layer nb 2
+                Else
+                  MessageRequester("Info", "Don't forget to register on HERE and change the following line or edit options file")
+                  PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
+                EndIf
                 SetGadgetState(#Gdt_AddHereMap, 1)
               EndIf
               PBMap::Refresh()
@@ -2549,8 +2621,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2432
-; FirstLine = 2413
-; Folding = ------------------
+; CursorPosition = 758
+; FirstLine = 733
+; Folding = -------------------
 ; EnableThread
 ; EnableXP
