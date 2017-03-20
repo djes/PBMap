@@ -289,7 +289,7 @@ Module PBMap
   ;-*** Global variables
   
   ;-Show debug infos 
-  Global MyDebugLevel = 2
+  Global MyDebugLevel = 3
   
   Global PBMap.PBMap, Null.i
   Global slash.s
@@ -743,14 +743,14 @@ Module PBMap
       PreferenceGroup("PROXY")       
       \Proxy              = ReadPreferenceInteger("Proxy", #False)
       If \Proxy
-        \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ;InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
-        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ;InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
-        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ;InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ;InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
+        \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ; = InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
+        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ; = InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
+        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ; = InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
+        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ; = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
       EndIf
       PreferenceGroup("HERE")  
-        \appid            = ReadPreferenceString("APP_ID", "")    ;InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
-        \appcode          = ReadPreferenceString("APP_CODE", "")  ;InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
+        \appid            = ReadPreferenceString("APP_ID", "")    ; = InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
+        \appcode          = ReadPreferenceString("APP_CODE", "")  ; = InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
       PreferenceGroup("URL")
       \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
       
@@ -875,13 +875,15 @@ Module PBMap
   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i
-    If FileSize(CacheFile) > 0
+    If FileSize(CacheFile) <> -1
       nImage = LoadImage(#PB_Any, CacheFile)
       If IsImage(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
       Else
         MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
+        MyDebug("Deleting faulty image file  " + CacheFile, 3)
+        DeleteFile(CacheFile)
       EndIf
     Else
       MyDebug("Failed loading " + CacheFile + " -> Size <= 0", 3)
@@ -893,9 +895,6 @@ Module PBMap
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileSize.i, timg
-    If PBMap\Options\Proxy
-      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    EndIf
     FileSize = ReceiveHTTPFile(TileURL, CacheFile)
     If FileSize > 0
       MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
@@ -936,7 +935,7 @@ Module PBMap
         MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
         *Tile\RetryNb = 0
       Else 
-        MyDebug("Image key : " + *Tile\key + " web image not correctly loaded", 3)
+        MyDebug("Image key : " + *Tile\key + " web image not correctly loaded, will retry in 2 secs", 3)
         Delay(2000)
         *Tile\RetryNb - 1
       EndIf
@@ -2189,6 +2188,16 @@ Module PBMap
   
   ; Could be called directly to attach our map to an existing canvas
   Procedure BindMapGadget(Gadget.i)
+    If PBMap\Options\Verbose
+      OpenConsole()
+    EndIf
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
+    CreateDirectoryEx(PBMap\Options\HDDCachePath) 
+    If PBMap\Options\DefaultOSMServer <> "" 
+      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
+    EndIf
     PBMap\Gadget = Gadget
     BindGadgetEvent(PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(PBMap\Window, PBMap\Timer, PBMap\Options\TimerInterval)
@@ -2199,6 +2208,16 @@ Module PBMap
   
   ; Creates a canvas and attach our map
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+    If PBMap\Options\Verbose
+      OpenConsole()
+    EndIf
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
+    CreateDirectoryEx(PBMap\Options\HDDCachePath) 
+    If PBMap\Options\DefaultOSMServer <> "" 
+      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
+    EndIf
     If Gadget = #PB_Any
       PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
@@ -2235,7 +2254,7 @@ Module PBMap
   
   Procedure InitPBMap(Window)
     Protected Result.i
-    PBMap\ZoomMin = 0
+    PBMap\ZoomMin = 1
     PBMap\ZoomMax = 18
     PBMap\Dragging = #False
     PBMap\TileSize = 256
@@ -2246,13 +2265,6 @@ Module PBMap
     PBMap\Timer = 1
     PBMap\Mode = #MODE_DEFAULT
     LoadOptions()
-    If PBMap\Options\Verbose
-      OpenConsole()
-    EndIf
-    CreateDirectoryEx(PBMap\Options\HDDCachePath) 
-    If PBMap\Options\DefaultOSMServer <> "" 
-      AddOSMServerLayer("OSM", 1, PBMap\Options\DefaultOSMServer)
-    EndIf
     TechnicalImagesCreation()
     SetLocation(0, 0)
   EndProcedure
@@ -2418,6 +2430,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "0") : Degrees = 0
     PBMap::SetOption("ShowDebugInfos", "0")
+    PBMap::SetOption("Verbose", "0")
     PBMap::SetOption("ShowScale", "1")    
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
@@ -2481,12 +2494,9 @@ CompilerIf #PB_Compiler_IsMainFile
                 PBMap::DeleteLayer("Here")
                 SetGadgetState(#Gdt_AddHereMap, 0)
               Else
-<<<<<<< HEAD
-                PBMap::AddHereServerLayer("Here", 2) ; Add a here overlay map on layer nb 2
-=======
+;                PBMap::AddHereServerLayer("Here", 2) ; Add a "HERE" overlay map on layer nb 2
                 MessageRequester("Info", "Don't forget to register on HERE and change the line 2485 or edit options file")
                 PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
->>>>>>> origin/djes
                 SetGadgetState(#Gdt_AddHereMap, 1)
               EndIf
               PBMap::Refresh()
@@ -2538,17 +2548,9 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-<<<<<<< HEAD
-; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
-; CursorPosition = 57
-; FirstLine = 32
-=======
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2475
-; FirstLine = 2453
->>>>>>> origin/djes
+; CursorPosition = 2432
+; FirstLine = 2413
 ; Folding = ------------------
 ; EnableThread
 ; EnableXP
-; DisableDebugger
-; EnableUnicode
