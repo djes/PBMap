@@ -759,7 +759,7 @@ Module PBMap
       PreferenceGroup("OPTIONS")   
       \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
       \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
-      \Verbose            = ReadPreferenceInteger("Verbose", #True)
+      \Verbose            = ReadPreferenceInteger("Verbose", #False)
       \Warning            = ReadPreferenceInteger("Warning", #False)
       \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
       \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
@@ -893,13 +893,15 @@ Module PBMap
     Protected *Buffer
     Protected nImage.i = -1
     Protected FileSize.i, timg
-    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
     FileSize = ReceiveHTTPFile(TileURL, CacheFile)
     If FileSize > 0
       MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
       nImage = GetTileFromHDD(CacheFile)
     Else
-      MyDebug("Problem loading from web " + TileURL, 3)
+      MyDebug("Problem loading from web " + TileURL + " as CacheFile " + CacheFile, 3)
     EndIf
     ; **** IMPORTANT NOTICE (please not remove)
     ; I'm (djes) now using Curl (actually, just normal pb) only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
@@ -1896,7 +1898,9 @@ Module PBMap
     ;     Debug *Buffer
     ;     Debug MemorySize(*Buffer)
     ;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
-    HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    If PBMap\Options\Proxy
+      HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    EndIf
     Size = ReceiveHTTPFile(Query, JSONFileName)
     If LoadJSON(0, JSONFileName) = 0
       ;Demivec's code
@@ -2477,7 +2481,12 @@ CompilerIf #PB_Compiler_IsMainFile
                 PBMap::DeleteLayer("Here")
                 SetGadgetState(#Gdt_AddHereMap, 0)
               Else
+<<<<<<< HEAD
                 PBMap::AddHereServerLayer("Here", 2) ; Add a here overlay map on layer nb 2
+=======
+                MessageRequester("Info", "Don't forget to register on HERE and change the line 2485 or edit options file")
+                PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
+>>>>>>> origin/djes
                 SetGadgetState(#Gdt_AddHereMap, 1)
               EndIf
               PBMap::Refresh()
@@ -2529,10 +2538,17 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
+<<<<<<< HEAD
 ; IDE Options = PureBasic 5.60 beta 7 (Windows - x64)
 ; CursorPosition = 57
 ; FirstLine = 32
+=======
+; IDE Options = PureBasic 5.60 (Windows - x64)
+; CursorPosition = 2475
+; FirstLine = 2453
+>>>>>>> origin/djes
 ; Folding = ------------------
 ; EnableThread
 ; EnableXP
+; DisableDebugger
 ; EnableUnicode
