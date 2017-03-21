@@ -192,6 +192,7 @@ Module PBMap
     ShowPointer.i
     TimerInterval.i
     MaxMemCache.i                                  ; in MiB
+    TileLifetime.i
     Verbose.i                                      ; Maximum debug informations
     Warning.i                                      ; Warning requesters
     ShowMarkersNb.i
@@ -660,6 +661,8 @@ Module PBMap
         PBMap\Options\HDDCachePath = Value
       Case "maxmemcache"
         PBMap\Options\MaxMemCache = Val(Value)
+      Case "tilelifetime"
+        PBMap\Options\TileLifetime =  Val(Value)
       Case "verbose"
         SelBool(Verbose)
       Case "warning"
@@ -725,6 +728,8 @@ Module PBMap
         ProcedureReturn \HDDCachePath
       Case "maxmemcache"
         ProcedureReturn StrU(\MaxMemCache)
+      Case "tilelifetime"
+        ProcedureReturn StrU(\TileLifetime)  
       Case "verbose"
         ProcedureReturn GetBoolString(\Verbose)
       Case "warning"
@@ -784,6 +789,7 @@ Module PBMap
       PreferenceGroup("OPTIONS")
       WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
       WritePreferenceInteger("MaxMemCache", \MaxMemCache)
+      WritePreferenceInteger("TileLifetime", \TileLifetime)  
       WritePreferenceInteger("Verbose", \Verbose)
       WritePreferenceInteger("Warning", \Warning)
       WritePreferenceInteger("ShowDegrees", \ShowDegrees)
@@ -847,6 +853,7 @@ Module PBMap
       PreferenceGroup("OPTIONS")   
       \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
       \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
+      \TileLifetime       = ReadPreferenceInteger("TileLifetime", 1209600) ;about 2 weeks ; -1 = unlimited
       \Verbose            = ReadPreferenceInteger("Verbose", #False)
       \Warning            = ReadPreferenceInteger("Warning", #False)
       \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
@@ -963,8 +970,18 @@ Module PBMap
   ;-*** These are threaded
   
   Procedure.i GetTileFromHDD(CacheFile.s)
-    Protected nImage.i
+    Protected nImage.i, LifeTime.i, MaxLifeTime.i = PBMap\Options\TileLifetime
     If FileSize(CacheFile) <> -1
+      ;Manage tile file lifetime
+      If MaxLifeTime <> -1
+        LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ;There's a bug with #PB_Date_Created
+        If LifeTime > MaxLifeTime
+          MyDebug("Deleting too old (" + StrU(LifeTime) + " secs) " + CacheFile, 3)
+          DeleteFile(CacheFile)
+          ProcedureReturn -1
+        EndIf
+      EndIf
+      ;Everything is OK, load the file
       nImage = LoadImage(#PB_Any, CacheFile)
       If IsImage(nImage)
         MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
@@ -2621,8 +2638,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 758
-; FirstLine = 733
+; CursorPosition = 2518
+; FirstLine = 2487
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
