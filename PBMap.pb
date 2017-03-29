@@ -78,7 +78,8 @@ DeclareModule PBMap
   Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
   Declare SetZoomToTracks(*Tracks)
   Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition = 0) ;Send back the position *ptr.GeographicCoordinates
-  Declare.i LoadGpxFile(file.s)                                    ;  
+  Declare.i LoadGpxFile(FileName.s)                                    ;  
+  Declare.i SaveGpxFile(FileName.s, *Track)                            ;  
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
@@ -89,6 +90,7 @@ DeclareModule PBMap
   Declare DeleteSelectedMarkers()
   Declare Drawing()
   Declare Quit()
+  Declare FatalError(msg.s)
   Declare Error(msg.s)
   Declare Refresh()
   Declare.i ClearDiskCache()  
@@ -321,11 +323,22 @@ Module PBMap
     (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
   EndMacro
   
+  ;-Error management
+  
   ;Shows an error msg and terminates the program
-  Procedure Error(msg.s)
-    MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+  Procedure FatalError(msg.s)
+    If PBMap\Options\Warning
+      MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+    EndIf
     End
   EndProcedure
+  
+  ;Shows an error msg
+  Procedure Error(msg.s)
+    If PBMap\Options\Warning
+      MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+    EndIf
+  EndProcedure  
   
   ;Send debug infos to stdout (allowing mixed debug infos with curl or other libs)
   Procedure MyDebug(msg.s, DbgLevel = 0)
@@ -1477,14 +1490,14 @@ Module PBMap
     EndWith
   EndProcedure
   
-  Procedure.i LoadGpxFile(file.s)
-    If LoadXML(0, file.s)
+  Procedure.i LoadGpxFile(FileName.s)
+    If LoadXML(0, FileName.s)
       Protected Message.s
       If XMLStatus(0) <> #PB_XML_Success
         Message = "Error in the XML file:" + Chr(13)
         Message + "Message: " + XMLError(0) + Chr(13)
         Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
-        MessageRequester("Error", Message)
+        Error(Message)
       EndIf
       Protected *MainNode,*subNode,*child,child.l
       *MainNode = MainXMLNode(0)
@@ -1510,6 +1523,32 @@ Module PBMap
       ProcedureReturn *NewTrack  
     EndIf
   EndProcedure
+  
+  Procedure.i SaveGpxFile(FileName.s, *Track.Tracks)
+    Protected Message.s
+    If CreateXML(0)
+      Protected *MainNode, *subNode, *child
+      *MainNode = CreateXMLNode(RootXMLNode(0), "gpx")
+      *subNode = CreateXMLNode(*MainNode, "trk")
+      *subNode = CreateXMLNode(*subNode, "trkseg")
+      ForEach *Track\Track()
+        *child = CreateXMLNode(*subNode, "trkpt")
+        SetXMLAttribute(*child, "lat", StrD(*Track\Track()\Latitude))
+        SetXMLAttribute(*child, "lon", StrD(*Track\Track()\Longitude))
+      Next
+      SaveXML(0, FileName)
+      If XMLStatus(0) <> #PB_XML_Success
+        Message = "Error in the XML file:" + Chr(13)
+        Message + "Message: " + XMLError(0) + Chr(13)
+        Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
+        Error(Message)
+        ProcedureReturn #False
+      EndIf
+      ProcedureReturn #True  
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure  
   
   ;-*** Markers
   
@@ -2239,7 +2278,7 @@ Module PBMap
                   If ListSize(\Track()) > 0
                     If \Visible
                       StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-                      ;Simulate tracks drawing
+                      ;Simulates track drawing
                       ForEach \Track()
                         LatLon2Pixel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                         If ListIndex(\Track()) = 0
@@ -2387,6 +2426,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #StringLatitude
     #StringLongitude
     #Gdt_LoadGpx
+    #Gdt_SaveGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
     #Gdt_AddHereMap
@@ -2458,6 +2498,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_SaveGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2475,29 +2516,30 @@ CompilerIf #PB_Compiler_IsMainFile
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
     LoadFont(2, "Arial", 8)
     
-    TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
+    TextGadget(#Text_1, 530, 10, 60, 15, "Movements")
     ;ButtonGadget(#Gdt_RotateLeft,  550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
     ;ButtonGadget(#Gdt_RotateRight, 610, 070, 30, 30, "RRot")  : SetGadgetFont(#Gdt_RotateRight, FontID(2)) 
-    ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
-    ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
-    ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
-    ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
-    TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
-    ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
-    ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
-    TextGadget(#Text_3, 530, 230, 50, 15, "Latitude ")
-    StringGadget(#StringLatitude, 580, 230, 90, 20, "")
-    TextGadget(#Text_4, 530, 250, 50, 15, "Longitude ")
-    StringGadget(#StringLongitude, 580, 250, 90, 20, "")
-    ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
-    ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
-    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_AddHereMap, 530, 370, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 400, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 430, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 460, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 495, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 510, 150, 20, "")
+    ButtonGadget(#Gdt_Left,  550, 60, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
+    ButtonGadget(#Gdt_Right, 610, 60, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
+    ButtonGadget(#Gdt_Up,    580, 030, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
+    ButtonGadget(#Gdt_Down,  580, 90, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
+    TextGadget(#Text_2, 530, 120, 60, 15, "Zoom")
+    ButtonGadget(#Button_4, 550, 140, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
+    ButtonGadget(#Button_5, 600, 140, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
+    TextGadget(#Text_3, 530, 190, 50, 15, "Latitude ")
+    StringGadget(#StringLatitude, 580, 190, 90, 20, "")
+    TextGadget(#Text_4, 530, 210, 50, 15, "Longitude ")
+    StringGadget(#StringLongitude, 580, 210, 90, 20, "")
+    ButtonGadget(#Gdt_AddMarker, 530, 240, 150, 30, "Add Marker")
+    ButtonGadget(#Gdt_LoadGpx, 530, 270, 150, 30, "Load GPX")    
+    ButtonGadget(#Gdt_SaveGpx, 530, 300, 150, 30, "Save GPX")    
+    ButtonGadget(#Gdt_AddOpenseaMap, 530, 330, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_AddHereMap, 530, 360, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 390, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 420, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 450, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 485, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 500, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2558,7 +2600,17 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Gdt_LoadGpx
               *Track = PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
               PBMap::SetTrackColour(*Track, RGBA(Random(255), Random(255), Random(255), 128))
-            Case #StringLatitude, #StringLongitude
+            Case #Gdt_SaveGpx
+              If *Track
+                If PBMap::SaveGpxFile(SaveFileRequester("Choose a filename", "mytrack.gpx", "Gpx|*.gpx", 0), *Track)
+                  MessageRequester("PBMap", "Saving OK !", #PB_MessageRequester_Ok) 
+                Else
+                  MessageRequester("PBMap", "Problem while saving.", #PB_MessageRequester_Ok)                 
+                EndIf  
+              Else
+                  MessageRequester("PBMap", "No track to save.", #PB_MessageRequester_Ok) 
+              EndIf
+              Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_Focus
                   AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventLonLatStringEnter)
@@ -2640,8 +2692,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2492
-; FirstLine = 2475
+; CursorPosition = 1503
+; FirstLine = 1488
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
