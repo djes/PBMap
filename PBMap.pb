@@ -53,6 +53,7 @@ DeclareModule PBMap
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
   Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+  Declare.i AddGeoServerLayer(LayerName.s, Order.i, ServerLayerName.s, ServerURL.s = "http://localhost:8080/", path.s = "geowebcache/service/gmaps", format.s = "image/png")
   Declare IsLayer(Name.s)
   Declare DeleteLayer(Name.s)
   Declare EnableLayer(Name.s)
@@ -216,20 +217,23 @@ Module PBMap
     Order.i                                        ; Layer nb
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
+    path.s
     LayerType.i                                    ; OSM : 0 ; Here : 1
     Enabled.i
     Alpha.d                                        ; 1 : opaque ; 0 : transparent
+    format.s
     ;> HERE specific params
     APP_ID.s
     APP_CODE.s
-    path.s
     ressource.s
     param.s 
     id.s 
     scheme.s
-    format.s
     lg.s
     lg2.s
+    ;<
+    ;> GeoServer specific params
+    ServerLayerName.s
     ;<
   EndStructure
   
@@ -935,7 +939,7 @@ Module PBMap
   Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
     Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
     If *Ptr
-      With *Ptr;PBMap\Layers()
+      With *Ptr ;PBMap\Layers()
         \ServerURL = ServerURL
         \path = path
         \ressource = ressource
@@ -956,6 +960,26 @@ Module PBMap
         \param = param
         \scheme = scheme
       EndWith     
+      PBMap\Redraw = #True
+      ProcedureReturn *Ptr
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
+  ;GeoServer / geowebcache - google maps service
+  ;template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
+  Procedure.i AddGeoServerLayer(LayerName.s, Order.i, ServerLayerName.s, ServerURL.s = "http://localhost:8080/", path.s = "geowebcache/service/gmaps", format.s = "image/png")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
+    If *Ptr
+      With *Ptr ;PBMap\Layers()    
+      \ServerURL = ServerURL
+      \path = path
+      \LayerType = 2 ; GeoServer
+      \format = format
+      \Enabled = #True
+      \ServerLayerName = ServerLayerName
+      EndWith
       PBMap\Redraw = #True
       ProcedureReturn *Ptr
     Else
@@ -1215,19 +1239,27 @@ Module PBMap
           EndIf
           With PBMap\Layers()
             Select \LayerType
-              Case 0 ;OSM
+              ;---- OSM tiles
+              Case 0 
                 URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + ".png" 
-              Case 1 ;Here
+              ;---- Here tiles
+              Case 1 
                 HereLoadBalancing = 1 + ((tiley + tilex) % 4)
-                ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
+                ; {Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
                 URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code=" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
                 If \param <> ""
                   URL + "&" + \param
                 EndIf
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + "." + \format 
+              ;---- GeoServer / geowebcache - google maps service tiles
+              Case 2 
+                ; template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
+                URL = \ServerURL + \path + "?layers=" + \ServerLayerName + "&zoom={" + Str(PBMap\Zoom) + "}&x={" + Str(tilex) + "}&y={" + Str(tiley) + "}&format=" + \format
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + ".png" 
             EndSelect          
           EndWith
           *timg = GetTile(key, URL, CacheFile)
@@ -2430,6 +2462,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
     #Gdt_AddHereMap
+    #Gdt_AddGeoServerMap
     #Gdt_Degrees
     #Gdt_EditMode 
     #Gdt_ClearDiskCache
@@ -2501,6 +2534,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Gdt_SaveGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddGeoServerMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2535,11 +2569,12 @@ CompilerIf #PB_Compiler_IsMainFile
     ButtonGadget(#Gdt_SaveGpx, 530, 300, 150, 30, "Save GPX")    
     ButtonGadget(#Gdt_AddOpenseaMap, 530, 330, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
     ButtonGadget(#Gdt_AddHereMap, 530, 360, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 390, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 420, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 450, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 485, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 500, 150, 20, "")
+    ButtonGadget(#Gdt_AddGeoServerMap, 530, 390, 150, 30, "Show/Hide Geoserver layer", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 420, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 450, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 480, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 515, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 530, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2643,6 +2678,16 @@ CompilerIf #PB_Compiler_IsMainFile
                 SetGadgetState(#Gdt_AddHereMap, 1)
               EndIf
               PBMap::Refresh()
+            Case #Gdt_AddGeoServerMap
+              If PBMap::IsLayer("GeoServer")
+                PBMap::DeleteLayer("GeoServer")
+                SetGadgetState(#Gdt_AddGeoServerMap, 0)
+              Else
+                PBMap::AddGeoServerLayer("GeoServer", 3, "demolayer", "http://localhost:8080/", "geowebcache/service/gmaps", "image/png") ; Add a geoserver overlay map on layer nb 3
+                PBMap::SetLayerAlpha("GeoServer", 0.75)
+                SetGadgetState(#Gdt_AddGeoServerMap, 1)
+              EndIf
+              PBMap::Refresh()
             Case #Gdt_Degrees
               Degrees = 1 - Degrees
               PBMap::SetOption("ShowDegrees", Str(Degrees))
@@ -2692,8 +2737,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1503
-; FirstLine = 1488
+; CursorPosition = 2691
+; FirstLine = 2684
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
