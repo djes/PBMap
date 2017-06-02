@@ -53,10 +53,13 @@ DeclareModule PBMap
   Declare SaveOptions(PreferencesFile.s = "PBMap.prefs")
   Declare.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
   Declare.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
+  Declare.i AddGeoServerLayer(LayerName.s, Order.i, ServerLayerName.s, ServerURL.s = "http://localhost:8080/", path.s = "geowebcache/service/gmaps", format.s = "image/png")
   Declare IsLayer(Name.s)
   Declare DeleteLayer(Name.s)
   Declare EnableLayer(Name.s)
   Declare DisableLayer(Name.s)
+  Declare SetLayerAlpha(Name.s, Alpha.d)
+  Declare.d GetLayerAlpha(Name.s)
   Declare BindMapGadget(Gadget.i)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)
@@ -75,8 +78,9 @@ DeclareModule PBMap
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
   Declare SetZoomToTracks(*Tracks)
-  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition= 0) ;Send back the position *ptr.GeographicCoordinates
-  Declare.i LoadGpxFile(file.s)                                    ;  
+  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition = 0) ;Send back the position *ptr.GeographicCoordinates
+  Declare.i LoadGpxFile(FileName.s)                                    ;  
+  Declare.i SaveGpxFile(FileName.s, *Track)                            ;  
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
@@ -87,6 +91,7 @@ DeclareModule PBMap
   Declare DeleteSelectedMarkers()
   Declare Drawing()
   Declare Quit()
+  Declare FatalError(msg.s)
   Declare Error(msg.s)
   Declare Refresh()
   Declare.i ClearDiskCache()  
@@ -212,19 +217,23 @@ Module PBMap
     Order.i                                        ; Layer nb
     Name.s
     ServerURL.s                                    ; Web URL ex: http://tile.openstreetmap.org/  
+    path.s
     LayerType.i                                    ; OSM : 0 ; Here : 1
     Enabled.i
+    Alpha.d                                        ; 1 : opaque ; 0 : transparent
+    format.s
     ;> HERE specific params
     APP_ID.s
     APP_CODE.s
-    path.s
     ressource.s
     param.s 
     id.s 
     scheme.s
-    format.s
     lg.s
     lg2.s
+    ;<
+    ;> GeoServer specific params
+    ServerLayerName.s
     ;<
   EndStructure
   
@@ -293,7 +302,7 @@ Module PBMap
   ;-Show debug infos 
   Global MyDebugLevel = 3
   
-  Global PBMap.PBMap, Null.i
+  Global PBMap.PBMap, Null.i, NullPtrMem.i, *NullPtr = @NullPtrMem
   Global slash.s
   
   CompilerSelect #PB_Compiler_OS
@@ -318,11 +327,22 @@ Module PBMap
     (Bool((a) >= (b)) * (a) + Bool((b) > (a)) * (b))
   EndMacro
   
+  ;-Error management
+  
   ;Shows an error msg and terminates the program
-  Procedure Error(msg.s)
-    MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+  Procedure FatalError(msg.s)
+    If PBMap\Options\Warning
+      MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+    EndIf
     End
   EndProcedure
+  
+  ;Shows an error msg
+  Procedure Error(msg.s)
+    If PBMap\Options\Warning
+      MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
+    EndIf
+  EndProcedure  
   
   ;Send debug infos to stdout (allowing mixed debug infos with curl or other libs)
   Procedure MyDebug(msg.s, DbgLevel = 0)
@@ -332,7 +352,9 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;(c) ts-soft http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
+  ;Creates a full tree
+  ;by Thomas (ts-soft) Schulz  
+  ;http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
   CompilerSelect #PB_Compiler_OS
     CompilerCase #PB_OS_Windows
       #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
@@ -354,9 +376,7 @@ Module PBMap
         SetFileAttributes(Name, Attribs)
       EndMacro
   CompilerEndSelect
-  
-  ;Creates a full tree
-  ;by Thomas (ts-soft) Schulz
+
   Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
     Protected i, c, tmp.s
     If Right(DirectoryName, 1) = slash
@@ -880,7 +900,7 @@ Module PBMap
   ;-*** Layers
   
   ;Add a layer to a list (to get things ordered) and to a map (to access things easily)
-  Procedure.i AddLayer(Name.s, Order.i)
+  Procedure.i AddLayer(Name.s, Order.i, Alpha.d)
     Protected *Ptr = 0
     *Ptr = AddMapElement(PBMap\Layers(), Name)
     If *Ptr
@@ -888,6 +908,8 @@ Module PBMap
       If PBMap\Layers()
         PBMap\LayersList()\Name  = Name
         PBMap\LayersList()\Order = Order
+        PBMap\LayersList()\Alpha = Alpha
+        SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order), TypeOf(Layer\Order))
         ProcedureReturn PBMap\Layers()
       Else
         *Ptr = 0
@@ -898,12 +920,12 @@ Module PBMap
   
   ; "OpenStreetMap" layer
   Procedure.i AddOSMServerLayer(LayerName.s, Order.i, ServerURL.s = "http://tile.openstreetmap.org/")
-    Protected *Ptr.Layer = AddLayer(LayerName, Order)
+    Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
     If *Ptr
       *Ptr\ServerURL = ServerURL
       *Ptr\LayerType = 0 ; OSM
       *Ptr\Enabled = #True
-      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      PBMap\Redraw = #True
       ProcedureReturn *Ptr
     Else
       ProcedureReturn #False
@@ -915,9 +937,9 @@ Module PBMap
   ;you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
   ;use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
   Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
-    Protected *Ptr.Layer = AddLayer(LayerName, Order)
+    Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
     If *Ptr
-      With *Ptr;PBMap\Layers()
+      With *Ptr ;PBMap\Layers()
         \ServerURL = ServerURL
         \path = path
         \ressource = ressource
@@ -938,7 +960,27 @@ Module PBMap
         \param = param
         \scheme = scheme
       EndWith     
-      SortStructuredList(PBMap\LayersList(), #PB_Sort_Ascending, OffsetOf(Layer\Order),TypeOf(Layer\Order))
+      PBMap\Redraw = #True
+      ProcedureReturn *Ptr
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure
+  
+  ;GeoServer / geowebcache - google maps service
+  ;template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
+  Procedure.i AddGeoServerLayer(LayerName.s, Order.i, ServerLayerName.s, ServerURL.s = "http://localhost:8080/", path.s = "geowebcache/service/gmaps", format.s = "image/png")
+    Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
+    If *Ptr
+      With *Ptr ;PBMap\Layers()    
+      \ServerURL = ServerURL
+      \path = path
+      \LayerType = 2 ; GeoServer
+      \format = format
+      \Enabled = #True
+      \ServerLayerName = ServerLayerName
+      EndWith
+      PBMap\Redraw = #True
       ProcedureReturn *Ptr
     Else
       ProcedureReturn #False
@@ -957,21 +999,33 @@ Module PBMap
     DeleteElement(PBMap\LayersList())
     ;Free the map element
     DeleteMapElement(PBMap\Layers())
+    PBMap\Redraw = #True
   EndProcedure
   
   Procedure EnableLayer(Name.s)
     PBMap\Layers(Name)\Enabled = #True
+    PBMap\Redraw = #True
   EndProcedure
   
   Procedure DisableLayer(Name.s)
     PBMap\Layers(Name)\Enabled = #False
+    PBMap\Redraw = #True
+  EndProcedure
+  
+  Procedure SetLayerAlpha(Name.s, Alpha.d)
+    PBMap\Layers(Name)\Alpha = Alpha
+    PBMap\Redraw = #True
+  EndProcedure
+  
+  Procedure.d GetLayerAlpha(Name.s)
+    ProcedureReturn PBMap\Layers(Name)\Alpha
   EndProcedure
   
   ;-*** These are threaded
   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i, LifeTime.i, MaxLifeTime.i = PBMap\Options\TileLifetime
-    If FileSize(CacheFile) <> -1
+    If FileSize(CacheFile) > 0
       ;Manage tile file lifetime
       If MaxLifeTime <> -1
         LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ;There's a bug with #PB_Date_Created
@@ -1000,9 +1054,8 @@ Module PBMap
   Procedure.i GetTileFromWeb(TileURL.s, CacheFile.s)
     Protected *Buffer
     Protected nImage.i = -1
-    Protected FileSize.i, timg
-    FileSize = ReceiveHTTPFile(TileURL, CacheFile)
-    If FileSize > 0
+    Protected timg
+    If ReceiveHTTPFile(TileURL, CacheFile)
       MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
       nImage = GetTileFromHDD(CacheFile)
     Else
@@ -1053,7 +1106,7 @@ Module PBMap
   ;-***
   
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
-    ; Try to find the tile in memory cache. If not found, add it, try To load it from the 
+    ; Try to find the tile in memory cache. If not found, add it, try to load it from the 
     ; HDD, or launch a loading thread, and try again on the next drawing loop.
     Protected img.i = -1
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
@@ -1183,42 +1236,50 @@ Module PBMap
               MyDebug(DirName + " successfully created", 4)
             EndIf
           EndIf
-          With PBMap\LayersList()
+          With PBMap\Layers()
             Select \LayerType
-              Case 0 ;OSM
+              ;---- OSM tiles
+              Case 0 
                 URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + ".png" 
-              Case 1 ;Here
+              ;---- Here tiles
+              Case 1 
                 HereLoadBalancing = 1 + ((tiley + tilex) % 4)
-                ;{Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
+                ; {Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
                 URL = "https://" + StrU(HereLoadBalancing, #PB_Byte) + "." + \ServerURL + \path + \ressource + "/" + \id + "/" + \scheme + "/" + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + "/256/" + \format + "?app_id=" + \APP_ID + "&app_code=" + \APP_CODE + "&lg=" + \lg + "&lg2=" + \lg2
                 If \param <> ""
                   URL + "&" + \param
                 EndIf
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + "." + \format 
+              ;---- GeoServer / geowebcache - google maps service tiles
+              Case 2 
+                ; template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
+                URL = \ServerURL + \path + "?layers=" + \ServerLayerName + "&zoom={" + Str(PBMap\Zoom) + "}&x={" + Str(tilex) + "}&y={" + Str(tiley) + "}&format=" + \format
+                ; Tile cache name based on y
+                CacheFile = DirName + slash + Str(tiley) + ".png" 
             EndSelect          
           EndWith
           *timg = GetTile(key, URL, CacheFile)
           If *timg\nImage <> -1  
             MovePathCursor(px, py)
             If *timg\Alpha <= 224
-              DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha)
+              DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha * PBMap\Layers()\Alpha)
               *timg\Alpha + 32
               PBMap\Redraw = #True
             Else
-              DrawVectorImage(ImageID(*timg\nImage), 255)
+              DrawVectorImage(ImageID(*timg\nImage), 255 * PBMap\Layers()\Alpha)
               *timg\Alpha = 256
             EndIf 
           Else 
             MovePathCursor(px, py)
-            DrawVectorImage(ImageID(PBMap\ImgLoading), 255)
+            DrawVectorImage(ImageID(PBMap\ImgLoading), 255 * PBMap\Layers()\Alpha)
           EndIf
         Else
           ;If PBMap\Layers()\Name = ""
           MovePathCursor(px, py)
-          DrawVectorImage(ImageID(PBMap\ImgNothing), 255)
+          DrawVectorImage(ImageID(PBMap\ImgNothing), 255 * PBMap\Layers()\Alpha)
           ;EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
@@ -1270,30 +1331,10 @@ Module PBMap
   EndProcedure
   
   Procedure DrawDegrees(*Drawing.DrawingParameters, alpha=192) 
-    Protected tx, ty, nx,ny,nx1,ny1,x,y,n,cx,dperpixel.d 
-    Protected pos1.PixelCoordinates,pos2.PixelCoordinates,Degrees1.GeographicCoordinates,degrees2.GeographicCoordinates 
-    Protected realx
-    
-    ;TODO to find why it doesn't work
+    Protected nx, ny, nx1, ny1, x, y
+    Protected pos1.PixelCoordinates, pos2.PixelCoordinates, Degrees1.GeographicCoordinates, degrees2.GeographicCoordinates 
     CopyStructure(*Drawing\Bounds\NorthWest, @Degrees1, GeographicCoordinates)
-    Debug "----"
-    Debug Degrees1\Longitude-1
     CopyStructure(*Drawing\Bounds\SouthEast, @Degrees2, GeographicCoordinates)
-    ;tx = Int(*Drawing\TileCoordinates\x)
-    ;ty = Int(*Drawing\TileCoordinates\y)
-    tx = *Drawing\TileCoordinates\x
-    ty = *Drawing\TileCoordinates\y
-    nx = *Drawing\RadiusX / PBMap\TileSize ;How many tiles around the point
-    ny = *Drawing\RadiusY / PBMap\TileSize
-    *Drawing\Bounds\TopLeft\x = tx-nx-1
-    *Drawing\Bounds\TopLeft\y = ty-ny-1
-    *Drawing\Bounds\BottomRight\x = tx+nx+2 
-    *Drawing\Bounds\BottomRight\y = ty+ny+2 
-    TileXY2LatLon(*Drawing\Bounds\TopLeft, @Degrees1, PBMap\Zoom)
-    TileXY2LatLon(*Drawing\Bounds\BottomRight, @Degrees2, PBMap\Zoom)    
-    Debug Degrees1\Longitude
-    ;***
-    
     ;ensure we stay positive for the drawing
     nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
     ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
@@ -1480,18 +1521,18 @@ Module PBMap
     EndWith
   EndProcedure
   
-  Procedure.i LoadGpxFile(file.s)
-    If LoadXML(0, file.s)
+  Procedure.i LoadGpxFile(FileName.s)
+    If LoadXML(0, FileName.s)
       Protected Message.s
       If XMLStatus(0) <> #PB_XML_Success
         Message = "Error in the XML file:" + Chr(13)
         Message + "Message: " + XMLError(0) + Chr(13)
         Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
-        MessageRequester("Error", Message)
+        Error(Message)
       EndIf
       Protected *MainNode,*subNode,*child,child.l
-      *MainNode=MainXMLNode(0)
-      *MainNode=XMLNodeFromPath(*MainNode,"/gpx/trk/trkseg")
+      *MainNode = MainXMLNode(0)
+      *MainNode = XMLNodeFromPath(*MainNode, "/gpx/trk/trkseg")
       Protected *NewTrack.Tracks = AddElement(PBMap\TracksList())
       PBMap\TracksList()\StrokeWidth = PBMap\Options\StrokeWidthTrackDefault
       PBMap\TracksList()\Colour      = PBMap\Options\ColourTrackDefault
@@ -1502,9 +1543,9 @@ Module PBMap
           While NextXMLAttribute(*child)
             Select XMLAttributeName(*child)
               Case "lat"
-                *NewTrack\Track()\Latitude=ValD(XMLAttributeValue(*child))
+                *NewTrack\Track()\Latitude = ValD(XMLAttributeValue(*child))
               Case "lon"
-                *NewTrack\Track()\Longitude=ValD(XMLAttributeValue(*child))
+                *NewTrack\Track()\Longitude = ValD(XMLAttributeValue(*child))
             EndSelect
           Wend
         EndIf
@@ -1513,6 +1554,32 @@ Module PBMap
       ProcedureReturn *NewTrack  
     EndIf
   EndProcedure
+  
+  Procedure.i SaveGpxFile(FileName.s, *Track.Tracks)
+    Protected Message.s
+    If CreateXML(0)
+      Protected *MainNode, *subNode, *child
+      *MainNode = CreateXMLNode(RootXMLNode(0), "gpx")
+      *subNode = CreateXMLNode(*MainNode, "trk")
+      *subNode = CreateXMLNode(*subNode, "trkseg")
+      ForEach *Track\Track()
+        *child = CreateXMLNode(*subNode, "trkpt")
+        SetXMLAttribute(*child, "lat", StrD(*Track\Track()\Latitude))
+        SetXMLAttribute(*child, "lon", StrD(*Track\Track()\Longitude))
+      Next
+      SaveXML(0, FileName)
+      If XMLStatus(0) <> #PB_XML_Success
+        Message = "Error in the XML file:" + Chr(13)
+        Message + "Message: " + XMLError(0) + Chr(13)
+        Message + "Line: " + Str(XMLErrorLine(0)) + "   Character: " + Str(XMLErrorPosition(0))
+        Error(Message)
+        ProcedureReturn #False
+      EndIf
+      ProcedureReturn #True  
+    Else
+      ProcedureReturn #False
+    EndIf
+  EndProcedure  
   
   ;-*** Markers
   
@@ -1557,13 +1624,15 @@ Module PBMap
     If GetGadgetText(EventGadget()) <> *Marker\Identifier
       *Marker\Identifier = GetGadgetText(EventGadget())
     EndIf
-  EndProcedure  
+  EndProcedure
+  
   Procedure MarkerLegendChange()
     Protected *Marker.Marker = GetGadgetData(EventGadget())
     If GetGadgetText(EventGadget()) <> *Marker\Legend
       *Marker\Legend = GetGadgetText(EventGadget())
     EndIf
-  EndProcedure  
+  EndProcedure
+  
   Procedure MarkerEditCloseWindow()
     ForEach PBMap\Markers()
       If PBMap\Markers()\EditWindow = EventWindow()
@@ -1572,6 +1641,7 @@ Module PBMap
     Next
     CloseWindow(EventWindow())  
   EndProcedure
+  
   Procedure MarkerEdit(*Marker.Marker)
     If *Marker\EditWindow = 0 ;Check that this marker has no already opened window
       Protected WindowMarkerEdit = OpenWindow(#PB_Any, WindowX(PBMap\Window) + WindowWidth(PBMap\Window) / 2 - 150, WindowY(PBMap\Window)+ WindowHeight(PBMap\Window) / 2 + 50, 300, 100, "Marker Edit", #PB_Window_SystemMenu | #PB_Window_TitleBar)
@@ -1732,6 +1802,7 @@ Module PBMap
     FillVectorOutput()
     ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
+    ;Draws layers based on their number
     ForEach PBMap\LayersList()
       If PBMap\LayersList()\Enabled
         DrawTiles(*Drawing, PBMap\LayersList()\Name)
@@ -2238,7 +2309,7 @@ Module PBMap
                   If ListSize(\Track()) > 0
                     If \Visible
                       StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-                      ;Simulate tracks drawing
+                      ;Simulates track drawing
                       ForEach \Track()
                         LatLon2Pixel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                         If ListIndex(\Track()) = 0
@@ -2386,9 +2457,11 @@ CompilerIf #PB_Compiler_IsMainFile
     #StringLatitude
     #StringLongitude
     #Gdt_LoadGpx
+    #Gdt_SaveGpx
     #Gdt_AddMarker
     #Gdt_AddOpenseaMap
     #Gdt_AddHereMap
+    #Gdt_AddGeoServerMap
     #Gdt_Degrees
     #Gdt_EditMode 
     #Gdt_ClearDiskCache
@@ -2457,8 +2530,10 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_SaveGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Gdt_AddGeoServerMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2474,29 +2549,31 @@ CompilerIf #PB_Compiler_IsMainFile
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
     LoadFont(2, "Arial", 8)
     
-    TextGadget(#Text_1, 530, 50, 60, 15, "Movements")
+    TextGadget(#Text_1, 530, 10, 60, 15, "Movements")
     ;ButtonGadget(#Gdt_RotateLeft,  550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
     ;ButtonGadget(#Gdt_RotateRight, 610, 070, 30, 30, "RRot")  : SetGadgetFont(#Gdt_RotateRight, FontID(2)) 
-    ButtonGadget(#Gdt_Left,  550, 100, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
-    ButtonGadget(#Gdt_Right, 610, 100, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
-    ButtonGadget(#Gdt_Up,    580, 070, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
-    ButtonGadget(#Gdt_Down,  580, 130, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
-    TextGadget(#Text_2, 530, 160, 60, 15, "Zoom")
-    ButtonGadget(#Button_4, 550, 180, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
-    ButtonGadget(#Button_5, 600, 180, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
-    TextGadget(#Text_3, 530, 230, 50, 15, "Latitude ")
-    StringGadget(#StringLatitude, 580, 230, 90, 20, "")
-    TextGadget(#Text_4, 530, 250, 50, 15, "Longitude ")
-    StringGadget(#StringLongitude, 580, 250, 90, 20, "")
-    ButtonGadget(#Gdt_AddMarker, 530, 280, 150, 30, "Add Marker")
-    ButtonGadget(#Gdt_LoadGpx, 530, 310, 150, 30, "Load GPX")    
-    ButtonGadget(#Gdt_AddOpenseaMap, 530, 340, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_AddHereMap, 530, 370, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_Degrees, 530, 400, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_EditMode, 530, 430, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
-    ButtonGadget(#Gdt_ClearDiskCache, 530, 460, 150, 30, "Clear disk cache", #PB_Button_Toggle)
-    TextGadget(#TextGeoLocationQuery, 530, 495, 150, 15, "Enter an address")
-    StringGadget(#StringGeoLocationQuery, 530, 510, 150, 20, "")
+    ButtonGadget(#Gdt_Left,  550, 60, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
+    ButtonGadget(#Gdt_Right, 610, 60, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
+    ButtonGadget(#Gdt_Up,    580, 030, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
+    ButtonGadget(#Gdt_Down,  580, 90, 30, 30, Chr($25BC))  : SetGadgetFont(#Gdt_Down, FontID(0)) 
+    TextGadget(#Text_2, 530, 120, 60, 15, "Zoom")
+    ButtonGadget(#Button_4, 550, 140, 50, 30, " + ")        : SetGadgetFont(#Button_4, FontID(1)) 
+    ButtonGadget(#Button_5, 600, 140, 50, 30, " - ")        : SetGadgetFont(#Button_5, FontID(1)) 
+    TextGadget(#Text_3, 530, 190, 50, 15, "Latitude ")
+    StringGadget(#StringLatitude, 580, 190, 90, 20, "")
+    TextGadget(#Text_4, 530, 210, 50, 15, "Longitude ")
+    StringGadget(#StringLongitude, 580, 210, 90, 20, "")
+    ButtonGadget(#Gdt_AddMarker, 530, 240, 150, 30, "Add Marker")
+    ButtonGadget(#Gdt_LoadGpx, 530, 270, 150, 30, "Load GPX")    
+    ButtonGadget(#Gdt_SaveGpx, 530, 300, 150, 30, "Save GPX")    
+    ButtonGadget(#Gdt_AddOpenseaMap, 530, 330, 150, 30, "Show/Hide OpenSeaMap", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_AddHereMap, 530, 360, 150, 30, "Show/Hide HERE Aerial", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_AddGeoServerMap, 530, 390, 150, 30, "Show/Hide Geoserver layer", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_Degrees, 530, 420, 150, 30, "Show/Hide Degrees", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_EditMode, 530, 450, 150, 30, "Edit mode ON/OFF", #PB_Button_Toggle)
+    ButtonGadget(#Gdt_ClearDiskCache, 530, 480, 150, 30, "Clear disk cache", #PB_Button_Toggle)
+    TextGadget(#TextGeoLocationQuery, 530, 515, 150, 15, "Enter an address")
+    StringGadget(#StringGeoLocationQuery, 530, 530, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
     ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
@@ -2557,7 +2634,17 @@ CompilerIf #PB_Compiler_IsMainFile
             Case #Gdt_LoadGpx
               *Track = PBMap::LoadGpxFile(OpenFileRequester("Choose a file to load", "", "Gpx|*.gpx", 0))
               PBMap::SetTrackColour(*Track, RGBA(Random(255), Random(255), Random(255), 128))
-            Case #StringLatitude, #StringLongitude
+            Case #Gdt_SaveGpx
+              If *Track
+                If PBMap::SaveGpxFile(SaveFileRequester("Choose a filename", "mytrack.gpx", "Gpx|*.gpx", 0), *Track)
+                  MessageRequester("PBMap", "Saving OK !", #PB_MessageRequester_Ok) 
+                Else
+                  MessageRequester("PBMap", "Problem while saving.", #PB_MessageRequester_Ok)                 
+                EndIf  
+              Else
+                  MessageRequester("PBMap", "No track to save.", #PB_MessageRequester_Ok) 
+              EndIf
+              Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_Focus
                   AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventLonLatStringEnter)
@@ -2582,11 +2669,22 @@ CompilerIf #PB_Compiler_IsMainFile
               Else
                 If PBMap::GetOption("appid") <> "" And PBMap::GetOption("appcode") <> ""
                   PBMap::AddHereServerLayer("Here", 2) ; Add a "HERE" overlay map on layer nb 2
+                  PBMap::SetLayerAlpha("Here", 0.75)
                 Else
                   MessageRequester("Info", "Don't forget to register on HERE and change the following line or edit options file")
                   PBMap::AddHereServerLayer("Here", 2, "my_id", "my_code") ; Add a here overlay map on layer nb 2
                 EndIf
                 SetGadgetState(#Gdt_AddHereMap, 1)
+              EndIf
+              PBMap::Refresh()
+            Case #Gdt_AddGeoServerMap
+              If PBMap::IsLayer("GeoServer")
+                PBMap::DeleteLayer("GeoServer")
+                SetGadgetState(#Gdt_AddGeoServerMap, 0)
+              Else
+                PBMap::AddGeoServerLayer("GeoServer", 3, "demolayer", "http://localhost:8080/", "geowebcache/service/gmaps", "image/png") ; Add a geoserver overlay map on layer nb 3
+                PBMap::SetLayerAlpha("GeoServer", 0.75)
+                SetGadgetState(#Gdt_AddGeoServerMap, 1)
               EndIf
               PBMap::Refresh()
             Case #Gdt_Degrees
@@ -2638,8 +2736,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2518
-; FirstLine = 2487
+; CursorPosition = 1031
+; FirstLine = 1020
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
