@@ -1025,7 +1025,7 @@ Module PBMap
   
   Procedure.i GetTileFromHDD(CacheFile.s)
     Protected nImage.i, LifeTime.i, MaxLifeTime.i = PBMap\Options\TileLifetime
-    If FileSize(CacheFile) > 0
+    If FileSize(CacheFile) <> -1
       ;Manage tile file lifetime
       If MaxLifeTime <> -1
         LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ;There's a bug with #PB_Date_Created
@@ -1054,8 +1054,9 @@ Module PBMap
   Procedure.i GetTileFromWeb(TileURL.s, CacheFile.s)
     Protected *Buffer
     Protected nImage.i = -1
-    Protected timg
-    If ReceiveHTTPFile(TileURL, CacheFile)
+    Protected FileSize.i, timg
+    FileSize = ReceiveHTTPFile(TileURL, CacheFile)
+    If FileSize > 0
       MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
       nImage = GetTileFromHDD(CacheFile)
     Else
@@ -2736,8 +2737,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1031
-; FirstLine = 1020
+; CursorPosition = 2691
+; FirstLine = 2684
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
