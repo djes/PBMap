@@ -1246,10 +1246,7 @@ Module PBMap
       If PBMap\ThreadsNB < PBMap\Options\MaxThreads      
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
-          With *NewTile
-            *timg\Tile = *NewTile ; There's now a loading thread
-            *timg\Alpha = 0
-            ; *timg\nImage = -1    
+          With *NewTile 
             ; New tile parameters
             \key = key
             \URL = URL
@@ -1258,6 +1255,9 @@ Module PBMap
             \Time = ElapsedMilliseconds()
             \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
             If \GetImageThread
+              *timg\Tile = *NewTile ; There's now a loading thread
+              *timg\Alpha = 0
+              ; *timg\nImage = 0   
               MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
               PBMap\ThreadsNB + 1
             Else
@@ -2837,8 +2837,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1241
-; FirstLine = 1233
+; CursorPosition = 1259
+; FirstLine = 1229
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
