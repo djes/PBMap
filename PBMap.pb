@@ -1272,7 +1272,7 @@ Module PBMap
         MyDebug(" Error, maximum threads nb reached", 3)
       EndIf
     EndIf
-    ProcedureReturn *timg 
+    ProcedureReturn 0 
   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
@@ -2837,8 +2837,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1162
-; FirstLine = 1143
+; CursorPosition = 1241
+; FirstLine = 1233
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
