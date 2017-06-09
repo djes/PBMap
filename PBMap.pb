@@ -124,7 +124,7 @@ Module PBMap
     URL.s
     CacheFile.s
     GetImageThread.i
-    RetryNb.i
+    Download.i
   EndStructure
   
   Structure BoundingBox 
@@ -288,6 +288,7 @@ Module PBMap
     Redraw.i
     Dragging.i
     Dirty.i                                        ; To signal that drawing need a refresh
+    MemoryCacheManagement.i                        ; To pause web loading threads
     
     List TracksList.Tracks()                       ; To display a GPX track
     List Markers.Marker()                          ; To diplay marker
@@ -881,7 +882,7 @@ Module PBMap
       PreferenceGroup("OPTIONS")   
       \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
       \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
-      \MaxThreads         = ReadPreferenceInteger("MaxThreads", 40)
+      \MaxThreads         = ReadPreferenceInteger("MaxThreads", 10)
       \TileLifetime       = ReadPreferenceInteger("TileLifetime", 1209600) ;about 2 weeks ; -1 = unlimited
       \Verbose            = ReadPreferenceInteger("Verbose", #False)
       \Warning            = ReadPreferenceInteger("Warning", #False)
@@ -900,7 +901,7 @@ Module PBMap
       \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
       \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
       \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
-      \TimerInterval      = 20
+      \TimerInterval      = 12
       ClosePreferences()         
     EndWith
     SetOptions()
@@ -1030,12 +1031,52 @@ Module PBMap
     ProcedureReturn PBMap\Layers(Name)\Alpha
   EndProcedure
   
+  Procedure MemoryCacheManagement()
+    ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
+    Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 5 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
+    Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
+    MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
+    If CacheSize > CacheLimit    
+      PBMap\MemoryCacheManagement = #True
+      MyDebug(" Cache full. Trying cache cleaning", 5)
+      ResetList(PBMap\MemCache\ImagesTimeStack())
+      ; Try to free half the cache memory (one pass)
+      While NextElement(PBMap\MemCache\ImagesTimeStack()) And CacheSize > (CacheLimit / 2) ; /2 = half
+        Protected CacheMapKey.s = PBMap\MemCache\ImagesTimeStack()\MapKey
+        Protected Image = PBMap\MemCache\Images(CacheMapKey)\nImage
+        If PBMap\MemCache\Images(CacheMapKey)\Tile = 0 ; Check if a loading thread is not already running
+          MyDebug("  Delete " + CacheMapKey, 5)
+          If IsImage(Image)                            ; Check if the image is valid
+            FreeImage(Image)
+            MyDebug("   and free image nb " + Str(Image), 5)
+          EndIf
+          DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
+          DeleteElement(PBMap\MemCache\ImagesTimeStack())
+        Else
+          ; If the thread is running, try to abort the download
+          If PBMap\MemCache\Images(CacheMapKey)\Tile\Download
+            AbortHTTP(PBMap\MemCache\Images(CacheMapKey)\Tile\Download)
+          EndIf
+        EndIf
+        CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
+      Wend
+      PBMap\MemoryCacheManagement = #False
+      MyDebug("  New cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)      
+      If CacheSize > CacheLimit
+        MyDebug("  Cache cleaning unsuccessfull, can't add new tiles.", 5)
+        ProcedureReturn 0
+      EndIf
+    EndIf
+  EndProcedure
+  
   ;-*** These are threaded
   
+  Threaded nImage.i, LifeTime.i, MaxLifeTime.i
+  
   Procedure.i GetTileFromHDD(CacheFile.s)
-    Protected nImage.i, LifeTime.i, MaxLifeTime.i = PBMap\Options\TileLifetime
+    MaxLifeTime.i = PBMap\Options\TileLifetime
     If FileSize(CacheFile) > 0 ;<> -1
-      ;Manage tile file lifetime
+      ; Manage tile file lifetime
       If MaxLifeTime <> -1
         LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ;There's a bug with #PB_Date_Created
         If LifeTime > MaxLifeTime
@@ -1063,83 +1104,66 @@ Module PBMap
     ProcedureReturn 0
   EndProcedure
   
-;   Procedure.i GetTileFromWeb(TileURL.s, CacheFile.s)
-;     ;Debug TileURL
-;     If ReceiveHTTPFile(TileURL, CacheFile, #PB_HTTP_Asynchronous)
-;       MyDebug(" Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-;     ;  Debug TileURL + " OK"
-;       ProcedureReturn GetTileFromHDD(CacheFile)
-;     Else
-;       MyDebug(" Problem receving from web " + TileURL + " as CacheFile " + CacheFile, 3)
-;     ;  Debug TileURL + " NOT OK"
-;       ProcedureReturn -1
-;     EndIf
-    ; **** (OLD) IMPORTANT NOTICE (please not remove)
-    ; I'm (djes) now using Curl (actually, just normal pb) only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
-    ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
-    ; More than that, the original Purebasic Receive library is still not Proxy enabled.    
-    ;Protected *Buffer
-    ;Protected nImage.i = -1
-    ;Protected timg
-    ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-    ;       If *Buffer
-    ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-    ;         If IsImage(nImage)
-    ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
-    ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-    ;           Else
-    ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
-    ;           EndIf
-    ;           FreeMemory(*Buffer)
-    ;         Else
-    ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
-    ;           nImage = -1
-    ;         EndIf
-    ;       Else
-    ;         MyDebug(" Problem loading from web " + TileURL, 3)
-    ;       EndIf
-    ; ****
-;   EndProcedure
+  ; **** OLD IMPORTANT NOTICE (please not remove)
+  ; This original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
+  ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
+  ;Protected *Buffer
+  ;Protected nImage.i = -1
+  ;Protected timg
+  ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
+  ;       If *Buffer
+  ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
+  ;         If IsImage(nImage)
+  ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
+  ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+  ;           Else
+  ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
+  ;           EndIf
+  ;           FreeMemory(*Buffer)
+  ;         Else
+  ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
+  ;           nImage = -1
+  ;         EndIf
+  ;       Else
+  ;         MyDebug(" Problem loading from web " + TileURL, 3)
+  ;       EndIf
+  ; ****
+  
+  Threaded Progress = 0, Size = 0
   
   Procedure GetImageThread(*Tile.Tile)
-    Protected Download, Progress, Size
-    MyDebug("Thread starting for image " + *Tile\CacheFile + "(" + *Tile\key + ")", 3)
-    Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
-    If Download
+    MyDebug("Thread starting for image " + *Tile\CacheFile + "(" + *Tile\key + ")", 5)
+    *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
+    If *Tile\Download
       Repeat
-        Progress = HTTPProgress(Download)
-        Select Progress
-          Case #PB_Http_Success
-            Size = FinishHTTP(Download)
-            MyDebug(" Thread for image " + *Tile\CacheFile + " finished. Size : " + Str(Size), 3)
-            PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
-            ProcedureReturn
-          Case #PB_Http_Failed
-            MyDebug(" Thread for image " + *Tile\CacheFile + " failed.", 3)
-            PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
-            ProcedureReturn
-          Case #PB_Http_Aborted
-            MyDebug(" Thread for image " + *Tile\CacheFile + " aborted.", 3)
-            PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
-            ProcedureReturn
-          Default
-            MyDebug(" Thread for image " + *Tile\CacheFile + " downloading " + Str(Progress) + " bytes", 3)
-        EndSelect
+        If PBMap\MemoryCacheManagement = #False ; Wait until cache cleaning is done
+          Progress = HTTPProgress(*Tile\Download)
+          Select Progress
+            Case #PB_Http_Success
+              Size = FinishHTTP(*Tile\Download)
+              MyDebug(" Thread for image " + *Tile\CacheFile + " finished. Size : " + Str(Size), 5)
+              PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
+              *Tile\Download = 0
+              ProcedureReturn #True
+            Case #PB_Http_Failed
+              FinishHTTP(*Tile\Download)
+              MyDebug(" Thread for image " + *Tile\CacheFile + " failed.", 5)
+              PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
+              *Tile\Download = 0
+              ProcedureReturn #False
+            Case #PB_Http_Aborted
+              FinishHTTP(*Tile\Download)
+              MyDebug(" Thread for image " + *Tile\CacheFile + " aborted.", 5)
+              PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
+              *Tile\Download = 0
+              ProcedureReturn #False
+            Default
+              MyDebug(" Thread for image " + *Tile\CacheFile + " downloading " + Str(Progress) + " bytes", 5)
+          EndSelect
+        EndIf
         Delay(500) ; Frees CPU
       ForEver
     EndIf
-;     Repeat
-;       *Tile\nImage = GetTileFromWeb(*Tile\URL, *Tile\CacheFile)
-;       If *Tile\nImage <> -1
-;         *Tile\RetryNb = 0
-;       Else 
-;         Delay(2000)
-;         *Tile\RetryNb - 1
-;       EndIf
-;     Until *Tile\RetryNb <= 0
-;     MyDebug(" Thread for image key " + *Tile\key + " finished", 3)
-;     *Tile\RetryNb = -2 ;End of the thread    
-;     PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
   EndProcedure
   ;-***
   
@@ -1148,9 +1172,9 @@ Module PBMap
     ; HDD, or launch a web loading thread, and try again on the next drawing loop.
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
-      MyDebug("Key : " + key + " found in memory cache", 3)
+      MyDebug("Key : " + key + " found in memory cache", 5)
       If *timg\nImage
-        MyDebug(" as image " + *timg\nImage, 3)
+        MyDebug(" as image " + *timg\nImage, 5)
         ;*** Cache management
         ; Retrieves the image in the time stack, push it to the end (to say it's the lastly used)
         ChangeCurrentElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPtr)
@@ -1158,36 +1182,10 @@ Module PBMap
         ;*timg\TimeStackPtr = LastElement(PBMap\MemCache\ImagesTimeStack())
         ;***
         ProcedureReturn *timg
+      Else
+        MyDebug(" but not the image.", 5)
       EndIf
     Else
-      ;*** Cache management
-      ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
-       Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 5 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
-       Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
-       MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
-       If CacheSize > CacheLimit
-         MyDebug(" Cache full. Trying cache cleaning", 5)
-         ResetList(PBMap\MemCache\ImagesTimeStack())
-         ; Try to free half the cache memory (one pass)
-         While NextElement(PBMap\MemCache\ImagesTimeStack()) And CacheSize > (CacheLimit / 2) ; /2 = half
-           Protected CacheMapKey.s = PBMap\MemCache\ImagesTimeStack()\MapKey
-           Protected Image = PBMap\MemCache\Images(CacheMapKey)\nImage
-           If PBMap\MemCache\Images(CacheMapKey)\Tile = 0 ; Check if a loading thread is not already running
-             If IsImage(Image) ; Check if the image is valid
-               FreeImage(Image)
-             EndIf
-             DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
-             DeleteElement(PBMap\MemCache\ImagesTimeStack())
-             MyDebug("  Delete " + CacheMapKey + " as image nb " + Str(Image), 5)
-           EndIf
-           CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
-         Wend
-         MyDebug("  New cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
-         If CacheSize > CacheLimit
-           MyDebug("  Cache cleaning unsuccessfull, can't add new tiles.", 5)
-           ProcedureReturn 0
-         EndIf
-      EndIf
       ; Creates a new cache element 
       *timg = AddMapElement(PBMap\MemCache\Images(), key)
       If *timg = 0
@@ -1228,7 +1226,6 @@ Module PBMap
             \key = key
             \URL = URL
             \CacheFile = CacheFile
-            \RetryNb = 5
             \nImage = 0       
             \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
             If \GetImageThread
@@ -2424,6 +2421,7 @@ Module PBMap
   ; Redraws at regular intervals
   Procedure TimerEvents()
     If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
+      MemoryCacheManagement()
       Drawing()
     EndIf    
   EndProcedure 
@@ -2451,13 +2449,13 @@ Module PBMap
   
   Procedure Quit()
     PBMap\Drawing\End = #True
+    PBMap\MemoryCacheManagement = #True ; Tells web loading threads to pause
     ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
       ForEach PBMap\MemCache\Images()
         If PBMap\MemCache\Images()\Tile <> 0         
           If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            PBMap\MemCache\Images()\Tile\RetryNb = 0
             If ElapsedMilliseconds() - TimeCounter > 2000
               ;Should not occur
               KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
@@ -2657,8 +2655,8 @@ CompilerIf #PB_Compiler_IsMainFile
     ;Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1") : Degrees = 0
-    PBMap::SetOption("ShowDebugInfos", "0")
-    PBMap::SetOption("Verbose", "0")
+    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetOption("Verbose", "1")
     PBMap::SetOption("ShowScale", "1")    
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
@@ -2801,8 +2799,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 871
-; FirstLine = 858
+; CursorPosition = 893
+; FirstLine = 894
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
