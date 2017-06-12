@@ -126,6 +126,7 @@ Module PBMap
     GetImageThread.i
     Download.i
     Time.i
+    Size.i
   EndStructure
   
   Structure BoundingBox 
@@ -309,7 +310,7 @@ Module PBMap
   ;-*** Global variables
   
   ;-Show debug infos 
-  Global MyDebugLevel = 5
+  Global MyDebugLevel = 3
   
   Global PBMap.PBMap, Null.i, NullPtrMem.i, *NullPtr = @NullPtrMem
   Global slash.s
@@ -1046,7 +1047,7 @@ Module PBMap
   
   Procedure MemoryCacheManagement()
     ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
-    Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 5 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
+    Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
     Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
     MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
     If CacheSize > CacheLimit    
@@ -1056,16 +1057,21 @@ Module PBMap
       ; Try to free half the cache memory (one pass)
       While NextElement(PBMap\MemCache\ImagesTimeStack()) And CacheSize > (CacheLimit / 2) ; /2 = half
         Protected CacheMapKey.s = PBMap\MemCache\ImagesTimeStack()\MapKey
-        Protected Image = PBMap\MemCache\Images(CacheMapKey)\nImage
-        If PBMap\MemCache\Images(CacheMapKey)\Tile = 0 ; Check if a loading thread is not already running
+        ;Protected Image = PBMap\MemCache\Images(CacheMapKey)\nImage
+        ; Is the loading over
+        If PBMap\MemCache\Images(CacheMapKey)\Tile = -1 
           MyDebug("  Delete " + CacheMapKey, 5)
-          If IsImage(Image)                            ; Check if the image is valid
-            FreeImage(Image)
-            MyDebug("   and free image nb " + Str(Image), 5)
+          If IsImage(PBMap\MemCache\Images(CacheMapKey)\nImage)
+            FreeImage(PBMap\MemCache\Images(CacheMapKey)\nImage)
+            MyDebug("   and free image nb " + Str(PBMap\MemCache\Images(CacheMapKey)\nImage), 5)
           EndIf
           DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
-          DeleteElement(PBMap\MemCache\ImagesTimeStack())
-        Else
+          DeleteElement(PBMap\MemCache\ImagesTimeStack(), 1)
+        ElseIf PBMap\MemCache\Images(CacheMapKey)\Tile = 0 
+          MyDebug("  Delete " + CacheMapKey, 5)
+          DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
+          DeleteElement(PBMap\MemCache\ImagesTimeStack(), 1)
+        ElseIf PBMap\MemCache\Images(CacheMapKey)\Tile > 0
           ; If the thread is running, try to abort the download
           If PBMap\MemCache\Images(CacheMapKey)\Tile\Download
             AbortHTTP(PBMap\MemCache\Images(CacheMapKey)\Tile\Download)
@@ -1077,19 +1083,17 @@ Module PBMap
       MyDebug("  New cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)      
       If CacheSize > CacheLimit
         MyDebug("  Cache cleaning unsuccessfull, can't add new tiles.", 5)
-        ProcedureReturn 0
+        ProcedureReturn #False
       EndIf
     EndIf
+    ProcedureReturn #True
   EndProcedure
-  
-  ;-*** These are threaded
-  
-  Threaded nImage.i, LifeTime.i, MaxLifeTime.i
-  
+ 
   Procedure.i GetTileFromHDD(CacheFile.s)
+    Protected nImage.i, LifeTime.i, MaxLifeTime.i
     MaxLifeTime.i = PBMap\Options\TileLifetime
     If FileSize(CacheFile) > 0 ; <> -1
-                               ; Manage tile file lifetime
+      ; Manage tile file lifetime
       If MaxLifeTime <> -1
         LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ; There's a bug with #PB_Date_Created
         If LifeTime > MaxLifeTime
@@ -1114,7 +1118,7 @@ Module PBMap
     Else
       MyDebug(" Failed loading " + CacheFile + " -> Filesize = " + FileSize(CacheFile), 3)
     EndIf
-    ProcedureReturn 0
+    ProcedureReturn #False
   EndProcedure
   
   ; **** OLD IMPORTANT NOTICE (please not remove)
@@ -1142,6 +1146,8 @@ Module PBMap
   ; EndIf
   ; ****
   
+    ;-*** These are threaded
+  
   Threaded Progress = 0, Size = 0
   
   Procedure GetImageThread(*Tile.Tile)
@@ -1164,11 +1170,11 @@ Module PBMap
     *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
     If *Tile\Download
       Repeat
-        If PBMap\MemoryCacheManagement = #False ; Wait until cache cleaning is done
+        ;If PBMap\MemoryCacheManagement = #False ; Wait until cache cleaning is done
           Progress = HTTPProgress(*Tile\Download)
           Select Progress
             Case #PB_Http_Success
-              Size = FinishHTTP(*Tile\Download)
+              *Tile\Size = FinishHTTP(*Tile\Download) ; \Size signals that the download is OK
               MyDebug(" Thread for image " + *Tile\CacheFile + " finished. Size : " + Str(Size), 5)
               LockMutex(PBMap\DownloadSlotsMutex)
               PBMap\DownloadSlots - 1
@@ -1177,6 +1183,7 @@ Module PBMap
               ProcedureReturn #True
             Case #PB_Http_Failed
               FinishHTTP(*Tile\Download)
+              *Tile\Size = 0 ; \Size = 0 signals that the download has failed
               MyDebug(" Thread for image " + *Tile\CacheFile + " failed.", 5)
               LockMutex(PBMap\DownloadSlotsMutex)
               PBMap\DownloadSlots - 1
@@ -1185,6 +1192,7 @@ Module PBMap
               ProcedureReturn #False
             Case #PB_Http_Aborted
               FinishHTTP(*Tile\Download)
+              *Tile\Size = 0 ; \Size = 0 signals that the download has failed
               MyDebug(" Thread for image " + *Tile\CacheFile + " aborted.", 5)
               LockMutex(PBMap\DownloadSlotsMutex)
               PBMap\DownloadSlots - 1
@@ -1193,26 +1201,29 @@ Module PBMap
               ProcedureReturn #False
             Default
               MyDebug(" Thread for image " + *Tile\CacheFile + " downloading " + Str(Progress) + " bytes", 5)
-              If ElapsedMilliseconds() - *Tile\Time > 60000
-                MyDebug(" Thread for image " + *Tile\CacheFile + " canceled after 60 seconds.", 5)
+              If ElapsedMilliseconds() - *Tile\Time > 10000
+                MyDebug(" Thread for image " + *Tile\CacheFile + " canceled after 10 seconds.", 5)
                 AbortHTTP(*Tile\Download)
               EndIf
           EndSelect
-        EndIf
+        ;EndIf
         Delay(500) ; Frees CPU
       ForEver
     EndIf
   EndProcedure
+  
   ;-***
   
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
-    ; Try to find the tile in memory cache. If not found, add it if there's enough room in the cache, try to load the picture from the 
-    ; HDD, or launch a web loading thread, and try again on the next drawing loop.
+    ; Try to find the tile in memory cache
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
       MyDebug("Key : " + key + " found in memory cache", 4)
-      If *timg\nImage
+      ; Is the associated image already been loaded in memory ?
+      If *timg\nImage And IsImage(*timg\nImage)
+        ; Yes, returns the image's nb
         MyDebug(" as image " + *timg\nImage, 4)
+        *timg\Tile = -1
         ; *** Cache management
         ; Retrieves the image in the time stack, push it to the end (to say it's the lastly used)
         ChangeCurrentElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPtr)
@@ -1221,14 +1232,15 @@ Module PBMap
         ; ***
         ProcedureReturn *timg
       Else
+        ; No, will load it below
         MyDebug(" but not the image.", 4)
       EndIf
     Else
-      ; Creates a new cache element 
+      ; The tile has not been found in the cache, so creates a new cache element 
       *timg = AddMapElement(PBMap\MemCache\Images(), key)
       If *timg = 0
         MyDebug("  Can't add a new cache element.", 4)
-        ProcedureReturn 0
+        ProcedureReturn #False
       EndIf
       ; add a new time stack element at the End     
       LastElement(PBMap\MemCache\ImagesTimeStack())
@@ -1237,22 +1249,27 @@ Module PBMap
       If *timg\TimeStackPtr = 0
         MyDebug("  Can't add a new time stack element.", 4)
         DeleteMapElement(PBMap\MemCache\Images())
-        ProcedureReturn 0
+        ProcedureReturn #False
       EndIf
       ; Associates the time stack element to the cache element
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())    
       MyDebug("Key : " + key + " added in memory cache", 4)
       ; ***
     EndIf
-    If *timg\Tile = 0 ; Checks if a loading thread is not already running
-                      ; Is the file image on HDD ?
+    ; Is this tile not loading ?
+    If *timg\Tile <= 0
+      ; Is the file image on HDD ?
       *timg\nImage = GetTileFromHDD(CacheFile.s)
       If *timg\nImage
         ; Image found and loaded from HDD
         *timg\Alpha = 256
+        *timg\Tile = -1
         ProcedureReturn *timg
       EndIf
-      ; Image not found on HDD, launch a new web loading thread
+    EndIf
+    ; If there's not this tile in memory and no web loading thread
+    If *timg\Tile = 0 
+      ; Launch a new one
       If PBMap\ThreadsNB < PBMap\Options\MaxThreads      
         Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
         If *NewTile
@@ -1267,7 +1284,6 @@ Module PBMap
             If \GetImageThread
               *timg\Tile = *NewTile ; There's now a loading thread
               *timg\Alpha = 0
-              ; *timg\nImage = 0   
               MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
               PBMap\ThreadsNB + 1
             Else
@@ -1282,7 +1298,7 @@ Module PBMap
         MyDebug(" Error, maximum threads nb reached", 3)
       EndIf
     EndIf
-    ProcedureReturn 0 
+    ProcedureReturn #False
   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
@@ -1362,7 +1378,7 @@ Module PBMap
             EndSelect          
           EndWith
           *timg = GetTile(key, URL, CacheFile)
-          If *timg And *timg\nImage  
+          If *timg And *timg\nImage And IsImage(*timg\nImage)
             MovePathCursor(px, py)
             If *timg\Alpha <= 224
               DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha * PBMap\Layers()\Alpha)
@@ -1840,7 +1856,7 @@ Module PBMap
     MovePathCursor(50, 70)
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
-      If PBMap\MemCache\Images()\Tile <> 0
+      If PBMap\MemCache\Images()\Tile > 0
         If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
           ThreadCounter + 1
         EndIf
@@ -2438,21 +2454,23 @@ Module PBMap
         PBMap\Dragging = #False
         PBMap\Redraw = #True
       Case #PB_MAP_REDRAW
-        Debug "Redraw"
         PBMap\Redraw = #True
       Case #PB_MAP_RETRY
-        Debug "Reload"
         PBMap\Redraw = #True
       Case #PB_MAP_TILE_CLEANUP
         *Tile = EventData() 
         key = *Tile\key
-        ; After a Web tile loading thread, clean the tile structure memory and set the image nb in the cache
-        ; avoid to have threads accessing vars (and avoid some mutex), see GetImageThread()
+        ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
         *Tile\Download = 0
-        Protected timg = PBMap\MemCache\Images(key)\Tile\nImage ; Get this new tile image nb
-        PBMap\MemCache\Images(key)\nImage = timg                ; Stores it in the cache using the key
-        FreeMemory(PBMap\MemCache\Images(key)\Tile)             ; Frees the data needed for the thread
-        PBMap\MemCache\Images(key)\Tile = 0                     ; Clears the data ptr, the web loading thread is finished
+        If *Tile\Size ; <> 0 
+          FreeMemory(PBMap\MemCache\Images(key)\Tile)             ; Frees the data needed for the thread
+          PBMap\MemCache\Images(key)\Tile = -1                    ; Clears the data ptr, and says that the web loading thread has finished successfully
+        Else
+          FreeMemory(PBMap\MemCache\Images(key)\Tile)             ; Frees the data needed for the thread
+          PBMap\MemCache\Images(key)\Tile = 0                     ; Clears the data ptr, and says that the web loading thread has finished unsuccessfully
+        EndIf
+        ;Protected timg = PBMap\MemCache\Images(key)\Tile\nImage ; Get this new tile image nb
+        ;PBMap\MemCache\Images(key)\nImage = timg                ; Stores it in the cache using the key
         PBMap\ThreadsNB - 1
         PBMap\Redraw = #True
     EndSelect
@@ -2461,7 +2479,7 @@ Module PBMap
   ; Redraws at regular intervals
   Procedure TimerEvents()
     If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
-      ; MemoryCacheManagement()
+      MemoryCacheManagement()
       Drawing()
     EndIf    
   EndProcedure 
@@ -2490,11 +2508,11 @@ Module PBMap
   Procedure Quit()
     PBMap\Drawing\End = #True
     PBMap\MemoryCacheManagement = #True ; Tells web loading threads to pause
-                                        ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+    ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
       ForEach PBMap\MemCache\Images()
-        If PBMap\MemCache\Images()\Tile <> 0         
+        If PBMap\MemCache\Images()\Tile > 0         
           If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
             If ElapsedMilliseconds() - TimeCounter > 2000
               ; Should not occur
@@ -2844,8 +2862,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1107
-; FirstLine = 1104
+; CursorPosition = 1047
+; FirstLine = 1047
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
