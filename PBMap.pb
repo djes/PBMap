@@ -294,7 +294,7 @@ Module PBMap
     MemoryCacheManagement.i                        ; To pause web loading threads    
     DownloadSlots.i                                ; Actual nb of used download slots
     DownloadSlotsMutex.i                           ; To be sure that only one thread at a time can access to the DownloadSlots var
-
+    
     List TracksList.Tracks()                       ; To display a GPX track
     List Markers.Marker()                          ; To diplay marker
     EditMarker.l
@@ -1089,13 +1089,13 @@ Module PBMap
   Procedure.i GetTileFromHDD(CacheFile.s)
     MaxLifeTime.i = PBMap\Options\TileLifetime
     If FileSize(CacheFile) > 0 ; <> -1
-      ; Manage tile file lifetime
+                               ; Manage tile file lifetime
       If MaxLifeTime <> -1
         LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ; There's a bug with #PB_Date_Created
         If LifeTime > MaxLifeTime
           MyDebug(" Deleting too old (" + StrU(LifeTime) + " secs) " + CacheFile, 3)
           DeleteFile(CacheFile)
-          ProcedureReturn 0
+          ProcedureReturn #False
         EndIf
       EndIf
       ; Everything is OK, loads the file
@@ -1155,6 +1155,7 @@ Module PBMap
         PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
         ProcedureReturn #False
       EndIf
+      MyDebug(" Thread for image " + *Tile\CacheFile + " waiting a download slot", 5)
       Delay(500)
       LockMutex(PBMap\DownloadSlotsMutex)
     Wend
@@ -1169,16 +1170,25 @@ Module PBMap
             Case #PB_Http_Success
               Size = FinishHTTP(*Tile\Download)
               MyDebug(" Thread for image " + *Tile\CacheFile + " finished. Size : " + Str(Size), 5)
+              LockMutex(PBMap\DownloadSlotsMutex)
+              PBMap\DownloadSlots - 1
+              UnlockMutex(PBMap\DownloadSlotsMutex)
               PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
               ProcedureReturn #True
             Case #PB_Http_Failed
               FinishHTTP(*Tile\Download)
               MyDebug(" Thread for image " + *Tile\CacheFile + " failed.", 5)
+              LockMutex(PBMap\DownloadSlotsMutex)
+              PBMap\DownloadSlots - 1
+              UnlockMutex(PBMap\DownloadSlotsMutex)
               PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
               ProcedureReturn #False
             Case #PB_Http_Aborted
               FinishHTTP(*Tile\Download)
               MyDebug(" Thread for image " + *Tile\CacheFile + " aborted.", 5)
+              LockMutex(PBMap\DownloadSlotsMutex)
+              PBMap\DownloadSlots - 1
+              UnlockMutex(PBMap\DownloadSlotsMutex)
               PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
               ProcedureReturn #False
             Default
@@ -1200,9 +1210,9 @@ Module PBMap
     ; HDD, or launch a web loading thread, and try again on the next drawing loop.
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
-      MyDebug("Key : " + key + " found in memory cache", 5)
+      MyDebug("Key : " + key + " found in memory cache", 4)
       If *timg\nImage
-        MyDebug(" as image " + *timg\nImage, 5)
+        MyDebug(" as image " + *timg\nImage, 4)
         ; *** Cache management
         ; Retrieves the image in the time stack, push it to the end (to say it's the lastly used)
         ChangeCurrentElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPtr)
@@ -1211,13 +1221,13 @@ Module PBMap
         ; ***
         ProcedureReturn *timg
       Else
-        MyDebug(" but not the image.", 5)
+        MyDebug(" but not the image.", 4)
       EndIf
     Else
       ; Creates a new cache element 
       *timg = AddMapElement(PBMap\MemCache\Images(), key)
       If *timg = 0
-        MyDebug("  Can't add a new cache element.", 5)
+        MyDebug("  Can't add a new cache element.", 4)
         ProcedureReturn 0
       EndIf
       ; add a new time stack element at the End     
@@ -1225,17 +1235,17 @@ Module PBMap
       ; Stores the time stack ptr   
       *timg\TimeStackPtr = AddElement(PBMap\MemCache\ImagesTimeStack())
       If *timg\TimeStackPtr = 0
-        MyDebug("  Can't add a new time stack element.", 5)
+        MyDebug("  Can't add a new time stack element.", 4)
         DeleteMapElement(PBMap\MemCache\Images())
         ProcedureReturn 0
       EndIf
       ; Associates the time stack element to the cache element
       PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())    
-      MyDebug("Key : " + key + " added in memory cache", 5)
+      MyDebug("Key : " + key + " added in memory cache", 4)
       ; ***
     EndIf
     If *timg\Tile = 0 ; Checks if a loading thread is not already running
-      ; Is the file image on HDD ?
+                      ; Is the file image on HDD ?
       *timg\nImage = GetTileFromHDD(CacheFile.s)
       If *timg\nImage
         ; Image found and loaded from HDD
@@ -2439,9 +2449,6 @@ Module PBMap
         ; After a Web tile loading thread, clean the tile structure memory and set the image nb in the cache
         ; avoid to have threads accessing vars (and avoid some mutex), see GetImageThread()
         *Tile\Download = 0
-        LockMutex(PBMap\DownloadSlotsMutex)
-        PBMap\DownloadSlots - 1
-        UnlockMutex(PBMap\DownloadSlotsMutex)
         Protected timg = PBMap\MemCache\Images(key)\Tile\nImage ; Get this new tile image nb
         PBMap\MemCache\Images(key)\nImage = timg                ; Stores it in the cache using the key
         FreeMemory(PBMap\MemCache\Images(key)\Tile)             ; Frees the data needed for the thread
@@ -2483,7 +2490,7 @@ Module PBMap
   Procedure Quit()
     PBMap\Drawing\End = #True
     PBMap\MemoryCacheManagement = #True ; Tells web loading threads to pause
-    ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+                                        ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
       ForEach PBMap\MemCache\Images()
@@ -2837,9 +2844,10 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1259
-; FirstLine = 1229
+; CursorPosition = 1107
+; FirstLine = 1104
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
 ; CompileSourceDirectory
+; Watchlist = PBMap::PBMap\DownloadSlots
