@@ -1059,7 +1059,7 @@ Module PBMap
     ; If MemoryCache is not being used by a download thread
     If PBMap\MemoryCacheAccessNB = 0    
       PBMap\MemoryCacheAccessNB = -1 ; Not really useful as the download thread are now blocked by the mutex, and this procedure is synchronous
-      UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+      ;UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
       ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
       Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
       Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
@@ -1099,7 +1099,7 @@ Module PBMap
         EndIf
       EndIf
       ; We're no more accessing MemoryCache
-      LockMutex(PBMap\MemoryCacheAccessNBMutex)
+      ;LockMutex(PBMap\MemoryCacheAccessNBMutex)
       PBMap\MemoryCacheAccessNB = 0  ; Not really useful as the download thread are now blocked
     EndIf
     UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
@@ -1287,7 +1287,7 @@ Module PBMap
       *timg\nImage = GetTileFromHDD(CacheFile.s)
       If *timg\nImage
         ; Image found and loaded from HDD
-        *timg\Alpha = 256
+        *timg\Alpha = 0
         *timg\Tile = -1
         ProcedureReturn *timg
       EndIf
@@ -2894,8 +2894,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2751
-; FirstLine = 2738
+; CursorPosition = 2510
+; FirstLine = 2503
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
