@@ -1,15 +1,15 @@
-;******************************************************************** 
+; ******************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes And Idle
 ; Date:              March, 2017
 ; License:           PBMap : Free, unrestricted, credit 
-;                            appreciated but not required.
-;                    OSM : see http://www.openstreetmap.org/copyright
+;                    appreciated but not required.
+; OSM :              see http://www.openstreetmap.org/copyright
 ; Note:              Please share improvement !
 ; Thanks:            Progi1984, yves86
-;******************************************************************** 
+; ******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
   MessageRequester("Warning !", "You must enable ThreadSafe support in compiler options", #PB_MessageRequester_Ok )
@@ -47,6 +47,7 @@ DeclareModule PBMap
   #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
   
   Declare InitPBMap(window)
+  Declare SetDebugLevel(level.i)
   Declare SetOption(Option.s, Value.s)
   Declare.s GetOption(Option.s)
   Declare LoadOptions(PreferencesFile.s = "PBMap.prefs")
@@ -78,9 +79,9 @@ DeclareModule PBMap
   Declare SetZoom(Zoom.i, mode.i = #PB_Relative)
   Declare SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
   Declare SetZoomToTracks(*Tracks)
-  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition = 0) ;Send back the position *ptr.GeographicCoordinates
-  Declare.i LoadGpxFile(FileName.s)                                    ;  
-  Declare.i SaveGpxFile(FileName.s, *Track)                            ;  
+  Declare NominatimGeoLocationQuery(Address.s, *ReturnPosition = 0) ; Send back the position *ptr.GeographicCoordinates
+  Declare.i LoadGpxFile(FileName.s)                                 ; 
+  Declare.i SaveGpxFile(FileName.s, *Track)                         ; 
   Declare ClearTracks()
   Declare DeleteTrack(*Ptr)
   Declare DeleteSelectedTracks()
@@ -124,7 +125,10 @@ Module PBMap
     URL.s
     CacheFile.s
     GetImageThread.i
-    RetryNb.i
+    Download.i
+    Time.i
+    Size.i
+    Mutex.i
   EndStructure
   
   Structure BoundingBox 
@@ -152,8 +156,9 @@ Module PBMap
   
   Structure ImgMemCach
     nImage.i
+    Size.i
     *Tile.Tile
-    TimeStackPosition.i
+    *TimeStackPtr
     Alpha.i
   EndStructure
   
@@ -197,18 +202,20 @@ Module PBMap
     ShowPointer.i
     TimerInterval.i
     MaxMemCache.i                                  ; in MiB
+    MaxThreads.i                                   ; Maximum simultaneous web loading threads
+    MaxDownloadSlots.i                             ; Maximum simultaneous download slots
     TileLifetime.i
     Verbose.i                                      ; Maximum debug informations
     Warning.i                                      ; Warning requesters
     ShowMarkersNb.i
     ShowMarkersLegend.i
-    ;Drawing stuff
+    ; Drawing stuff
     StrokeWidthTrackDefault.i
-    ;Colours
+    ; Colours
     ColourFocus.i
     ColourSelected.i
     ColourTrackDefault.i
-    ;HERE specific
+    ; HERE specific
     appid.s
     appcode.s
   EndStructure
@@ -222,7 +229,7 @@ Module PBMap
     Enabled.i
     Alpha.d                                        ; 1 : opaque ; 0 : transparent
     format.s
-    ;> HERE specific params
+    ; > HERE specific params
     APP_ID.s
     APP_CODE.s
     ressource.s
@@ -231,10 +238,10 @@ Module PBMap
     scheme.s
     lg.s
     lg2.s
-    ;<
-    ;> GeoServer specific params
+    ; <
+    ; > GeoServer specific params
     ServerLayerName.s
-    ;<
+    ; <
   EndStructure
   
   Structure Box
@@ -281,10 +288,15 @@ Module PBMap
     
     MemCache.TileMemCach                           ; Images in memory cache
     
+    ThreadsNB.i                                    ; Current web threads nb
+    
     Mode.i                                         ; User mode : 0 (default)->hand (moving map) and select markers, 1->hand, 2->select only (moving objects), 3->drawing (todo) 
     Redraw.i
     Dragging.i
     Dirty.i                                        ; To signal that drawing need a refresh
+    
+    MemoryCacheAccessMutex.i                     ; Memorycache access variable mutual exclusion    
+    DownloadSlots.i                                ; Actual nb of used download slots
     
     List TracksList.Tracks()                       ; To display a GPX track
     List Markers.Marker()                          ; To diplay marker
@@ -300,7 +312,7 @@ Module PBMap
   ;-*** Global variables
   
   ;-Show debug infos 
-  Global MyDebugLevel = 3
+  Global MyDebugLevel = 5
   
   Global PBMap.PBMap, Null.i, NullPtrMem.i, *NullPtr = @NullPtrMem
   Global slash.s
@@ -314,7 +326,7 @@ Module PBMap
   
   ;- *** GetText - Translation purpose
   
-  ;TODO use this for all text
+  ; TODO use this for all text
   IncludeFile "gettext.pbi"
   
   ;-*** Misc tools
@@ -329,7 +341,7 @@ Module PBMap
   
   ;-Error management
   
-  ;Shows an error msg and terminates the program
+  ; Shows an error msg and terminates the program
   Procedure FatalError(msg.s)
     If PBMap\Options\Warning
       MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
@@ -337,31 +349,36 @@ Module PBMap
     End
   EndProcedure
   
-  ;Shows an error msg
+  ; Shows an error msg
   Procedure Error(msg.s)
     If PBMap\Options\Warning
       MessageRequester("PBMap", msg, #PB_MessageRequester_Ok)
     EndIf
   EndProcedure  
+    
+    ; Set the debug level allowing more or less debug infos
+  Procedure SetDebugLevel(level.i)
+    MyDebugLevel = level
+  EndProcedure 
   
-  ;Send debug infos to stdout (allowing mixed debug infos with curl or other libs)
+  ; Send debug infos to stdout (allowing mixed debug infos with curl or other libs)
   Procedure MyDebug(msg.s, DbgLevel = 0)
-    If PBMap\Options\Verbose And DbgLevel >= MyDebugLevel 
+    If PBMap\Options\Verbose And DbgLevel <= MyDebugLevel 
       PrintN(msg)
-      ;Debug msg  
+      ; Debug msg  
     EndIf
   EndProcedure
   
-  ;Creates a full tree
-  ;by Thomas (ts-soft) Schulz  
-  ;http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
+  ; Creates a full tree
+  ; by Thomas (ts-soft) Schulz  
+  ; http://www.purebasic.fr/english/viewtopic.php?f=12&t=58657&hilit=createdirectory&view=unread#unread
   CompilerSelect #PB_Compiler_OS
     CompilerCase #PB_OS_Windows
-      #FILE_ATTRIBUTE_DEVICE              =     64 ;(0x40)
-      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ;(0x8000)
-      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192;(0x2000)
-      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072;(0x20000)
-      #FILE_ATTRIBUTE_VIRTUAL              =  65536;(0x10000)
+      #FILE_ATTRIBUTE_DEVICE              =     64 ; (0x40)
+      #FILE_ATTRIBUTE_INTEGRITY_STREAM    =  32768 ; (0x8000)
+      #FILE_ATTRIBUTE_NOT_CONTENT_INDEXED  =   8192; (0x2000)
+      #FILE_ATTRIBUTE_NO_SCRUB_DATA        = 131072; (0x20000)
+      #FILE_ATTRIBUTE_VIRTUAL              =  65536; (0x10000)
       #FILE_ATTRIBUTE_DONTSETFLAGS = ~(#FILE_ATTRIBUTE_DIRECTORY|
                                        #FILE_ATTRIBUTE_SPARSE_FILE|
                                        #FILE_ATTRIBUTE_OFFLINE|
@@ -376,7 +393,7 @@ Module PBMap
         SetFileAttributes(Name, Attribs)
       EndMacro
   CompilerEndSelect
-
+  
   Procedure CreateDirectoryEx(DirectoryName.s, FileAttribute = #PB_Default)
     Protected i, c, tmp.s
     If Right(DirectoryName, 1) = slash
@@ -399,7 +416,7 @@ Module PBMap
   EndProcedure
   
   Procedure TechnicalImagesCreation()
-    ;"Loading" image
+    ; "Loading" image
     Protected LoadingText$ = "Loading"
     Protected NothingText$ = "Nothing"
     PBmap\ImgLoading = CreateImage(#PB_Any, 256, 256) 
@@ -417,20 +434,20 @@ Module PBMap
       EndVectorLayer()
       StopVectorDrawing() 
     EndIf
-    ;"Nothing" tile
+    ; "Nothing" tile
     PBmap\ImgNothing = CreateImage(#PB_Any, 256, 256) 
     If PBmap\ImgNothing
       StartVectorDrawing(ImageVectorOutput(PBMap\ImgNothing)) 
-      ;BeginVectorLayer()
+      ; BeginVectorLayer()
       VectorSourceColor(RGBA(220, 230, 255, 255))
       AddPathBox(0, 0, 256, 256)
       FillPath()
-      ;MovePathCursor(0, 0)
-      ;VectorFont(FontID(PBMap\Font), 256 / 20)
-      ;VectorSourceColor(RGBA(150, 150, 150, 255))
-      ;MovePathCursor(0 + (256 - VectorTextWidth(NothingText$)) / 2, 0 + (256 - VectorTextHeight(NothingText$)) / 2)
-      ;DrawVectorText(NothingText$)
-      ;EndVectorLayer()
+      ; MovePathCursor(0, 0)
+      ; VectorFont(FontID(PBMap\Font), 256 / 20)
+      ; VectorSourceColor(RGBA(150, 150, 150, 255))
+      ; MovePathCursor(0 + (256 - VectorTextWidth(NothingText$)) / 2, 0 + (256 - VectorTextHeight(NothingText$)) / 2)
+      ; DrawVectorText(NothingText$)
+      ; EndVectorLayer()
       StopVectorDrawing() 
     EndIf
   EndProcedure  
@@ -441,22 +458,22 @@ Module PBMap
     ProcedureReturn Result
   EndProcedure
   
-  ;*** Converts coords to tile.decimal
-  ;Warning, structures used in parameters are not tested
+  ; *** Converts coords to tile.decimal
+  ; Warning, structures used in parameters are not tested
   Procedure LatLon2TileXY(*Location.GeographicCoordinates, *Coords.Coordinates, Zoom)
     Protected n.d = Pow(2.0, Zoom)
     Protected LatRad.d = Radian(*Location\Latitude)
     *Coords\x = n * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
     *Coords\y = n * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
     MyDebug("Latitude : " + StrD(*Location\Latitude) + " ; Longitude : " + StrD(*Location\Longitude), 5)
-    MyDebug("Coords X : " + Str(*Coords\x) + " ;  Y : " + Str(*Coords\y), 5)
+    MyDebug("Coords X : " + Str(*Coords\x) + " ; Y : " + Str(*Coords\y), 5)
   EndProcedure
   
-  ;*** Converts tile.decimal to coords
-  ;Warning, structures used in parameters are not tested
+  ; *** Converts tile.decimal to coords
+  ; Warning, structures used in parameters are not tested
   Procedure TileXY2LatLon(*Coords.Coordinates, *Location.GeographicCoordinates, Zoom)
     Protected n.d = Pow(2.0, Zoom)
-    ;Ensures the longitude to be in the range [-180;180[
+    ; Ensures the longitude to be in the range [-180; 180[
     *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
     If *Location\Latitude <= -89 
@@ -469,7 +486,7 @@ Module PBMap
   
   Procedure Pixel2LatLon(*Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
     Protected n.d = PBMap\TileSize * Pow(2.0, Zoom)
-    ;Ensures the longitude to be in the range [-180;180[
+    ; Ensures the longitude to be in the range [-180; 180[
     *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
     If *Location\Latitude <= -89 
@@ -480,12 +497,12 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;Ensures the longitude to be in the range [-180;180[
+  ; Ensures the longitude to be in the range [-180; 180[
   Procedure.d ClipLongitude(Longitude.d)
     ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
-  ;Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
+  ; Lat Lon coordinates 2 pixel absolute [0 to 2^Zoom * TileSize [
   Procedure LatLon2Pixel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
     Protected LatRad.d = Radian(*Location\Latitude)
@@ -493,7 +510,7 @@ Module PBMap
     *Pixel\y = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0
   EndProcedure   
   
-  ;Lat Lon coordinates 2 pixel relative to the center of view
+  ; Lat Lon coordinates 2 pixel relative to the center of view
   Procedure LatLon2PixelRel(*Location.GeographicCoordinates, *Pixel.PixelCoordinates, Zoom) 
     Protected tilemax = Pow(2.0, Zoom) * PBMap\TileSize 
     Protected cx.d  = PBMap\Drawing\RadiusX
@@ -501,18 +518,18 @@ Module PBMap
     Protected LatRad.d = Radian(*Location\Latitude)
     Protected px.d = tilemax * (Mod( *Location\Longitude + 180.0, 360) / 360.0 )
     Protected py.d = tilemax * ( 1.0 - Log(Tan(LatRad) + (1.0/Cos(LatRad))) / #PI ) / 2.0    
-    ;check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
+    ; check the x boundaries of the map to adjust the position (coz of the longitude wrapping)
     If dpx - px >= tilemax / 2
-      ;Debug "c1"
+      ; Debug "c1"
       *Pixel\x = cx + (px - dpx + tilemax)
     ElseIf px - dpx > tilemax / 2
-      ;Debug "c2"
+      ; Debug "c2"
       *Pixel\x = cx + (px - dpx - tilemax)
     ElseIf px - dpx < 0
-      ;Debug "c3"
+      ; Debug "c3"
       *Pixel\x = cx - (dpx - px)
     Else
-      ;Debug "c0"
+      ; Debug "c0"
       *Pixel\x = cx + (px - dpx) 
     EndIf
     *Pixel\y = PBMap\Drawing\RadiusY + (py - PBMap\PixelCoordinates\y) 
@@ -521,7 +538,7 @@ Module PBMap
   Procedure.d Pixel2Lon(x)
     Protected NewX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + x) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180;180[
+    ; double mod is to ensure the longitude to be in the range [-180; 180[
     ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
@@ -534,19 +551,19 @@ Module PBMap
   ; HaversineAlgorithm 
   ; http://andrew.hedges.name/experiments/haversine/
   Procedure.d HaversineInKM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
-    Protected eQuatorialEarthRadius.d = 6378.1370;6372.795477598;
-    Protected dlong.d = (*posB\Longitude - *posA\Longitude);
-    Protected dlat.d = (*posB\Latitude - *posA\Latitude)   ;
+    Protected eQuatorialEarthRadius.d = 6378.1370; 6372.795477598; 
+    Protected dlong.d = (*posB\Longitude - *posA\Longitude); 
+    Protected dlat.d = (*posB\Latitude - *posA\Latitude)   ; 
     Protected alpha.d=dlat/2
     Protected beta.d=dlong/2
     Protected a.d = Sin(Radian(alpha)) * Sin(Radian(alpha)) + Cos(Radian(*posA\Latitude)) * Cos(Radian(*posB\Latitude)) * Sin(Radian(beta)) * Sin(Radian(beta)) 
-    Protected c.d = ASin(Min(1,Sqr(a)));
+    Protected c.d = ASin(Min(1,Sqr(a))); 
     Protected distance.d = 2*eQuatorialEarthRadius * c     
-    ProcedureReturn distance                                                                                                        ;
+    ProcedureReturn distance                                                                                                        ; 
   EndProcedure
   
   Procedure.d HaversineInM(*posA.GeographicCoordinates, *posB.GeographicCoordinates)
-    ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB));
+    ProcedureReturn (1000 * HaversineInKM(@*posA,@*posB)); 
   EndProcedure
   
   ; No more used, see LatLon2PixelRel
@@ -556,15 +573,15 @@ Module PBMap
     Protected x1.l,y1.l
     x1 = (*Location\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
-    Protected latRad.d = *Location\Latitude*#PI/180;
-    Protected mercN.d = Log(Tan((#PI/4)+(latRad/2)));
-    y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ;
+    Protected latRad.d = *Location\Latitude*#PI/180; 
+    Protected mercN.d = Log(Tan((#PI/4)+(latRad/2))); 
+    y1     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)) ; 
     Protected x2.l, y2.l
     x2 = (PBMap\GeographicCoordinates\Longitude+180)*(mapWidth/360)
     ; convert from degrees To radians
-    latRad = PBMap\GeographicCoordinates\Latitude*#PI/180;
+    latRad = PBMap\GeographicCoordinates\Latitude*#PI/180; 
     mercN = Log(Tan((#PI/4)+(latRad/2)))        
-    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI));    
+    y2     = (mapHeight/2)-(mapWidth*mercN/(2*#PI)); 
     *Pixel\x=PBMap\Drawing\RadiusX  - (x2-x1)
     *Pixel\y=PBMap\Drawing\RadiusY - (y2-y1)
   EndProcedure
@@ -606,24 +623,24 @@ Module PBMap
     EndIf
   EndProcedure  
   
-  ;TODO : best cleaning of the string from bad behaviour
+  ; TODO : best cleaning of the string from bad behaviour
   Procedure.s StringCheck(String.s)
     ProcedureReturn Trim(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(RemoveString(String, Chr(0)), Chr(32)), Chr(39)), Chr(33)), Chr(34)), "@"), "/"), "\"), "$"), "%"))
   EndProcedure
   
   Procedure.i ColourString2Value(Value.s)
-    ;TODO : better string check
+    ; TODO : better string check
     Protected Col.s = RemoveString(Value, " ")
     If Left(Col, 1) = "$"
       Protected r.i, g.i, b.i, a.i = 255
       Select Len(Col)
-        Case 4 ;RGB  (eg : "$9BC"
+        Case 4 ; RGB  (eg : "$9BC"
           r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1))
-        Case 5 ;RGBA (eg : "$9BC5")
+        Case 5 ; RGBA (eg : "$9BC5")
           r = Val("$"+Mid(Col, 2, 1)) : g = Val("$"+Mid(Col, 3, 1)) : b = Val("$"+Mid(Col, 4, 1)) : a = Val("$"+Mid(Col, 5, 1))
-        Case 7 ;RRGGBB (eg : "$95B4C2")
+        Case 7 ; RRGGBB (eg : "$95B4C2")
           r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2))
-        Case 9 ;RRGGBBAA (eg : "$95B4C249")
+        Case 9 ; RRGGBBAA (eg : "$95B4C249")
           r = Val("$"+Mid(Col, 2, 2)) : g = Val("$"+Mid(Col, 4, 2)) : b = Val("$"+Mid(Col, 6, 2)) : a = Val("$"+Mid(Col, 8, 2))
       EndSelect
       ProcedureReturn RGBA(r, g, b, a)
@@ -647,7 +664,7 @@ Module PBMap
         OpenConsole()
       EndIf
       CreateDirectoryEx(\HDDCachePath)
-      If \DefaultOSMServer <> "" And IsLayer("OSM") = #False ;First time creation of the basis OSM layer
+      If \DefaultOSMServer <> "" And IsLayer("OSM") = #False ; First time creation of the basis OSM layer
         AddOSMServerLayer("OSM", 1, \DefaultOSMServer)
       EndIf
     EndWith
@@ -681,6 +698,10 @@ Module PBMap
         PBMap\Options\HDDCachePath = Value
       Case "maxmemcache"
         PBMap\Options\MaxMemCache = Val(Value)
+      Case "maxthreads"
+        PBMap\Options\MaxThreads = Val(Value)
+      Case "maxdownloadslots"
+        PBMap\Options\MaxDownloadSlots = Val(Value)
       Case "tilelifetime"
         PBMap\Options\TileLifetime =  Val(Value)
       Case "verbose"
@@ -732,61 +753,65 @@ Module PBMap
     Option = StringCheck(Option)
     With PBMap\Options
       Select LCase(Option)
-      Case "proxy"
-        ProcedureReturn GetBoolString(\Proxy)
-      Case "proxyurl"
-        ProcedureReturn \ProxyURL
-      Case "proxyport"        
-        ProcedureReturn \ProxyPort
-      Case "proxyuser"        
-        ProcedureReturn \ProxyUser
-      Case "appid"        
-        ProcedureReturn \appid
-      Case "appcode"        
-        ProcedureReturn \appcode
-      Case "tilescachepath"
-        ProcedureReturn \HDDCachePath
-      Case "maxmemcache"
-        ProcedureReturn StrU(\MaxMemCache)
-      Case "tilelifetime"
-        ProcedureReturn StrU(\TileLifetime)  
-      Case "verbose"
-        ProcedureReturn GetBoolString(\Verbose)
-      Case "warning"
-        ProcedureReturn GetBoolString(\Warning)
-      Case "wheelmouserelative"
-        ProcedureReturn GetBoolString(\WheelMouseRelative)
-      Case "showdegrees"
-        ProcedureReturn GetBoolString(\ShowDegrees)
-      Case "showdebuginfos"
-        ProcedureReturn GetBoolString(\ShowDebugInfos)
-      Case "showscale"
-        ProcedureReturn GetBoolString(\ShowScale)
-      Case "showmarkers"
-        ProcedureReturn GetBoolString(\ShowMarkers)
-      Case "showpointer"
-        ProcedureReturn GetBoolString(\ShowPointer)
-      Case "showtrack"
-        ProcedureReturn GetBoolString(\ShowTrack)
-      Case "showmarkersnb"
-        ProcedureReturn GetBoolString(\ShowMarkersNb)      
-      Case "showmarkerslegend"
-        ProcedureReturn GetBoolString(\ShowMarkersLegend)      
-      Case "showtrackkms"
-        ProcedureReturn GetBoolString(\ShowTrackKms)
-      Case "strokewidthtrackdefault"
-        ProcedureReturn GetBoolString(\StrokeWidthTrackDefault)
-      Case "colourfocus"
-        ProcedureReturn Value2ColourString(\ColourFocus)
-      Case "colourselected"
-        ProcedureReturn Value2ColourString(\ColourSelected)
-      Case "colourtrackdefault"
-        ProcedureReturn Value2ColourString(\ColourTrackDefault)
-    EndSelect
+        Case "proxy"
+          ProcedureReturn GetBoolString(\Proxy)
+        Case "proxyurl"
+          ProcedureReturn \ProxyURL
+        Case "proxyport"        
+          ProcedureReturn \ProxyPort
+        Case "proxyuser"        
+          ProcedureReturn \ProxyUser
+        Case "appid"        
+          ProcedureReturn \appid
+        Case "appcode"        
+          ProcedureReturn \appcode
+        Case "tilescachepath"
+          ProcedureReturn \HDDCachePath
+        Case "maxmemcache"
+          ProcedureReturn StrU(\MaxMemCache)
+        Case "maxthreads"
+          ProcedureReturn StrU(\MaxThreads)
+        Case "maxdownloadslots"
+          ProcedureReturn StrU(\MaxDownloadSlots)
+        Case "tilelifetime"
+          ProcedureReturn StrU(\TileLifetime)  
+        Case "verbose"
+          ProcedureReturn GetBoolString(\Verbose)
+        Case "warning"
+          ProcedureReturn GetBoolString(\Warning)
+        Case "wheelmouserelative"
+          ProcedureReturn GetBoolString(\WheelMouseRelative)
+        Case "showdegrees"
+          ProcedureReturn GetBoolString(\ShowDegrees)
+        Case "showdebuginfos"
+          ProcedureReturn GetBoolString(\ShowDebugInfos)
+        Case "showscale"
+          ProcedureReturn GetBoolString(\ShowScale)
+        Case "showmarkers"
+          ProcedureReturn GetBoolString(\ShowMarkers)
+        Case "showpointer"
+          ProcedureReturn GetBoolString(\ShowPointer)
+        Case "showtrack"
+          ProcedureReturn GetBoolString(\ShowTrack)
+        Case "showmarkersnb"
+          ProcedureReturn GetBoolString(\ShowMarkersNb)      
+        Case "showmarkerslegend"
+          ProcedureReturn GetBoolString(\ShowMarkersLegend)      
+        Case "showtrackkms"
+          ProcedureReturn GetBoolString(\ShowTrackKms)
+        Case "strokewidthtrackdefault"
+          ProcedureReturn GetBoolString(\StrokeWidthTrackDefault)
+        Case "colourfocus"
+          ProcedureReturn Value2ColourString(\ColourFocus)
+        Case "colourselected"
+          ProcedureReturn Value2ColourString(\ColourSelected)
+        Case "colourtrackdefault"
+          ProcedureReturn Value2ColourString(\ColourTrackDefault)
+      EndSelect
     EndWith
   EndProcedure
   
-  ;By default, save options in the user's home directory
+  ; By default, save options in the user's home directory
   Procedure SaveOptions(PreferencesFile.s = "PBMap.prefs")
     If PreferencesFile = "PBMap.prefs"
       CreatePreferences(GetHomeDirectory() + "PBMap.prefs")      
@@ -809,6 +834,8 @@ Module PBMap
       PreferenceGroup("OPTIONS")
       WritePreferenceInteger("WheelMouseRelative", \WheelMouseRelative)
       WritePreferenceInteger("MaxMemCache", \MaxMemCache)
+      WritePreferenceInteger("MaxThreads", \MaxThreads)
+      WritePreferenceInteger("MaxDownloadSlots", \MaxDownloadSlots)
       WritePreferenceInteger("TileLifetime", \TileLifetime)  
       WritePreferenceInteger("Verbose", \Verbose)
       WritePreferenceInteger("Warning", \Warning)
@@ -823,7 +850,7 @@ Module PBMap
       WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
       PreferenceGroup("DRAWING")  
       WritePreferenceInteger("StrokeWidthTrackDefault", \StrokeWidthTrackDefault)
-      ;Colours;
+      ; Colours; 
       WritePreferenceInteger("ColourFocus", \ColourFocus)
       WritePreferenceInteger("ColourSelected", \ColourSelected)
       WritePreferenceInteger("ColourTrackDefault", \ColourTrackDefault)
@@ -837,22 +864,22 @@ Module PBMap
     Else
       OpenPreferences(PreferencesFile)     
     EndIf
-    ;Use this to create and customize your preferences file for the first time
-    ;     CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
-    ;     ;Or this to modify
-    ;     ;OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
-    ;     ;Or this 
-    ;     ;RunProgram("notepad.exe",  GetHomeDirectory() + "PBMap.prefs", GetHomeDirectory())
-    ;     PreferenceGroup("PROXY")
-    ;     WritePreferenceInteger("Proxy", #True)
-    ;     WritePreferenceString("ProxyURL", "myproxy.fr")
-    ;     WritePreferenceString("ProxyPort", "myproxyport")
-    ;     WritePreferenceString("ProxyUser", "myproxyname")       
-    ;     WritePreferenceString("ProxyPass", "myproxypass") ;TODO !Warning! !not encoded!
-    ;     PreferenceGroup("HERE")
-    ;     WritePreferenceString("APP_ID", "myhereid")       ;TODO !Warning! !not encoded!
-    ;     WritePreferenceString("APP_CODE", "myherecode")   ;TODO !Warning! !not encoded!
-    ;     ClosePreferences()
+    ; Use this to create and customize your preferences file for the first time
+    ; CreatePreferences(GetHomeDirectory() + "PBMap.prefs")
+    ; ; Or this to modify
+    ; ; OpenPreferences(GetHomeDirectory() + "PBMap.prefs")
+    ; ; Or this 
+    ; ; RunProgram("notepad.exe",  GetHomeDirectory() + "PBMap.prefs", GetHomeDirectory())
+    ; PreferenceGroup("PROXY")
+    ; WritePreferenceInteger("Proxy", #True)
+    ; WritePreferenceString("ProxyURL", "myproxy.fr")
+    ; WritePreferenceString("ProxyPort", "myproxyport")
+    ; WritePreferenceString("ProxyUser", "myproxyname")       
+    ; WritePreferenceString("ProxyPass", "myproxypass") ; TODO !Warning! !not encoded!
+    ; PreferenceGroup("HERE")
+    ; WritePreferenceString("APP_ID", "myhereid")       ; TODO !Warning! !not encoded!
+    ; WritePreferenceString("APP_CODE", "myherecode")   ; TODO !Warning! !not encoded!
+    ; ClosePreferences()
     With PBMap\Options
       PreferenceGroup("PROXY")       
       \Proxy              = ReadPreferenceInteger("Proxy", #False)
@@ -860,11 +887,11 @@ Module PBMap
         \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ; = InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
         \ProxyPort        = ReadPreferenceString("ProxyPort", "") ; = InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
         \ProxyUser        = ReadPreferenceString("ProxyUser", "") ; = InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
-        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ; = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ;TODO
+        \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ; = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ; TODO
       EndIf
       PreferenceGroup("HERE")  
-      \appid            = ReadPreferenceString("APP_ID", "")    ; = InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ;TODO
-      \appcode          = ReadPreferenceString("APP_CODE", "")  ; = InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ;TODO
+      \appid            = ReadPreferenceString("APP_ID", "")    ; = InputRequester("Here App ID", "Do you use HERE ? Enter app ID", "") ; TODO
+      \appcode          = ReadPreferenceString("APP_CODE", "")  ; = InputRequester("Here App Code", "Do you use HERE ? Enter app Code", "") ; TODO
       PreferenceGroup("URL")
       \DefaultOSMServer   = ReadPreferenceString("DefaultOSMServer", "http://tile.openstreetmap.org/")
       
@@ -872,8 +899,10 @@ Module PBMap
       \HDDCachePath       = ReadPreferenceString("TilesCachePath", GetTemporaryDirectory() + "PBMap" + slash)
       PreferenceGroup("OPTIONS")   
       \WheelMouseRelative = ReadPreferenceInteger("WheelMouseRelative", #True)
-      \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ;20 MiB, about 80 tiles in memory
-      \TileLifetime       = ReadPreferenceInteger("TileLifetime", 1209600) ;about 2 weeks ; -1 = unlimited
+      \MaxMemCache        = ReadPreferenceInteger("MaxMemCache", 20480) ; 20 MiB, about 80 tiles in memory
+      \MaxThreads         = ReadPreferenceInteger("MaxThreads", 40)
+      \MaxDownloadSlots   = ReadPreferenceInteger("MaxDownloadSlots", 2)
+      \TileLifetime       = ReadPreferenceInteger("TileLifetime", 1209600) ; about 2 weeks ;-1 = unlimited
       \Verbose            = ReadPreferenceInteger("Verbose", #False)
       \Warning            = ReadPreferenceInteger("Warning", #False)
       \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
@@ -891,7 +920,7 @@ Module PBMap
       \ColourFocus        = ReadPreferenceInteger("ColourFocus", RGBA(255, 255, 0, 255))
       \ColourSelected     = ReadPreferenceInteger("ColourSelected", RGBA(225, 225, 0, 255))
       \ColourTrackDefault = ReadPreferenceInteger("ColourTrackDefault", RGBA(0, 255, 0, 150))
-      \TimerInterval      = 20
+      \TimerInterval      = 12
       ClosePreferences()         
     EndWith
     SetOptions()
@@ -899,7 +928,7 @@ Module PBMap
   
   ;-*** Layers
   
-  ;Add a layer to a list (to get things ordered) and to a map (to access things easily)
+  ; Add a layer to a list (to get things ordered) and to a map (to access things easily)
   Procedure.i AddLayer(Name.s, Order.i, Alpha.d)
     Protected *Ptr = 0
     *Ptr = AddMapElement(PBMap\Layers(), Name)
@@ -933,13 +962,13 @@ Module PBMap
   EndProcedure
   
   ; "Here" layer
-  ;see there for parameters : https://developer.here.com/rest-apis/documentation/enterprise-map-tile/topics/resource-base-maptile.html
-  ;you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
-  ;use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
+  ; see there for parameters : https://developer.here.com/rest-apis/documentation/enterprise-map-tile/topics/resource-base-maptile.html
+  ; you could use base.maps.api.here.com or aerial.maps.api.here.com or traffic.maps.api.here.com or pano.maps.api.here.com. 
+  ; use *.cit.map.api.com For Customer Integration Testing (see https://developer.here.com/rest-apis/documentation/enterprise-Map-tile/common/request-cit-environment-rest.html)
   Procedure.i AddHereServerLayer(LayerName.s, Order.i, APP_ID.s = "", APP_CODE.s = "", ServerURL.s = "aerial.maps.api.here.com", path.s = "/maptile/2.1/", ressource.s = "maptile", id.s = "newest", scheme.s = "satellite.day", format.s = "jpg", lg.s = "eng", lg2.s = "eng", param.s = "")
     Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
     If *Ptr
-      With *Ptr ;PBMap\Layers()
+      With *Ptr ; PBMap\Layers()
         \ServerURL = ServerURL
         \path = path
         \ressource = ressource
@@ -967,18 +996,18 @@ Module PBMap
     EndIf
   EndProcedure
   
-  ;GeoServer / geowebcache - google maps service
-  ;template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
+  ; GeoServer / geowebcache - google maps service
+  ; template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
   Procedure.i AddGeoServerLayer(LayerName.s, Order.i, ServerLayerName.s, ServerURL.s = "http://localhost:8080/", path.s = "geowebcache/service/gmaps", format.s = "image/png")
     Protected *Ptr.Layer = AddLayer(LayerName, Order, 1)
     If *Ptr
-      With *Ptr ;PBMap\Layers()    
-      \ServerURL = ServerURL
-      \path = path
-      \LayerType = 2 ; GeoServer
-      \format = format
-      \Enabled = #True
-      \ServerLayerName = ServerLayerName
+      With *Ptr ; PBMap\Layers()    
+        \ServerURL = ServerURL
+        \path = path
+        \LayerType = 2 ; GeoServer
+        \format = format
+        \Enabled = #True
+        \ServerLayerName = ServerLayerName
       EndWith
       PBMap\Redraw = #True
       ProcedureReturn *Ptr
@@ -994,10 +1023,10 @@ Module PBMap
   Procedure DeleteLayer(Name.s)
     FindMapElement(PBMap\Layers(), Name)
     Protected *Ptr = PBMap\Layers()
-    ;Free the list element
+    ; Free the list element
     ChangeCurrentElement(PBMap\LayersList(), *Ptr)
     DeleteElement(PBMap\LayersList())
-    ;Free the map element
+    ; Free the map element
     DeleteMapElement(PBMap\Layers())
     PBMap\Redraw = #True
   EndProcedure
@@ -1021,181 +1050,272 @@ Module PBMap
     ProcedureReturn PBMap\Layers(Name)\Alpha
   EndProcedure
   
-  ;-*** These are threaded
+  ;-***
+  ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
+  Procedure MemoryCacheManagement()
+    LockMutex(PBMap\MemoryCacheAccessMutex) ; Prevents thread to start or finish
+    Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
+    Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
+    MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
+    If CacheSize > CacheLimit    
+      MyDebug(" Cache full. Trying cache cleaning", 5)
+      ResetList(PBMap\MemCache\ImagesTimeStack())
+      ; Try to free half the cache memory (one pass)
+      While NextElement(PBMap\MemCache\ImagesTimeStack()) And CacheSize > (CacheLimit / 2) ; /2 = half
+        Protected CacheMapKey.s = PBMap\MemCache\ImagesTimeStack()\MapKey
+        ; Is the loading over
+        If PBMap\MemCache\Images(CacheMapKey)\Tile <= 0 ;TODO Should not verify this var directly
+          MyDebug("  Delete " + CacheMapKey, 5)
+          If PBMap\MemCache\Images(CacheMapKey)\nImage;IsImage(PBMap\MemCache\Images(CacheMapKey)\nImage)
+            FreeImage(PBMap\MemCache\Images(CacheMapKey)\nImage)
+            MyDebug("   and free image nb " + Str(PBMap\MemCache\Images(CacheMapKey)\nImage), 5)
+            PBMap\MemCache\Images(CacheMapKey)\nImage = 0
+          EndIf
+          DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
+          DeleteElement(PBMap\MemCache\ImagesTimeStack(), 1)
+          ;           ElseIf PBMap\MemCache\Images(CacheMapKey)\Tile = 0 
+          ;             MyDebug("  Delete " + CacheMapKey, 5)
+          ;             DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
+          ;             DeleteElement(PBMap\MemCache\ImagesTimeStack(), 1)
+          ;           ElseIf PBMap\MemCache\Images(CacheMapKey)\Tile > 0
+          ;             ; If the thread is running, try to abort the download
+          ;             If PBMap\MemCache\Images(CacheMapKey)\Tile\Download
+          ;               AbortHTTP(PBMap\MemCache\Images(CacheMapKey)\Tile\Download) ; Could lead to error
+          ;             EndIf
+        EndIf
+        CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
+      Wend
+      MyDebug("  New cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)      
+      If CacheSize > CacheLimit
+        MyDebug("  Cache cleaning unsuccessfull, can't add new tiles.", 5)
+      EndIf
+    EndIf
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
+  EndProcedure
   
   Procedure.i GetTileFromHDD(CacheFile.s)
-    Protected nImage.i, LifeTime.i, MaxLifeTime.i = PBMap\Options\TileLifetime
-    If FileSize(CacheFile) <> -1
-      ;Manage tile file lifetime
-      If MaxLifeTime <> -1
-        LifeTime = Date() - GetFileDate(CacheFile, #PB_Date_Modified) ;There's a bug with #PB_Date_Created
-        If LifeTime > MaxLifeTime
-          MyDebug("Deleting too old (" + StrU(LifeTime) + " secs) " + CacheFile, 3)
-          DeleteFile(CacheFile)
-          ProcedureReturn -1
-        EndIf
-      EndIf
-      ;Everything is OK, load the file
+    Protected nImage.i, LifeTime.i, MaxLifeTime.i
+      ; Everything is OK, loads the file
       nImage = LoadImage(#PB_Any, CacheFile)
-      If IsImage(nImage)
-        MyDebug("Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
+      If nImage
+        MyDebug(" Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
       Else
-        MyDebug("Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
-        MyDebug("Deleting faulty image file  " + CacheFile, 3)
-        DeleteFile(CacheFile)
+        MyDebug(" Failed loading " + CacheFile + " as nImage " + Str(nImage) + " -> not an image !", 3)
+        If DeleteFile(CacheFile)
+          MyDebug("  Deleting faulty image file  " + CacheFile, 3)
+        Else
+          MyDebug("  Can't delete faulty image file  " + CacheFile, 3)
+        EndIf
       EndIf
-    Else
-      MyDebug("Failed loading " + CacheFile + " -> Size <= 0", 3)
-    EndIf
-    ProcedureReturn -1
+    ProcedureReturn #False
   EndProcedure
   
-  Procedure.i GetTileFromWeb(TileURL.s, CacheFile.s)
-    Protected *Buffer
-    Protected nImage.i = -1
-    Protected FileSize.i, timg
-    FileSize = ReceiveHTTPFile(TileURL, CacheFile)
-    If FileSize > 0
-      MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-      nImage = GetTileFromHDD(CacheFile)
-    Else
-      MyDebug("Problem loading from web " + TileURL + " as CacheFile " + CacheFile, 3)
+  ; **** OLD IMPORTANT NOTICE (please not remove)
+  ; This original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
+  ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
+  ; Protected *Buffer
+  ; Protected nImage.i = -1
+  ; Protected timg
+  ; *Buffer = ReceiveHTTPMemory(TileURL)  ; TODO to thread by using #PB_HTTP_Asynchronous
+  ; If *Buffer
+  ; nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
+  ; If IsImage(nImage)
+  ; If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ; The 32 is needed !!!!
+  ; MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
+  ; Else
+  ; MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
+  ; EndIf
+  ; FreeMemory(*Buffer)
+  ; Else
+  ; MyDebug("Can't catch image loaded from web " + TileURL, 3)
+  ; nImage = -1
+  ; EndIf
+  ; Else
+  ; MyDebug(" Problem loading from web " + TileURL, 3)
+  ; EndIf
+  ; ****
+  
+  ;-*** These are threaded
+  
+  Threaded Progress = 0, Quit = #False
+  
+  Procedure GetImageThread(*Tile.Tile)    
+    LockMutex(PBMap\MemoryCacheAccessMutex)
+    MyDebug("Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " starting for image " + *Tile\CacheFile, 5)
+    ; If MemoryCache is currently being cleaned, abort
+;     If PBMap\MemoryCacheAccessNB = -1
+;       MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " canceled because of cleaning.", 5)
+;       *Tile\Size = 0 ; \Size = 0 signals that the download has failed
+;       PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
+;       UnlockMutex(PBMap\MemoryCacheAccessMutex)
+;       ProcedureReturn
+;     EndIf
+    ; We're accessing MemoryCache
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
+    *Tile\Size = 0
+    *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
+    If *Tile\Download
+      Repeat
+        Progress = HTTPProgress(*Tile\Download)
+        Select Progress
+          Case #PB_Http_Success
+            *Tile\Size = FinishHTTP(*Tile\Download) ; \Size signals that the download is OK
+            MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " for image " + *Tile\CacheFile + " finished. Size : " + Str(*Tile\Size), 5)
+            Quit = #True
+          Case #PB_Http_Failed
+            FinishHTTP(*Tile\Download)
+            *Tile\Size = 0 ; \Size = 0 signals that the download has failed
+            MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " failed.", 5)
+            Quit = #True
+          Case #PB_Http_Aborted
+            FinishHTTP(*Tile\Download)
+            *Tile\Size = 0 ; \Size = 0 signals that the download has failed
+            MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " aborted.", 5)
+            Quit = #True
+          Default
+            MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " downloading " + Str(Progress) + " bytes", 5)
+            If ElapsedMilliseconds() - *Tile\Time > 10000
+              MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " canceled after 10 seconds.", 5)
+              AbortHTTP(*Tile\Download)
+            EndIf
+        EndSelect
+        Delay(200) ; Frees CPU
+      Until Quit
     EndIf
-    ; **** IMPORTANT NOTICE (please not remove)
-    ; I'm (djes) now using Curl (actually, just normal pb) only, as this original catchimage/saveimage method is a double operation (uncompress/recompress PNG)
-    ; and is modifying the original PNG image which could lead to PNG error (Idle has spent hours debunking the 1 bit PNG bug)
-    ; More than that, the original Purebasic Receive library is still not Proxy enabled.
-    ;       *Buffer = ReceiveHTTPMemory(TileURL)  ;TODO to thread by using #PB_HTTP_Asynchronous
-    ;       If *Buffer
-    ;         nImage = CatchImage(#PB_Any, *Buffer, MemorySize(*Buffer))
-    ;         If IsImage(nImage)
-    ;           If SaveImage(nImage, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;The 32 is needed !!!!
-    ;             MyDebug("Loaded from web " + TileURL + " as CacheFile " + CacheFile, 3)
-    ;           Else
-    ;             MyDebug("Loaded from web " + TileURL + " but cannot save to CacheFile " + CacheFile, 3)
-    ;           EndIf
-    ;           FreeMemory(*Buffer)
-    ;         Else
-    ;           MyDebug("Can't catch image loaded from web " + TileURL, 3)
-    ;           nImage = -1
-    ;         EndIf
-    ;       Else
-    ;         MyDebug(" Problem loading from web " + TileURL, 3)
-    ;       EndIf
-    ; ****
-    ProcedureReturn nImage
+    ; End of the memory cache access
+    LockMutex(PBMap\MemoryCacheAccessMutex)
+    PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
-  Procedure GetImageThread(*Tile.Tile)
-    Protected nImage.i = -1
-    Repeat
-      nImage = GetTileFromWeb(*Tile\URL, *Tile\CacheFile)
-      If nImage <> -1
-        MyDebug("Image key : " + *Tile\key + " web image loaded", 3)
-        *Tile\RetryNb = 0
-      Else 
-        MyDebug("Image key : " + *Tile\key + " web image not correctly loaded, will retry in 2 secs", 3)
-        Delay(2000)
-        *Tile\RetryNb - 1
-      EndIf
-    Until *Tile\RetryNb <= 0
-    *Tile\nImage = nImage
-    *Tile\RetryNb = -2 ;End of the thread    
-    PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ;To free memory outside the thread
-  EndProcedure
   ;-***
   
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
-    ; Try to find the tile in memory cache. If not found, add it, try to load it from the 
-    ; HDD, or launch a loading thread, and try again on the next drawing loop.
-    Protected img.i = -1
+    ; MemoryCache access management
+    LockMutex(PBMap\MemoryCacheAccessMutex)
+    ; Try to find the tile in memory cache
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
-      MyDebug("Key : " + key + " found in memory cache", 3)
-      img = *timg\nImage
-      If img <> -1
-        MyDebug("Image : " + img + " found in memory cache", 3)
-        ;*** Cache management
-        ; Move the newly used element to the last position of the time stack
-        SelectElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPosition)
+      MyDebug("Key : " + key + " found in memory cache", 4)
+      ; Is the associated image already been loaded in memory ?
+      If *timg\nImage
+        ; Yes, returns the image's nb
+        MyDebug(" as image " + *timg\nImage, 4)
+        ; *** Cache management
+        ; Retrieves the image in the time stack, push it to the end (to say it's the lastly used)
+        ChangeCurrentElement(PBMap\MemCache\ImagesTimeStack(), *timg\TimeStackPtr)
         MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
-        ;***
+        ; *timg\TimeStackPtr = LastElement(PBMap\MemCache\ImagesTimeStack())
+        ; ***
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
         ProcedureReturn *timg
+      Else
+        ; No, try to load it from HD (see below)
+        MyDebug(" but not the image.", 4)
       EndIf
     Else
-      ;PushMapPosition(PBMap\MemCache\Images())
-      ;*** Cache management
-      ; if cache size exceeds limit, try to delete the oldest tile used (first in the list)
-      Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
-      Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
-      MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 4)
-      ResetList(PBMap\MemCache\ImagesTimeStack())
-      While NextElement(PBMap\MemCache\ImagesTimeStack()) And CacheSize > CacheLimit   
-        Protected CacheMapKey.s = PBMap\MemCache\ImagesTimeStack()\MapKey
-        Protected Image = PBMap\MemCache\Images(CacheMapKey)\nImage
-        If IsImage(Image) ; Check if the image is valid (is a loading thread running ?)
-          FreeImage(Image)
-          MyDebug("Delete " + CacheMapKey + " As image nb " + Str(Image), 4)
-          DeleteMapElement(PBMap\MemCache\Images(), CacheMapKey)
-          DeleteElement(PBMap\MemCache\ImagesTimeStack())
-          CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
-        EndIf
-      Wend
-      LastElement(PBMap\MemCache\ImagesTimeStack())
-      ;PopMapPosition(PBMap\MemCache\Images())
-      AddMapElement(PBMap\MemCache\Images(), key)
-      AddElement(PBMap\MemCache\ImagesTimeStack())
-      ;MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
-      PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())
-      ;***
-      MyDebug("Key : " + key + " added in memory cache", 3)
-      *timg = PBMap\MemCache\Images()
-      *timg\nImage = -1
-    EndIf
-    If *timg\Tile = 0 ; Check if a loading thread is not running
-      MyDebug("Trying to load from HDD " + CacheFile, 3)
-      img = GetTileFromHDD(CacheFile.s)
-      If img <> -1
-        MyDebug("Key : " + key + " found on HDD", 3)
-        *timg\nImage = img
-        *timg\Alpha = 256
-        ProcedureReturn *timg
+      ; The tile has not been found in the cache, so creates a new cache element 
+      *timg = AddMapElement(PBMap\MemCache\Images(), key)
+      If *timg = 0
+        MyDebug("  Can't add a new cache element.", 4)
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
+        ProcedureReturn #False
       EndIf
-      MyDebug("Key : " + key + " not found on HDD", 3)
-      ;Launch a new thread
-      Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
-      If *NewTile
-        With *NewTile
-          *timg\Tile = *NewTile
-          *timg\Alpha = 0
-          ;*timg\nImage = -1    
-          ;New tile parameters
-          \key = key
-          \URL = URL
-          \CacheFile = CacheFile
-          \RetryNb = 5
-          \nImage = -1         
-          MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile, 3)
-          \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-        EndWith  
-      Else
-        MyDebug(" Error, can't create a new tile loading thread", 3)
-      EndIf    
+      ; add a new time stack element at the End     
+      LastElement(PBMap\MemCache\ImagesTimeStack())
+      ; Stores the time stack ptr   
+      *timg\TimeStackPtr = AddElement(PBMap\MemCache\ImagesTimeStack())
+      If *timg\TimeStackPtr = 0
+        MyDebug("  Can't add a new time stack element.", 4)
+        DeleteMapElement(PBMap\MemCache\Images())
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
+        ProcedureReturn #False
+      EndIf
+      ; Associates the time stack element to the cache element
+      PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(PBMap\MemCache\Images())    
+      MyDebug("Key : " + key + " added in memory cache", 4)
     EndIf
-    ProcedureReturn *timg 
+    ; If there's no active download thread for this tile
+    If *timg\Tile <= 0        
+      ; Manage tile file lifetime, delete if too old
+      If PBMap\Options\TileLifetime <> -1 
+        If FileSize(CacheFile) > 0 ; Does the file exists ?
+          If Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
+            If DeleteFile(CacheFile)
+              MyDebug("  Deleting too old image file  " + CacheFile, 3)
+            Else
+              MyDebug("  Can't delete too old image file  " + CacheFile, 3)
+              UnlockMutex(PBMap\MemoryCacheAccessMutex)
+              ProcedureReturn #False
+            EndIf
+          EndIf
+        EndIf
+      EndIf
+      ; Try To load it from HD
+      *timg\nImage = 0
+      *timg\Size = FileSize(CacheFile)
+      If *timg\Size > 0   
+        *timg\nImage = GetTileFromHDD(CacheFile.s)
+      Else
+        MyDebug(" Failed loading from HDD " + CacheFile + " -> Filesize = " + FileSize(CacheFile), 3)
+      EndIf
+      If *timg\nImage
+        ; Image found and loaded from HDD
+        *timg\Alpha = 0
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
+        ProcedureReturn *timg
+      Else
+        ; If GetTileFromHDD failed, will load it (again?) from the web
+        If PBMap\ThreadsNB < PBMap\Options\MaxThreads
+          If PBMap\DownloadSlots < PBMap\Options\MaxDownloadSlots        
+            ; Launch a new web loading thread
+            PBMap\DownloadSlots + 1
+            Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
+            If *NewTile
+              With *NewTile 
+                ; New tile parameters
+                \key = key
+                \URL = URL
+                \CacheFile = CacheFile
+                \nImage = 0 
+                \Time = ElapsedMilliseconds()
+                \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
+                If \GetImageThread
+                  *timg\Tile = *NewTile ; There's now a loading thread
+                  *timg\Alpha = 0
+                  MyDebug(" Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile + " (key = " + key, 3)
+                  PBMap\ThreadsNB + 1
+                Else
+                  MyDebug(" Can't create get image thread to get " + CacheFile, 3)
+                  FreeMemory(*NewTile)
+                EndIf
+              EndWith
+            Else        
+              MyDebug(" Error, can't allocate memory for a new tile loading thread", 3)
+            EndIf            
+          Else
+            MyDebug(" Thread needed " + key + "  for image " + CacheFile + " canceled because no free download slot.", 5)
+          EndIf
+        Else
+          MyDebug(" Error, maximum threads nb reached", 3)
+        EndIf
+      EndIf
+    EndIf
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
+    ProcedureReturn #False
   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
     Protected x.i, y.i,kq.q
-    Protected tx = Int(*Drawing\TileCoordinates\x)          ;Don't forget the Int() !
+    Protected tx = Int(*Drawing\TileCoordinates\x)          ; Don't forget the Int() !
     Protected ty = Int(*Drawing\TileCoordinates\y)
-    Protected nx = *Drawing\RadiusX / PBMap\TileSize        ;How many tiles around the point
+    Protected nx = *Drawing\RadiusX / PBMap\TileSize        ; How many tiles around the point
     Protected ny = *Drawing\RadiusY / PBMap\TileSize
     Protected px, py, *timg.ImgMemCach, tilex, tiley, key.s
     Protected URL.s, CacheFile.s
     Protected tilemax = 1<<PBMap\Zoom
-    Protected HereLoadBalancing.b                           ;Here is providing a load balancing system
+    Protected HereLoadBalancing.b                           ; Here is providing a load balancing system
     FindMapElement(PBMap\Layers(), LayerName)
     MyDebug("Drawing tiles")
     For y = - ny - 1 To ny + 1
@@ -1239,12 +1359,12 @@ Module PBMap
           EndIf
           With PBMap\Layers()
             Select \LayerType
-              ;---- OSM tiles
+                ;---- OSM tiles
               Case 0 
                 URL = \ServerURL + Str(PBMap\Zoom) + "/" + Str(tilex) + "/" + Str(tiley) + ".png"   
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + ".png" 
-              ;---- Here tiles
+                ;---- Here tiles
               Case 1 
                 HereLoadBalancing = 1 + ((tiley + tilex) % 4)
                 ; {Base URL}{Path}{resource (tile type)}/{Map id}/{scheme}/{zoom}/{column}/{row}/{size}/{format}?app_id={YOUR_APP_ID}&app_code={YOUR_APP_CODE}&{param}={value}
@@ -1254,7 +1374,7 @@ Module PBMap
                 EndIf
                 ; Tile cache name based on y
                 CacheFile = DirName + slash + Str(tiley) + "." + \format 
-              ;---- GeoServer / geowebcache - google maps service tiles
+                ;---- GeoServer / geowebcache - google maps service tiles
               Case 2 
                 ; template 'http://localhost:8080/geowebcache/service/gmaps?layers=layer-name&zoom={Z}&x={X}&y={Y}&format=image/png'
                 URL = \ServerURL + \path + "?layers=" + \ServerLayerName + "&zoom={" + Str(PBMap\Zoom) + "}&x={" + Str(tilex) + "}&y={" + Str(tiley) + "}&format=" + \format
@@ -1263,7 +1383,7 @@ Module PBMap
             EndSelect          
           EndWith
           *timg = GetTile(key, URL, CacheFile)
-          If *timg\nImage <> -1  
+          If *timg And *timg\nImage
             MovePathCursor(px, py)
             If *timg\Alpha <= 224
               DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha * PBMap\Layers()\Alpha)
@@ -1278,10 +1398,10 @@ Module PBMap
             DrawVectorImage(ImageID(PBMap\ImgLoading), 255 * PBMap\Layers()\Alpha)
           EndIf
         Else
-          ;If PBMap\Layers()\Name = ""
+          ; If PBMap\Layers()\Name = ""
           MovePathCursor(px, py)
           DrawVectorImage(ImageID(PBMap\ImgNothing), 255 * PBMap\Layers()\Alpha)
-          ;EndIf
+          ; EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
           VectorFont(FontID(PBMap\Font), 16)
@@ -1307,7 +1427,7 @@ Module PBMap
       AddPathLine(-8, 16, #PB_Path_Relative)
       AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
       VectorSourceColor(RGBA($FF, 0, 0, $FF))
-      FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA($FF, 0, 0, $FF));RGBA(0, 0, 0, 255)) 
+      FillPath(#PB_Path_Preserve):VectorSourceColor(RGBA($FF, 0, 0, $FF)); RGBA(0, 0, 0, 255)) 
       StrokePath(1)
     EndIf  
   EndProcedure
@@ -1336,7 +1456,7 @@ Module PBMap
     Protected pos1.PixelCoordinates, pos2.PixelCoordinates, Degrees1.GeographicCoordinates, degrees2.GeographicCoordinates 
     CopyStructure(*Drawing\Bounds\NorthWest, @Degrees1, GeographicCoordinates)
     CopyStructure(*Drawing\Bounds\SouthEast, @Degrees2, GeographicCoordinates)
-    ;ensure we stay positive for the drawing
+    ; ensure we stay positive for the drawing
     nx =  Mod(Mod(Round(Degrees1\Longitude, #PB_Round_Down)-1, 360) + 360, 360)
     ny =          Round(Degrees1\Latitude,  #PB_Round_Up)  +1
     nx1 = Mod(Mod(Round(Degrees2\Longitude, #PB_Round_Up)  +1, 360) + 360, 360)
@@ -1345,12 +1465,12 @@ Module PBMap
     Degrees1\Latitude  = ny 
     Degrees2\Longitude = nx1
     Degrees2\Latitude  = ny1
-    ;    Debug "NW : " + StrD(Degrees1\Longitude) + " ; NE : " + StrD(Degrees2\Longitude)
+    ; Debug "NW : " + StrD(Degrees1\Longitude) + " ; NE : " + StrD(Degrees2\Longitude)
     LatLon2PixelRel(@Degrees1, @pos1, PBMap\Zoom)
     LatLon2PixelRel(@Degrees2, @pos2, PBMap\Zoom)
     VectorFont(FontID(PBMap\Font), 10)
     VectorSourceColor(RGBA(0, 0, 0, alpha))    
-    ;draw latitudes
+    ; draw latitudes
     For y = ny1 To ny
       Degrees1\Longitude = nx
       Degrees1\Latitude  = y 
@@ -1360,7 +1480,7 @@ Module PBMap
       MovePathCursor(10, pos1\y) 
       DrawVectorText(StrD(y, 1))
     Next       
-    ;draw longitudes
+    ; draw longitudes
     x = nx
     Repeat
       Degrees1\Longitude = x
@@ -1449,12 +1569,12 @@ Module PBMap
     Protected Location.GeographicCoordinates
     Protected km.f, memKm.i
     With PBMap\TracksList()
-      ;Trace Track
+      ; Trace Track
       If ListSize(PBMap\TracksList()) > 0
         BeginVectorLayer()
         ForEach PBMap\TracksList()
           If ListSize(\Track()) > 0
-            ;Check visibility
+            ; Check visibility
             \Visible = #False
             ForEach \Track()
               If IsInDrawingPixelBoundaries(*Drawing, @PBMap\TracksList()\Track())
@@ -1463,7 +1583,7 @@ Module PBMap
               EndIf
             Next
             If \Visible
-              ;Draw tracks
+              ; Draw tracks
               ForEach \Track()
                 LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                 If ListIndex(\Track()) = 0
@@ -1472,10 +1592,10 @@ Module PBMap
                   AddPathLine(Pixel\x, Pixel\y)    
                 EndIf
               Next
-              ;           \BoundingBox\x = PathBoundsX()
-              ;           \BoundingBox\y = PathBoundsY()
-              ;           \BoundingBox\w = PathBoundsWidth()
-              ;           \BoundingBox\h = PathBoundsHeight()
+              ; \BoundingBox\x = PathBoundsX()
+              ; \BoundingBox\y = PathBoundsY()
+              ; \BoundingBox\w = PathBoundsWidth()
+              ; \BoundingBox\h = PathBoundsHeight()
               If \Focus
                 VectorSourceColor(PBMap\Options\ColourFocus)
               ElseIf \Selected
@@ -1488,14 +1608,14 @@ Module PBMap
           EndIf
         Next
         EndVectorLayer()
-        ;Draw distances
+        ; Draw distances
         If PBMap\Options\ShowTrackKms And PBMap\Zoom > 10
           BeginVectorLayer()
           ForEach PBMap\TracksList()
             If \Visible
               km = 0 : memKm = -1
               ForEach PBMap\TracksList()\Track()
-                ;Test Distance
+                ; Test Distance
                 If ListIndex(\Track()) = 0
                   Location\Latitude = \Track()\Latitude
                   Location\Longitude = \Track()\Longitude 
@@ -1644,7 +1764,7 @@ Module PBMap
   EndProcedure
   
   Procedure MarkerEdit(*Marker.Marker)
-    If *Marker\EditWindow = 0 ;Check that this marker has no already opened window
+    If *Marker\EditWindow = 0 ; Check that this marker has no already opened window
       Protected WindowMarkerEdit = OpenWindow(#PB_Any, WindowX(PBMap\Window) + WindowWidth(PBMap\Window) / 2 - 150, WindowY(PBMap\Window)+ WindowHeight(PBMap\Window) / 2 + 50, 300, 100, "Marker Edit", #PB_Window_SystemMenu | #PB_Window_TitleBar)
       StickyWindow(WindowMarkerEdit, #True) 
       TextGadget(#PB_Any, 2, 2, 80, 25, gettext("Identifier"))
@@ -1667,8 +1787,8 @@ Module PBMap
     AddPathLine(-8, -16, #PB_Path_Relative)
     AddPathCircle(8, 0, 8, 180, 0, #PB_Path_Relative)
     AddPathLine(-8, 16, #PB_Path_Relative)
-    ;FillPath(#PB_Path_Preserve) 
-    ;ClipPath(#PB_Path_Preserve)
+    ; FillPath(#PB_Path_Preserve) 
+    ; ClipPath(#PB_Path_Preserve)
     AddPathCircle(0, -16, 5, 0, 360, #PB_Path_Relative)
     VectorSourceColor(*Marker\Color)
     FillPath(#PB_Path_Preserve)
@@ -1695,7 +1815,7 @@ Module PBMap
     EndIf
     If PBMap\Options\ShowMarkersLegend And *Marker\Legend <> ""
       VectorFont(FontID(PBMap\Font), 13)
-      ;dessin d'un cadre avec fond transparent
+      ; dessin d'un cadre avec fond transparent
       Protected Height = VectorParagraphHeight(*Marker\Legend, 100, 100)
       Protected Width.l
       If Height < 20 ; une ligne
@@ -1737,23 +1857,23 @@ Module PBMap
     VectorFont(FontID(PBMap\Font), 16)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(50, 50)
-    DrawVectorText(Str(MapSize(PBMap\MemCache\Images())))
+    DrawVectorText("Images in cache : " + Str(MapSize(PBMap\MemCache\Images())))
     MovePathCursor(50, 70)
     Protected ThreadCounter = 0
     ForEach PBMap\MemCache\Images()
-      If PBMap\MemCache\Images()\Tile <> 0
+      If PBMap\MemCache\Images()\Tile > 0
         If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
           ThreadCounter + 1
         EndIf
       EndIf
     Next
-    DrawVectorText(Str(ThreadCounter))    
+    DrawVectorText("Threads nb : " + Str(ThreadCounter))    
     MovePathCursor(50, 90)
-    DrawVectorText(Str(PBMap\Zoom))
+    DrawVectorText("Zoom : " + Str(PBMap\Zoom))
     MovePathCursor(50, 110)
-    DrawVectorText(StrD(*Drawing\Bounds\NorthWest\Latitude) + "," + StrD(*Drawing\Bounds\NorthWest\Longitude))  
+    DrawVectorText("Lat-Lon 1 : " + StrD(*Drawing\Bounds\NorthWest\Latitude) + "," + StrD(*Drawing\Bounds\NorthWest\Longitude))  
     MovePathCursor(50, 130)
-    DrawVectorText(StrD(*Drawing\Bounds\SouthEast\Latitude) + "," + StrD(*Drawing\Bounds\SouthEast\Longitude))  
+    DrawVectorText("Lat-Lon 2 : " + StrD(*Drawing\Bounds\SouthEast\Latitude) + "," + StrD(*Drawing\Bounds\SouthEast\Longitude))  
   EndProcedure
   
   Procedure DrawOSMCopyright(*Drawing.DrawingParameters)
@@ -1772,7 +1892,7 @@ Module PBMap
     Protected NW.Coordinates, SE.Coordinates
     PBMap\Dirty = #False
     PBMap\Redraw = #False
-    ;*** Precalc some values
+    ; *** Precalc some values
     *Drawing\RadiusX = GadgetWidth(PBMap\Gadget) / 2
     *Drawing\RadiusY = GadgetHeight(PBMap\Gadget) / 2
     *Drawing\GeographicCoordinates\Latitude = PBMap\GeographicCoordinates\Latitude
@@ -1782,10 +1902,10 @@ Module PBMap
     ; Pixel shift, aka position in the tile
     Px = *Drawing\TileCoordinates\x 
     Py = *Drawing\TileCoordinates\y
-    *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ;Don't forget the Int() !
+    *Drawing\DeltaX = Px * ts - (Int(Px) * ts) ; Don't forget the Int() !
     *Drawing\DeltaY = Py * ts - (Int(Py) * ts)
-    ;Drawing boundaries  
-    nx = *Drawing\RadiusX / ts ;How many tiles around the point
+    ; Drawing boundaries  
+    nx = *Drawing\RadiusX / ts ; How many tiles around the point
     ny = *Drawing\RadiusY / ts
     NW\x = Px - nx - 1
     NW\y = Py - ny - 1
@@ -1793,17 +1913,17 @@ Module PBMap
     SE\y = Py + ny + 2
     TileXY2LatLon(@NW, *Drawing\Bounds\NorthWest, PBMap\Zoom)
     TileXY2LatLon(@SE, *Drawing\Bounds\SouthEast, PBMap\Zoom)
-    ;*Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ;Calculus without clipping
-    ;*Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
-    ;***
+    ; *Drawing\Width = (SE\x / Pow(2, PBMap\Zoom) * 360.0) - (NW\x / Pow(2, PBMap\Zoom) * 360.0) ; Calculus without clipping
+    ; *Drawing\Height = *Drawing\Bounds\NorthWest\Latitude - *Drawing\Bounds\SouthEast\Latitude
+    ; ***
     ; Main drawing stuff
     StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-    ;Clearscreen
+    ; Clearscreen
     VectorSourceColor(RGBA(150, 150, 150, 255))
     FillVectorOutput()
-    ;TODO add in layers of tiles ;this way we can cache them as 0 base 1.n layers 
+    ; TODO add in layers of tiles ; this way we can cache them as 0 base 1.n layers 
     ; such as for openseamap tiles which are overlaid. not that efficent from here though.
-    ;Draws layers based on their number
+    ; Draws layers based on their number
     ForEach PBMap\LayersList()
       If PBMap\LayersList()\Enabled
         DrawTiles(*Drawing, PBMap\LayersList()\Name)
@@ -1833,7 +1953,7 @@ Module PBMap
   
   Procedure Refresh()
     PBMap\Redraw = #True
-    ;Drawing()
+    ; Drawing()
   EndProcedure
   
   ;-*** Misc functions
@@ -1841,7 +1961,7 @@ Module PBMap
   Procedure.d GetMouseLongitude()
     Protected MouseX.d = (PBMap\PixelCoordinates\x - PBMap\Drawing\RadiusX + GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX)) / PBMap\TileSize
     Protected n.d = Pow(2.0, PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180;180[
+    ; double mod is to ensure the longitude to be in the range [-180; 180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
@@ -1886,26 +2006,26 @@ Module PBMap
   EndProcedure
   
   Procedure SetZoomToArea(MinY.d, MaxY.d, MinX.d, MaxX.d)
-    ;Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
-    ;bounding box in long/lat coords (x=long, y=lat)
-    Protected DeltaX.d = MaxX - MinX                            ;assumption ! In original code DeltaX have no source
+    ; Source => http://gis.stackexchange.com/questions/19632/how-to-calculate-the-optimal-zoom-level-to-display-two-or-more-points-on-a-map
+    ; bounding box in long/lat coords (x=long, y=lat)
+    Protected DeltaX.d = MaxX - MinX                            ; assumption ! In original code DeltaX have no source
     Protected centerX.d = MinX + DeltaX / 2                     ; assumption ! In original code CenterX have no source
-    Protected paddingFactor.f= 1.2                              ;paddingFactor: this can be used to get the "120%" effect ThomM refers to. Value of 1.2 would get you the 120%.
+    Protected paddingFactor.f= 1.2                              ; paddingFactor: this can be used to get the "120%" effect ThomM refers to. Value of 1.2 would get you the 120%.
     Protected ry1.d = Log((Sin(Radian(MinY)) + 1) / Cos(Radian(MinY)))
     Protected ry2.d = Log((Sin(Radian(MaxY)) + 1) / Cos(Radian(MaxY)))
     Protected ryc.d = (ry1 + ry2) / 2                                 
     Protected centerY.d = Degree(ATan(SinH(ryc)))                     
     Protected resolutionHorizontal.d = DeltaX / (PBMap\Drawing\RadiusX * 2)
-    Protected vy0.d = Log(Tan(#PI*(0.25 + centerY/360)));
-    Protected vy1.d = Log(Tan(#PI*(0.25 + MaxY/360)))   ;
-    Protected viewHeightHalf.d = PBMap\Drawing\RadiusY  ;
+    Protected vy0.d = Log(Tan(#PI*(0.25 + centerY/360))); 
+    Protected vy1.d = Log(Tan(#PI*(0.25 + MaxY/360)))   ; 
+    Protected viewHeightHalf.d = PBMap\Drawing\RadiusY  ; 
     Protected zoomFactorPowered.d = viewHeightHalf / (40.7436654315252*(vy1 - vy0))
     Protected resolutionVertical.d = 360.0 / (zoomFactorPowered * PBMap\TileSize)    
     If resolutionHorizontal<>0 And resolutionVertical<>0
       Protected resolution.d = Max(resolutionHorizontal, resolutionVertical)* paddingFactor
       Protected zoom.d = Log(360 / (resolution * PBMap\TileSize))/Log(2)
-      Protected lon.d = centerX;
-      Protected lat.d = centerY;
+      Protected lon.d = centerX; 
+      Protected lat.d = centerY; 
       SetLocation(lat, lon, Round(zoom,#PB_Round_Down))
     Else
       SetLocation(PBMap\GeographicCoordinates\Latitude, PBMap\GeographicCoordinates\Longitude, 15)
@@ -1978,7 +2098,7 @@ Module PBMap
   Procedure SetMapScaleUnit(ScaleUnit.i = PBMAP::#SCALE_KM)
     PBMap\Options\ScaleUnit = ScaleUnit
     PBMap\Redraw = #True
-    ;Drawing()
+    ; Drawing()
   EndProcedure   
   
   ; User mode
@@ -1994,9 +2114,9 @@ Module PBMap
     ProcedureReturn PBMap\Mode
   EndProcedure
   
-  ;Zoom on x, y pixel position from the center
+  ; Zoom on x, y pixel position from the center
   Procedure SetZoomOnPixel(x, y, zoom)
-    ;*** First : Zoom
+    ; *** First : Zoom
     PBMap\Zoom + zoom
     If PBMap\Zoom > PBMap\ZoomMax : PBMap\Zoom = PBMap\ZoomMax : ProcedureReturn : EndIf
     If PBMap\Zoom < PBMap\ZoomMin : PBMap\Zoom = PBMap\ZoomMin : ProcedureReturn : EndIf
@@ -2017,12 +2137,12 @@ Module PBMap
     EndIf      
   EndProcedure  
   
-  ;Zoom on x, y position relative to the canvas gadget
+  ; Zoom on x, y position relative to the canvas gadget
   Procedure SetZoomOnPixelRel(x, y, zoom)
     SetZoomOnPixel(x - PBMap\Drawing\RadiusX, y - PBMap\Drawing\RadiusY, zoom)
   EndProcedure  
   
-  ;Go to x, y position relative to the canvas gadget left up
+  ; Go to x, y position relative to the canvas gadget left up
   Procedure GotoPixelRel(x, y)
     LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
     PBMap\PixelCoordinates\x + x - PBMap\Drawing\RadiusX
@@ -2036,7 +2156,7 @@ Module PBMap
     EndIf      
   EndProcedure  
   
-  ;Go to x, y position relative to the canvas gadget
+  ; Go to x, y position relative to the canvas gadget
   Procedure GotoPixel(x, y)
     PBMap\PixelCoordinates\x = x
     PBMap\PixelCoordinates\y = y
@@ -2071,16 +2191,16 @@ Module PBMap
                         URLEncoder(Address) + 
                         "?format=json&addressdetails=0&polygon=0&limit=1"
     Protected JSONFileName.s = PBMap\Options\HDDCachePath + "nominatimresponse.json"
-    ;    Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
-    ;     Debug *Buffer
-    ;     Debug MemorySize(*Buffer)
-    ;     Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
+    ; Protected *Buffer = CurlReceiveHTTPToMemory("http://nominatim.openstreetmap.org/search/Unter%20den%20Linden%201%20Berlin?format=json&addressdetails=1&limit=1&polygon_svg=1", PBMap\Options\ProxyURL, PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
+    ; Debug *Buffer
+    ; Debug MemorySize(*Buffer)
+    ; Protected JSon.s = PeekS(*Buffer, MemorySize(*Buffer), #PB_UTF8)
     If PBMap\Options\Proxy
       HTTPProxy(PBMap\Options\ProxyURL + ":" + PBMap\Options\ProxyPort, PBMap\Options\ProxyUser, PBMap\Options\ProxyPassword)
     EndIf
     Size = ReceiveHTTPFile(Query, JSONFileName)
     If LoadJSON(0, JSONFileName) = 0
-      ;Demivec's code
+      ; Demivec's code
       MyDebug( JSONErrorMessage() + " at position " +
                JSONErrorPosition() + " in line " +
                JSONErrorLine() + " of JSON web Data", 1)
@@ -2100,7 +2220,7 @@ Module PBMap
       EndIf
       If lat <> "" And lon <> "" 
         SetZoomToArea(bbox\SouthEast\Latitude, bbox\NorthWest\Latitude, bbox\NorthWest\Longitude, bbox\SouthEast\Longitude)
-        ;SetLocation(Position\Latitude, Position\Longitude)
+        ; SetLocation(Position\Latitude, Position\Longitude)
       EndIf
     EndIf
   EndProcedure
@@ -2113,11 +2233,11 @@ Module PBMap
       EndIf
     EndIf
     If DeleteDirectory(PBMap\Options\HDDCachePath, "", #PB_FileSystem_Recursive)
-      MyDebug("Cache in : " + PBMap\Options\HDDCachePath + " cleared")
+      MyDebug("Cache in : " + PBMap\Options\HDDCachePath + " cleared", 3)
       CreateDirectoryEx(PBMap\Options\HDDCachePath)
       ProcedureReturn #True
     Else
-      MyDebug("Can't clear cache in " + PBMap\Options\HDDCachePath)
+      MyDebug("Can't clear cache in " + PBMap\Options\HDDCachePath, 3)
       ProcedureReturn #False
     EndIf
   EndProcedure
@@ -2133,11 +2253,11 @@ Module PBMap
     CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\RadiusX
     CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\RadiusY
     ; rotation wip
-    ;    StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-    ;    RotateCoordinates(0, 0, PBMap\Angle)
-    ;    CanvasMouseX = ConvertCoordinateX(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
-    ;    CanvasMouseY = ConvertCoordinateY(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
-    ;    StopVectorDrawing()
+    ; StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
+    ; RotateCoordinates(0, 0, PBMap\Angle)
+    ; CanvasMouseX = ConvertCoordinateX(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    ; CanvasMouseY = ConvertCoordinateY(MouseX, MouseY, #PB_Coordinate_Device, #PB_Coordinate_User)
+    ; StopVectorDrawing()
     Select EventType()
       Case #PB_EventType_Focus
         PBMap\Drawing\RadiusX = GadgetWidth(PBMap\Gadget) / 2
@@ -2189,19 +2309,19 @@ Module PBMap
         LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
         MouseX = PBMap\PixelCoordinates\x  + CanvasMouseX
         MouseY = PBMap\PixelCoordinates\y  + CanvasMouseY
-        ;Clip MouseX to the map range (in X, the map is infinite)
+        ; Clip MouseX to the map range (in X, the map is infinite)
         MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
         Touch = #False
-        ;Check if the mouse touch a marker
+        ; Check if the mouse touch a marker
         ForEach PBMap\Markers()              
           LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
           If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
             If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
-              ;Jump to the marker
+              ; Jump to the marker
               Touch = #True
               SetLocation(PBMap\Markers()\GeographicCoordinates\Latitude, PBMap\Markers()\GeographicCoordinates\Longitude)
             ElseIf PBMap\Mode = #MODE_EDIT
-              ;Edit the legend
+              ; Edit the legend
               MarkerEdit(@PBMap\Markers())
             EndIf
             Break
@@ -2212,37 +2332,37 @@ Module PBMap
         EndIf
       Case #PB_EventType_MouseWheel
         If PBMap\Options\WheelMouseRelative
-          ;Relative zoom (centered on the mouse)
+          ; Relative zoom (centered on the mouse)
           SetZoomOnPixel(CanvasMouseX, CanvasMouseY, GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta))
         Else
-          ;Absolute zoom (centered on the center of the map)
+          ; Absolute zoom (centered on the center of the map)
           SetZoom(GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
         EndIf        
       Case #PB_EventType_LeftButtonDown
-        ;LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
+        ; LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
         PBMap\Dragging = #True
-        ;Mem cursor Coord
+        ; Memorize cursor Coord
         PBMap\MoveStartingPoint\x = CanvasMouseX
         PBMap\MoveStartingPoint\y = CanvasMouseY
-        ;Clip MouseX to the map range (in X, the map is infinite)
+        ; Clip MouseX to the map range (in X, the map is infinite)
         PBMap\MoveStartingPoint\x = Mod(Mod(PBMap\MoveStartingPoint\x, MapWidth) + MapWidth, MapWidth)
         If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT
           PBMap\EditMarker = #False
-          ;Check if we select marker(s)
+          ; Check if we select marker(s)
           ForEach PBMap\Markers()                   
             If CtrlKey = #False
-              PBMap\Markers()\Selected = #False ;If no CTRL key, deselect everything and select only the focused marker
+              PBMap\Markers()\Selected = #False ; If no CTRL key, deselect everything and select only the focused marker
             EndIf
             If PBMap\Markers()\Focus
               PBMap\Markers()\Selected = #True
-              PBMap\EditMarker = #True;ListIndex(PBMap\Markers())  
+              PBMap\EditMarker = #True; ListIndex(PBMap\Markers())  
               PBMap\Markers()\Focus = #False
             EndIf
           Next
-          ;Check if we select track(s)
+          ; Check if we select track(s)
           ForEach PBMap\TracksList()                   
             If CtrlKey = #False
-              PBMap\TracksList()\Selected = #False ;If no CTRL key, deselect everything and select only the focused track
+              PBMap\TracksList()\Selected = #False ; If no CTRL key, deselect everything and select only the focused track
             EndIf
             If PBMap\TracksList()\Focus
               PBMap\TracksList()\Selected = #True
@@ -2253,12 +2373,12 @@ Module PBMap
       Case #PB_EventType_MouseMove
         ; Drag
         If PBMap\Dragging
-          ;        If PBMap\MoveStartingPoint\x <> - 1
+          ; If PBMap\MoveStartingPoint\x <> - 1
           MouseX = CanvasMouseX - PBMap\MoveStartingPoint\x
           MouseY = CanvasMouseY - PBMap\MoveStartingPoint\y
           PBMap\MoveStartingPoint\x = CanvasMouseX
           PBMap\MoveStartingPoint\y = CanvasMouseY
-          ;Move selected markers
+          ; Move selected markers
           If PBMap\EditMarker And (PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT)
             ForEach PBMap\Markers()
               If PBMap\Markers()\Selected
@@ -2269,14 +2389,14 @@ Module PBMap
               EndIf
             Next
           ElseIf PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_HAND
-            ;Move map only
-            LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom) ;This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
+            ; Move map only
+            LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom) ; This line could be removed as the coordinates don't have to change but I want to be sure we rely only on geographic coordinates
             PBMap\PixelCoordinates\x - MouseX
-            ;Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
+            ; Ensures that pixel position stay in the range [0..2^Zoom*PBMap\TileSize[ coz of the wrapping of the map
             PBMap\PixelCoordinates\x = Mod(Mod(PBMap\PixelCoordinates\x, MapWidth) + MapWidth, MapWidth)
             PBMap\PixelCoordinates\y - MouseY
             Pixel2LatLon(@PBMap\PixelCoordinates, @PBMap\GeographicCoordinates, PBMap\Zoom)
-            ;If CallBackLocation send Location to function
+            ; If CallBackLocation send Location to function
             If PBMap\CallBackLocation > 0
               CallFunctionFast(PBMap\CallBackLocation, @PBMap\GeographicCoordinates)
             EndIf 
@@ -2287,30 +2407,30 @@ Module PBMap
           LatLon2Pixel(@PBMap\GeographicCoordinates, @PBMap\PixelCoordinates, PBMap\Zoom)
           MouseX = PBMap\PixelCoordinates\x + CanvasMouseX 
           MouseY = PBMap\PixelCoordinates\y + CanvasMouseY 
-          ;Clip MouseX to the map range (in X, the map is infinite)
+          ; Clip MouseX to the map range (in X, the map is infinite)
           MouseX = Mod(Mod(MouseX, MapWidth) + MapWidth, MapWidth)
           If PBMap\Mode = #MODE_DEFAULT Or PBMap\Mode = #MODE_SELECT Or PBMap\Mode = #MODE_EDIT
-            ;Check if mouse touch markers
+            ; Check if mouse touch markers
             ForEach PBMap\Markers()              
               LatLon2Pixel(@PBMap\Markers()\GeographicCoordinates, @MarkerCoords, PBMap\Zoom)
               If Distance(MarkerCoords\x, MarkerCoords\y, MouseX, MouseY) < 8
                 PBMap\Markers()\Focus = #True
                 PBMap\Redraw = #True
               ElseIf PBMap\Markers()\Focus
-                ;If CtrlKey = #False
+                ; If CtrlKey = #False
                 PBMap\Markers()\Focus = #False
                 PBMap\Redraw = #True
               EndIf
             Next
-            ;Check if mouse touch tracks           
+            ; Check if mouse touch tracks           
             With PBMap\TracksList()
-              ;Trace Track
+              ; Trace Track
               If ListSize(PBMap\TracksList()) > 0
                 ForEach PBMap\TracksList()
                   If ListSize(\Track()) > 0
                     If \Visible
                       StartVectorDrawing(CanvasVectorOutput(PBMap\Gadget))
-                      ;Simulates track drawing
+                      ; Simulates track drawing
                       ForEach \Track()
                         LatLon2Pixel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
                         If ListIndex(\Track()) = 0
@@ -2335,24 +2455,31 @@ Module PBMap
           EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
-        ;        PBMap\MoveStartingPoint\x = - 1
+        ; PBMap\MoveStartingPoint\x = - 1
         PBMap\Dragging = #False
         PBMap\Redraw = #True
       Case #PB_MAP_REDRAW
-        Debug "Redraw"
         PBMap\Redraw = #True
       Case #PB_MAP_RETRY
-        Debug "Reload"
         PBMap\Redraw = #True
+        ;- Tile web loading thread cleanup 
+        ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
       Case #PB_MAP_TILE_CLEANUP
         *Tile = EventData() 
-        key = *Tile\key
-        ;After a Web tile loading thread, clean the tile structure memory and set the image nb in the cache
-        ;avoid to have threads accessing vars (and avoid mutex), see GetImageThread()
-        Protected timg = PBMap\MemCache\Images(key)\Tile\nImage ;Get this new tile image nb
-        PBMap\MemCache\Images(key)\nImage = timg                ;store it in the cache using the key
-        FreeMemory(PBMap\MemCache\Images(key)\Tile)             ;free the data needed for the thread
-        PBMap\MemCache\Images(key)\Tile = 0                     ;clear the data ptr
+        key = *Tile\key           
+        *Tile\Download = 0
+        If FindMapElement(PBMap\MemCache\Images(), key) <> 0
+          ; If the map element has not been deleted during the thread lifetime (should not occur)
+          PBMap\MemCache\Images(key)\Tile = *Tile\Size
+          If *Tile\Size
+            PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
+          Else
+            PBMap\MemCache\Images(key)\Tile = 0
+          EndIf
+        EndIf
+        FreeMemory(*Tile)                                       ; Frees the data needed for the thread (*tile=PBMap\MemCache\Images(key)\Tile)
+        PBMap\ThreadsNB - 1
+        PBMap\DownloadSlots - 1
         PBMap\Redraw = #True
     EndSelect
   EndProcedure
@@ -2360,6 +2487,7 @@ Module PBMap
   ; Redraws at regular intervals
   Procedure TimerEvents()
     If EventTimer() = PBMap\Timer And (PBMap\Redraw Or PBMap\Dirty)
+      MemoryCacheManagement()
       Drawing()
     EndIf    
   EndProcedure 
@@ -2377,7 +2505,7 @@ Module PBMap
   ; Creates a canvas and attach our map
   Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
     If Gadget = #PB_Any
-      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ;#PB_Canvas_Keyboard has to be set for mousewheel to work on windows
+      PBMap\Gadget = CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ; #PB_Canvas_Keyboard has to be set for mousewheel to work on windows
     Else
       PBMap\Gadget = Gadget
       CanvasGadget(PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
@@ -2387,15 +2515,14 @@ Module PBMap
   
   Procedure Quit()
     PBMap\Drawing\End = #True
-    ;Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
+    ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
     Repeat
       ForEach PBMap\MemCache\Images()
-        If PBMap\MemCache\Images()\Tile <> 0         
+        If PBMap\MemCache\Images()\Tile > 0
           If IsThread(PBMap\MemCache\Images()\Tile\GetImageThread)
-            PBMap\MemCache\Images()\Tile\RetryNb = 0
             If ElapsedMilliseconds() - TimeCounter > 2000
-              ;Should not occur
+              ; Should not occur
               KillThread(PBMap\MemCache\Images()\Tile\GetImageThread)
             EndIf
           Else
@@ -2411,17 +2538,24 @@ Module PBMap
   EndProcedure
   
   Procedure InitPBMap(Window)
-    Protected Result.i
-    PBMap\ZoomMin = 1
-    PBMap\ZoomMax = 18
-    PBMap\Dragging = #False
-    PBMap\TileSize = 256
-    PBMap\Dirty = #False
-    PBMap\EditMarker = #False
-    PBMap\Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
-    PBMap\Window = Window
-    PBMap\Timer = 1
-    PBMap\Mode = #MODE_DEFAULT
+    With PBMap
+      Protected Result.i
+      \ZoomMin = 1
+      \ZoomMax = 18
+      \Dragging = #False
+      \TileSize = 256
+      \Dirty = #False
+      \EditMarker = #False
+      \Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \Window = Window
+      \Timer = 1
+      \Mode = #MODE_DEFAULT
+      \MemoryCacheAccessMutex = CreateMutex() 
+      If \MemoryCacheAccessMutex = #False
+        MyDebug("Cannot create a mutex", 0)
+        End
+      EndIf
+    EndWith
     LoadOptions()
     TechnicalImagesCreation()
     SetLocation(0, 0)
@@ -2429,11 +2563,11 @@ Module PBMap
   
 EndModule
 
-;****************************************************************
-;
+; ****************************************************************
+; 
 ;- Example of application
-;
-;****************************************************************
+; 
+; ****************************************************************
 
 CompilerIf #PB_Compiler_IsMainFile 
   InitNetwork()
@@ -2445,8 +2579,8 @@ CompilerIf #PB_Compiler_IsMainFile
     #Gdt_Right
     #Gdt_Up
     #Gdt_Down
-    ;#Gdt_RotateLeft
-    ;#Gdt_RotateRight
+    ; #Gdt_RotateLeft
+    ; #Gdt_RotateRight
     #Button_4
     #Button_5
     #Combo_0
@@ -2470,7 +2604,7 @@ CompilerIf #PB_Compiler_IsMainFile
     #StringGeoLocationQuery
   EndEnumeration
   
-  ;Menu events
+  ; Menu events
   Enumeration
     #MenuEventLonLatStringEnter
     #MenuEventGeoLocationStringEnter
@@ -2487,7 +2621,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ProcedureReturn 0
   EndProcedure
   
-  ;This callback demonstration procedure will receive relative coords from canvas
+  ; This callback demonstration procedure will receive relative coords from canvas
   Procedure MyMarker(x.i, y.i, Focus = #False, Selected = #False)
     Protected color = RGBA(0, 255, 0, 255) 
     MovePathCursor(x, y)
@@ -2518,8 +2652,8 @@ CompilerIf #PB_Compiler_IsMainFile
     ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Left, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Right,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ;ResizeGadget(#Gdt_RotateLeft, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ;ResizeGadget(#Gdt_RotateRight,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ; ResizeGadget(#Gdt_RotateLeft, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ; ResizeGadget(#Gdt_RotateRight,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Up,   WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Gdt_Down, WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
     ResizeGadget(#Text_2,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
@@ -2551,8 +2685,8 @@ CompilerIf #PB_Compiler_IsMainFile
     LoadFont(2, "Arial", 8)
     
     TextGadget(#Text_1, 530, 10, 60, 15, "Movements")
-    ;ButtonGadget(#Gdt_RotateLeft,  550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
-    ;ButtonGadget(#Gdt_RotateRight, 610, 070, 30, 30, "RRot")  : SetGadgetFont(#Gdt_RotateRight, FontID(2)) 
+    ; ButtonGadget(#Gdt_RotateLeft,  550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
+    ; ButtonGadget(#Gdt_RotateRight, 610, 070, 30, 30, "RRot")  : SetGadgetFont(#Gdt_RotateRight, FontID(2)) 
     ButtonGadget(#Gdt_Left,  550, 60, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 60, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
     ButtonGadget(#Gdt_Up,    580, 030, 30, 30, Chr($25B2))  : SetGadgetFont(#Gdt_Up, FontID(0)) 
@@ -2577,24 +2711,25 @@ CompilerIf #PB_Compiler_IsMainFile
     StringGadget(#StringGeoLocationQuery, 530, 530, 150, 20, "")
     SetActiveGadget(#StringGeoLocationQuery)
     AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventGeoLocationStringEnter)
-    ;*** TODO : code to remove when the SetActiveGadget(-1) will be fixed
+    ; *** TODO : code to remove when the SetActiveGadget(-1) will be fixed
     CompilerIf #PB_Compiler_OS = #PB_OS_Linux
       Define Dummy = ButtonGadget(#PB_Any, 0, 0, 1, 1, "Dummy") 
       HideGadget(Dummy, 1) 
     CompilerElse
       Define Dummy = -1
     CompilerEndIf
-    ;***
+    ; ***
     Define Event.i, Gadget.i, Quit.b = #False
     Define pfValue.d
     Define Degrees = 1
     Define *Track
     
-    ;Our main gadget
+    ; Our main gadget
     PBMap::InitPBMap(#Window_0)
-    PBMap::SetOption("ShowDegrees", "0") : Degrees = 0
-    PBMap::SetOption("ShowDebugInfos", "0")
-    PBMap::SetOption("Verbose", "0")
+    PBMap::SetOption("ShowDegrees", "1") : Degrees = 0
+    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetDebugLevel(5)
+    PBMap::SetOption("Verbose", "1")
     PBMap::SetOption("ShowScale", "1")    
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
@@ -2611,7 +2746,7 @@ CompilerIf #PB_Compiler_IsMainFile
       Event = WaitWindowEvent()
       Select Event
         Case #PB_Event_CloseWindow : Quit = 1
-        Case #PB_Event_Gadget ;{
+        Case #PB_Event_Gadget ; {
           Gadget = EventGadget()
           Select Gadget
             Case #Gdt_Up
@@ -2622,12 +2757,12 @@ CompilerIf #PB_Compiler_IsMainFile
               PBMap::SetLocation(0, 10* -360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
             Case #Gdt_Right
               PBMap::SetLocation(0, 10* 360 / Pow(2, PBMap::GetZoom() + 8), 0, #PB_Relative)
-              ;Case #Gdt_RotateLeft
-              ;  PBMAP::SetAngle(-5,#PB_Relative) 
-              ;  PBMap::Refresh()
-              ;Case #Gdt_RotateRight
-              ;  PBMAP::SetAngle(5,#PB_Relative) 
-              ;  PBMap::Refresh()
+              ; Case #Gdt_RotateLeft
+              ; PBMAP::SetAngle(-5,#PB_Relative) 
+              ; PBMap::Refresh()
+              ; Case #Gdt_RotateRight
+              ; PBMAP::SetAngle(5,#PB_Relative) 
+              ; PBMap::Refresh()
             Case #Button_4
               PBMap::SetZoom(1)
             Case #Button_5
@@ -2643,9 +2778,9 @@ CompilerIf #PB_Compiler_IsMainFile
                   MessageRequester("PBMap", "Problem while saving.", #PB_MessageRequester_Ok)                 
                 EndIf  
               Else
-                  MessageRequester("PBMap", "No track to save.", #PB_MessageRequester_Ok) 
+                MessageRequester("PBMap", "No track to save.", #PB_MessageRequester_Ok) 
               EndIf
-              Case #StringLatitude, #StringLongitude
+            Case #StringLatitude, #StringLongitude
               Select EventType()
                 Case #PB_EventType_Focus
                   AddKeyboardShortcut(#Window_0, #PB_Shortcut_Return, #MenuEventLonLatStringEnter)
@@ -2714,16 +2849,16 @@ CompilerIf #PB_Compiler_IsMainFile
         Case #PB_Event_SizeWindow
           ResizeAll()
         Case #PB_Event_Menu
-          ;Receive "enter" key events
+          ; Receive "enter" key events
           Select EventMenu()
             Case #MenuEventGeoLocationStringEnter
               If GetGadgetText(#StringGeoLocationQuery) <> ""
                 PBMap::NominatimGeoLocationQuery(GetGadgetText(#StringGeoLocationQuery))
                 PBMap::Refresh()
               EndIf
-              ;*** TODO : code to change when the SetActiveGadget(-1) will be fixed
+              ; *** TODO : code to change when the SetActiveGadget(-1) will be fixed
               SetActiveGadget(Dummy)
-              ;***
+              ; ***
             Case  #MenuEventLonLatStringEnter
               PBMap::SetLocation(ValD(GetGadgetText(#StringLatitude)), ValD(GetGadgetText(#StringLongitude)))                     ; Change the PBMap coordinates
               PBMap::Refresh()
@@ -2737,8 +2872,10 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2691
-; FirstLine = 2684
+; CursorPosition = 2552
+; FirstLine = 2548
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
+; CompileSourceDirectory
+; DisablePurifier = 1,1,1,1
