@@ -2,13 +2,13 @@
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
-; Author:            Thyphoon, djes And Idle
-; Date:              March, 2017
+; Author:            Thyphoon, djes, Idle, yves86
+; Date:              June, 2017
 ; License:           PBMap : Free, unrestricted, credit 
 ;                    appreciated but not required.
 ; OSM :              see http://www.openstreetmap.org/copyright
 ; Note:              Please share improvement !
-; Thanks:            Progi1984, yves86
+; Thanks:            Progi1984
 ; ******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
@@ -1910,7 +1910,7 @@ Module PBMap
   EndProcedure
   
   Procedure DrawOSMCopyright(*Drawing.DrawingParameters)
-    Protected Text.s = "© OpenStreetMap contributors"
+    Protected Text.s = "Â© OpenStreetMap contributors"
     VectorFont(FontID(PBMap\Font), 12)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
@@ -2415,14 +2415,14 @@ Module PBMap
             EndIf
           Next
         EndIf
-        ; YA pour sélectionner un point de la trace avec le clic gauche
+        ; YA pour sÃ©lectionner un point de la trace avec le clic gauche
         If PBMap\EditMarker = #False 
           Location\Latitude = GetMouseLatitude()
           Location\Longitude = GetMouseLongitude()
           If PBMap\CallBackLeftClic > 0
             CallFunctionFast(PBMap\CallBackLeftClic, @Location)
           EndIf 
-          ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
+          ; ajout YA // change la forme du pointeur de souris pour les dÃ©placements de la carte
           SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Hand)
         Else
           SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
@@ -2480,7 +2480,7 @@ Module PBMap
               EndIf
             Next
             ; Check if mouse touch tracks           
-            If PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
+            If PBMap\Options\ShowTrackSelection ; YA ajout pour Ã©viter la sÃ©lection de la trace
             With PBMap\TracksList()
               ; Trace Track
               If ListSize(PBMap\TracksList()) > 0
@@ -2518,7 +2518,7 @@ Module PBMap
         ; PBMap\MoveStartingPoint\x = - 1
         PBMap\Dragging = #False
         PBMap\Redraw = #True
-        ;YA pour connaitre les coordonnées d'un marqueur après déplacement
+        ;YA pour connaitre les coordonnÃ©es d'un marqueur aprÃ¨s dÃ©placement
         ForEach PBMap\Markers()
           If PBMap\Markers()\Selected = #True
             If PBMap\CallBackMarker > 0
