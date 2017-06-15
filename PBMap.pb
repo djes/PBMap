@@ -295,8 +295,7 @@ Module PBMap
     Dragging.i
     Dirty.i                                        ; To signal that drawing need a refresh
     
-    MemoryCacheAccessNB.i                          ; Count the access to the memory cache. =0 no access ; >0 download threads ; -1 cleaning
-    MemoryCacheAccessNBMutex.i                     ; Memorycache access variable mutual exclusion    
+    MemoryCacheAccessMutex.i                     ; Memorycache access variable mutual exclusion    
     DownloadSlots.i                                ; Actual nb of used download slots
     
     List TracksList.Tracks()                       ; To display a GPX track
@@ -1054,7 +1053,7 @@ Module PBMap
   ;-***
   ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
   Procedure MemoryCacheManagement()
-    LockMutex(PBMap\MemoryCacheAccessNBMutex) ; Prevents thread to start or finish
+    LockMutex(PBMap\MemoryCacheAccessMutex) ; Prevents thread to start or finish
     Protected CacheSize = MapSize(PBMap\MemCache\Images()) * Pow(PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
     Protected CacheLimit = PBMap\Options\MaxMemCache * 1024
     MyDebug("Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
@@ -1091,7 +1090,7 @@ Module PBMap
         MyDebug("  Cache cleaning unsuccessfull, can't add new tiles.", 5)
       EndIf
     EndIf
-    UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
   Procedure.i GetTileFromHDD(CacheFile.s)
@@ -1142,19 +1141,18 @@ Module PBMap
   Threaded Progress = 0, Quit = #False
   
   Procedure GetImageThread(*Tile.Tile)    
-    LockMutex(PBMap\MemoryCacheAccessNBMutex)
+    LockMutex(PBMap\MemoryCacheAccessMutex)
     MyDebug("Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " starting for image " + *Tile\CacheFile, 5)
     ; If MemoryCache is currently being cleaned, abort
 ;     If PBMap\MemoryCacheAccessNB = -1
 ;       MyDebug(" Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " canceled because of cleaning.", 5)
 ;       *Tile\Size = 0 ; \Size = 0 signals that the download has failed
 ;       PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
-;       UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+;       UnlockMutex(PBMap\MemoryCacheAccessMutex)
 ;       ProcedureReturn
 ;     EndIf
     ; We're accessing MemoryCache
-    PBMap\MemoryCacheAccessNB + 1
-    UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
     *Tile\Size = 0
     *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
     If *Tile\Download
@@ -1186,17 +1184,16 @@ Module PBMap
       Until Quit
     EndIf
     ; End of the memory cache access
-    LockMutex(PBMap\MemoryCacheAccessNBMutex)
-    PBMap\MemoryCacheAccessNB - 1
+    LockMutex(PBMap\MemoryCacheAccessMutex)
     PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
-    UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
   ;-***
   
   Procedure.i GetTile(key.s, URL.s, CacheFile.s)
     ; MemoryCache access management
-    LockMutex(PBMap\MemoryCacheAccessNBMutex)
+    LockMutex(PBMap\MemoryCacheAccessMutex)
     ; Try to find the tile in memory cache
     Protected *timg.ImgMemCach = FindMapElement(PBMap\MemCache\Images(), key)
     If *timg
@@ -1211,7 +1208,7 @@ Module PBMap
         MoveElement(PBMap\MemCache\ImagesTimeStack(), #PB_List_Last)
         ; *timg\TimeStackPtr = LastElement(PBMap\MemCache\ImagesTimeStack())
         ; ***
-        UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
         ProcedureReturn *timg
       Else
         ; No, try to load it from HD (see below)
@@ -1222,7 +1219,7 @@ Module PBMap
       *timg = AddMapElement(PBMap\MemCache\Images(), key)
       If *timg = 0
         MyDebug("  Can't add a new cache element.", 4)
-        UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
         ProcedureReturn #False
       EndIf
       ; add a new time stack element at the End     
@@ -1232,7 +1229,7 @@ Module PBMap
       If *timg\TimeStackPtr = 0
         MyDebug("  Can't add a new time stack element.", 4)
         DeleteMapElement(PBMap\MemCache\Images())
-        UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
         ProcedureReturn #False
       EndIf
       ; Associates the time stack element to the cache element
@@ -1242,10 +1239,17 @@ Module PBMap
     ; If there's no active download thread for this tile
     If *timg\Tile <= 0        
       ; Manage tile file lifetime, delete if too old
-      If PBMap\Options\TileLifetime <> -1
-        If Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
-          MyDebug(" Deleting too old " + CacheFile, 3)
-          DeleteFile(CacheFile)
+      If PBMap\Options\TileLifetime <> -1 
+        If FileSize(CacheFile) > 0 ; Does the file exists ?
+          If Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
+            If DeleteFile(CacheFile)
+              MyDebug("  Deleting too old image file  " + CacheFile, 3)
+            Else
+              MyDebug("  Can't delete too old image file  " + CacheFile, 3)
+              UnlockMutex(PBMap\MemoryCacheAccessMutex)
+              ProcedureReturn #False
+            EndIf
+          EndIf
         EndIf
       EndIf
       ; Try To load it from HD
@@ -1259,7 +1263,7 @@ Module PBMap
       If *timg\nImage
         ; Image found and loaded from HDD
         *timg\Alpha = 0
-        UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+        UnlockMutex(PBMap\MemoryCacheAccessMutex)
         ProcedureReturn *timg
       Else
         ; If GetTileFromHDD failed, will load it (again?) from the web
@@ -1298,7 +1302,7 @@ Module PBMap
         EndIf
       EndIf
     EndIf
-    UnlockMutex(PBMap\MemoryCacheAccessNBMutex)
+    UnlockMutex(PBMap\MemoryCacheAccessMutex)
     ProcedureReturn #False
   EndProcedure
   
@@ -2546,9 +2550,8 @@ Module PBMap
       \Window = Window
       \Timer = 1
       \Mode = #MODE_DEFAULT
-      \MemoryCacheAccessNB = 0
-      \MemoryCacheAccessNBMutex = CreateMutex() 
-      If \MemoryCacheAccessNBMutex = #False
+      \MemoryCacheAccessMutex = CreateMutex() 
+      If \MemoryCacheAccessMutex = #False
         MyDebug("Cannot create a mutex", 0)
         End
       EndIf
@@ -2869,8 +2872,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1066
-; FirstLine = 1384
+; CursorPosition = 2552
+; FirstLine = 2548
 ; Folding = -------------------
 ; EnableThread
 ; EnableXP
