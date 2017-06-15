@@ -96,6 +96,9 @@ DeclareModule PBMap
   Declare Error(msg.s)
   Declare Refresh()
   Declare.i ClearDiskCache()  
+  Declare SetCallBackMarker(*CallBackLocation)
+  Declare SetCallBackLeftClic(*CallBackLocation)
+
 EndDeclareModule
 
 Module PBMap 
@@ -128,7 +131,6 @@ Module PBMap
     Download.i
     Time.i
     Size.i
-    Mutex.i
   EndStructure
   
   Structure BoundingBox 
@@ -193,7 +195,8 @@ Module PBMap
     ProxyPort.s
     ProxyUser.s
     ProxyPassword.s
-    ShowDegrees.i
+    ShowDegrees.i    
+    ShowZoom.i
     ShowDebugInfos.i
     ShowScale.i
     ShowTrack.i
@@ -209,6 +212,7 @@ Module PBMap
     Warning.i                                      ; Warning requesters
     ShowMarkersNb.i
     ShowMarkersLegend.i
+    ShowTrackSelection.i                           ; YA to show or not track selection
     ; Drawing stuff
     StrokeWidthTrackDefault.i
     ; Colours
@@ -273,6 +277,8 @@ Module PBMap
     
     CallBackLocation.i                             ; @Procedure(latitude.d,lontitude.d)
     CallBackMainPointer.i                          ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
+    CallBackMarker.i                               ; @Procedure (latitude.d,lontitude.d) pour connaitre la nouvelle position du marqueur (YA)
+    CallBackLeftClic.i                             ; @Procdeure (latitude.d,lontitude.d) pour connaitre la position lors du clic gauche  (YA)
     
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
@@ -712,6 +718,8 @@ Module PBMap
         SelBool(WheelMouseRelative)
       Case "showdegrees"
         SelBool(ShowDegrees)
+      Case "showzoom"
+        SelBool(ShowZoom)
       Case "showdebuginfos"
         SelBool(ShowDebugInfos)
       Case "showscale"
@@ -722,6 +730,8 @@ Module PBMap
         SelBool(ShowPointer)
       Case "showtrack"
         SelBool(ShowTrack)
+      Case "showtrackselection"
+        SelBool(ShowTrackSelection)
       Case "showmarkersnb"
         SelBool(ShowMarkersNb)      
       Case "showmarkerslegend"
@@ -787,12 +797,16 @@ Module PBMap
           ProcedureReturn GetBoolString(\ShowDebugInfos)
         Case "showscale"
           ProcedureReturn GetBoolString(\ShowScale)
+        Case "showzoom"
+          ProcedureReturn GetBoolString(\ShowZoom)
         Case "showmarkers"
           ProcedureReturn GetBoolString(\ShowMarkers)
         Case "showpointer"
           ProcedureReturn GetBoolString(\ShowPointer)
         Case "showtrack"
           ProcedureReturn GetBoolString(\ShowTrack)
+        Case "showtrackselection"
+          ProcedureReturn GetBoolString(\ShowTrackSelection)
         Case "showmarkersnb"
           ProcedureReturn GetBoolString(\ShowMarkersNb)      
         Case "showmarkerslegend"
@@ -842,9 +856,11 @@ Module PBMap
       WritePreferenceInteger("ShowDegrees", \ShowDegrees)
       WritePreferenceInteger("ShowDebugInfos", \ShowDebugInfos)
       WritePreferenceInteger("ShowScale", \ShowScale)
+      WritePreferenceInteger("ShowZoom", \ShowZoom)
       WritePreferenceInteger("ShowMarkers", \ShowMarkers)
       WritePreferenceInteger("ShowPointer", \ShowPointer)
       WritePreferenceInteger("ShowTrack", \ShowTrack)
+      WritePreferenceInteger("ShowTrackSelection", \ShowTrackSelection)
       WritePreferenceInteger("ShowTrackKms", \ShowTrackKms)
       WritePreferenceInteger("ShowMarkersNb", \ShowMarkersNb)
       WritePreferenceInteger("ShowMarkersLegend", \ShowMarkersLegend)
@@ -908,9 +924,11 @@ Module PBMap
       \ShowDegrees        = ReadPreferenceInteger("ShowDegrees", #False)
       \ShowDebugInfos     = ReadPreferenceInteger("ShowDebugInfos", #False)
       \ShowScale          = ReadPreferenceInteger("ShowScale", #False)
+      \ShowZoom           = ReadPreferenceInteger("ShowZoom", #True)
       \ShowMarkers        = ReadPreferenceInteger("ShowMarkers", #True)
       \ShowPointer        = ReadPreferenceInteger("ShowPointer", #True)
       \ShowTrack          = ReadPreferenceInteger("ShowTrack", #True)
+      \ShowTrackSelection = ReadPreferenceInteger("ShowTrackSelection", #False)
       \ShowTrackKms       = ReadPreferenceInteger("ShowTrackKms", #False)
       \ShowMarkersNb      = ReadPreferenceInteger("ShowMarkersNb", #True)
       \ShowMarkersLegend  = ReadPreferenceInteger("ShowMarkersLegend", #False)
@@ -1495,6 +1513,12 @@ Module PBMap
     StrokePath(1)  
   EndProcedure   
   
+  Procedure DrawZoom(x.i, y.i)
+    VectorFont(FontID(PBMap\Font), 20)
+    VectorSourceColor(RGBA(0, 0, 0,150))
+    MovePathCursor(x,y)
+    DrawVectorText(Str(GetZoom()))
+  EndProcedure
   ;-*** Tracks
   
   Procedure DrawTrackPointer(x.d, y.d, dist.l)
@@ -1604,11 +1628,20 @@ Module PBMap
                 VectorSourceColor(\Colour)
               EndIf
               StrokePath(\StrokeWidth, #PB_Path_RoundEnd|#PB_Path_RoundCorner)
+              
+              ; YA pour marquer chaque point d'un rond
+              ForEach \Track()
+                LatLon2PixelRel(@PBMap\TracksList()\Track(),  @Pixel, PBMap\Zoom)
+                AddPathCircle(Pixel\x,Pixel\y,(\StrokeWidth / 4))
+              Next
+              VectorSourceColor(RGBA(255, 255, 0, 255))
+              StrokePath(1)
+              
             EndIf  
           EndIf
         Next
         EndVectorLayer()
-        ; Draw distances
+        ;Draw distances
         If PBMap\Options\ShowTrackKms And PBMap\Zoom > 10
           BeginVectorLayer()
           ForEach PBMap\TracksList()
@@ -1947,6 +1980,9 @@ Module PBMap
     If PBMap\Options\ShowScale
       DrawScale(*Drawing, 10, GadgetHeight(PBMAP\Gadget) - 20, 192)
     EndIf
+    If PBMap\Options\ShowZoom
+      DrawZoom(GadgetWidth(PBMap\Gadget) - 30, 5) ; ajout YA - affiche le niveau de zoom
+    EndIf
     DrawOSMCopyright(*Drawing)
     StopVectorDrawing()
   EndProcedure
@@ -2093,6 +2129,14 @@ Module PBMap
   
   Procedure SetCallBackMainPointer(CallBackMainPointer.i)
     PBMap\CallBackMainPointer = CallBackMainPointer
+  EndProcedure
+  
+  Procedure SetCallBackMarker(CallBackLocation.i)
+    PBMap\CallBackMarker = CallBackLocation
+  EndProcedure
+  
+  Procedure SetCallBackLeftClic(CallBackLocation.i)
+    PBMap\CallBackLeftClic = CallBackLocation
   EndProcedure
   
   Procedure SetMapScaleUnit(ScaleUnit.i = PBMAP::#SCALE_KM)
@@ -2250,6 +2294,7 @@ Module PBMap
     Protected key.s, Touch.i
     Protected Pixel.PixelCoordinates
     Static CtrlKey
+    Protected Location.GeographicCoordinates
     CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\RadiusX
     CanvasMouseY = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseY) - PBMap\Drawing\RadiusY
     ; rotation wip
@@ -2370,6 +2415,18 @@ Module PBMap
             EndIf
           Next
         EndIf
+        ; YA pour sélectionner un point de la trace avec le clic gauche
+        If PBMap\EditMarker = #False 
+          Location\Latitude = GetMouseLatitude()
+          Location\Longitude = GetMouseLongitude()
+          If PBMap\CallBackLeftClic > 0
+            CallFunctionFast(PBMap\CallBackLeftClic, @Location)
+          EndIf 
+          ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
+          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Hand)
+        Else
+          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
+        EndIf
       Case #PB_EventType_MouseMove
         ; Drag
         If PBMap\Dragging
@@ -2423,6 +2480,7 @@ Module PBMap
               EndIf
             Next
             ; Check if mouse touch tracks           
+            If PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
             With PBMap\TracksList()
               ; Trace Track
               If ListSize(PBMap\TracksList()) > 0
@@ -2454,10 +2512,20 @@ Module PBMap
             EndWith
           EndIf
         EndIf
+        EndIf
       Case #PB_EventType_LeftButtonUp
+        SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
         ; PBMap\MoveStartingPoint\x = - 1
         PBMap\Dragging = #False
         PBMap\Redraw = #True
+        ;YA pour connaitre les coordonnées d'un marqueur après déplacement
+        ForEach PBMap\Markers()
+          If PBMap\Markers()\Selected = #True
+            If PBMap\CallBackMarker > 0
+              CallFunctionFast(PBMap\CallBackMarker,  @PBMap\Markers()\GeographicCoordinates)
+            EndIf 
+          EndIf
+        Next
       Case #PB_MAP_REDRAW
         PBMap\Redraw = #True
       Case #PB_MAP_RETRY
@@ -2727,9 +2795,9 @@ CompilerIf #PB_Compiler_IsMainFile
     ; Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1") : Degrees = 0
-    PBMap::SetOption("ShowDebugInfos", "1")
+    PBMap::SetOption("ShowDebugInfos", "0")
     PBMap::SetDebugLevel(5)
-    PBMap::SetOption("Verbose", "1")
+    PBMap::SetOption("Verbose", "0")
     PBMap::SetOption("ShowScale", "1")    
     PBMap::SetOption("Warning", "1")
     PBMap::SetOption("ShowMarkersLegend", "1")
@@ -2872,9 +2940,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2552
-; FirstLine = 2548
-; Folding = -------------------
+; CursorPosition = 2797
+; FirstLine = 2794
+; Folding = --------------------
 ; EnableThread
 ; EnableXP
 ; CompileSourceDirectory
