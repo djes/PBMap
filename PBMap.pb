@@ -269,7 +269,8 @@ Module PBMap
   Structure PBMap
     Window.i                                       ; Parent Window
     Gadget.i                                       ; Canvas Gadget Id 
-    Font.i                                         ; Font to uses when write on the map 
+    StandardFont.i                                 ; Font to use when writing on the map 
+    UnderlineFont.i
     Timer.i                                        ; Redraw/update timer
     
     GeographicCoordinates.GeographicCoordinates    ; Latitude and Longitude from focus point
@@ -433,7 +434,7 @@ Module PBMap
       AddPathBox(0, 0, 256, 256)
       FillPath()
       MovePathCursor(0, 0)
-      VectorFont(FontID(PBMap\Font), 256 / 20)
+      VectorFont(FontID(PBMap\StandardFont), 256 / 20)
       VectorSourceColor(RGBA(150, 150, 150, 255))
       MovePathCursor(0 + (256 - VectorTextWidth(LoadingText$)) / 2, 0 + (256 - VectorTextHeight(LoadingText$)) / 2)
       DrawVectorText(LoadingText$)
@@ -449,7 +450,7 @@ Module PBMap
       AddPathBox(0, 0, 256, 256)
       FillPath()
       ; MovePathCursor(0, 0)
-      ; VectorFont(FontID(PBMap\Font), 256 / 20)
+      ; VectorFont(FontID(PBMap\StandardFont), 256 / 20)
       ; VectorSourceColor(RGBA(150, 150, 150, 255))
       ; MovePathCursor(0 + (256 - VectorTextWidth(NothingText$)) / 2, 0 + (256 - VectorTextHeight(NothingText$)) / 2)
       ; DrawVectorText(NothingText$)
@@ -1422,7 +1423,7 @@ Module PBMap
           ; EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
-          VectorFont(FontID(PBMap\Font), 16)
+          VectorFont(FontID(PBMap\StandardFont), 16)
           VectorSourceColor(RGBA(0, 0, 0, 80))
           MovePathCursor(px, py)
           DrawVectorText("x:" + Str(tilex)) 
@@ -1460,7 +1461,7 @@ Module PBMap
       Case #SCALE_KM; 
         sunit = " Km"
     EndSelect
-    VectorFont(FontID(PBMap\Font), 10)
+    VectorFont(FontID(PBMap\StandardFont), 10)
     VectorSourceColor(RGBA(0, 0, 0, alpha))
     MovePathCursor(x,y)
     DrawVectorText(StrD(Scale,3)+sunit)
@@ -1486,7 +1487,7 @@ Module PBMap
     ; Debug "NW : " + StrD(Degrees1\Longitude) + " ; NE : " + StrD(Degrees2\Longitude)
     LatLon2PixelRel(@Degrees1, @pos1, PBMap\Zoom)
     LatLon2PixelRel(@Degrees2, @pos2, PBMap\Zoom)
-    VectorFont(FontID(PBMap\Font), 10)
+    VectorFont(FontID(PBMap\StandardFont), 10)
     VectorSourceColor(RGBA(0, 0, 0, alpha))    
     ; draw latitudes
     For y = ny1 To ny
@@ -1514,7 +1515,7 @@ Module PBMap
   EndProcedure   
   
   Procedure DrawZoom(x.i, y.i)
-    VectorFont(FontID(PBMap\Font), 20)
+    VectorFont(FontID(PBMap\StandardFont), 20)
     VectorSourceColor(RGBA(0, 0, 0,150))
     MovePathCursor(x,y)
     DrawVectorText(Str(GetZoom()))
@@ -1534,7 +1535,7 @@ Module PBMap
     VectorSourceColor(RGBA(255, 255, 255, 255))
     AddPathCircle(x,y-20,12)
     FillPath()
-    VectorFont(FontID(PBMap\Font), 13)
+    VectorFont(FontID(PBMap\StandardFont), 13)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-20-VectorTextHeight(Str(dist))/2)
     VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
@@ -1553,7 +1554,7 @@ Module PBMap
     VectorSourceColor(RGBA(255, 0, 0, 255))
     AddPathCircle(x,y-24,14)
     FillPath()
-    VectorFont(FontID(PBMap\Font), 14)
+    VectorFont(FontID(PBMap\StandardFont), 14)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-24-VectorTextHeight(Str(dist))/2)
     VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
@@ -1841,13 +1842,13 @@ Module PBMap
       Else
         Text.s = *Marker\Identifier
       EndIf
-      VectorFont(FontID(PBMap\Font), 13)
+      VectorFont(FontID(PBMap\StandardFont), 13)
       MovePathCursor(x - VectorTextWidth(Text) / 2, y)
       VectorSourceColor(RGBA(0, 0, 0, 255))
       DrawVectorText(Text)
     EndIf
     If PBMap\Options\ShowMarkersLegend And *Marker\Legend <> ""
-      VectorFont(FontID(PBMap\Font), 13)
+      VectorFont(FontID(PBMap\StandardFont), 13)
       ; dessin d'un cadre avec fond transparent
       Protected Height = VectorParagraphHeight(*Marker\Legend, 100, 100)
       Protected Width.l
@@ -1887,7 +1888,7 @@ Module PBMap
   
   Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
-    VectorFont(FontID(PBMap\Font), 16)
+    VectorFont(FontID(PBMap\StandardFont), 16)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(50, 50)
     DrawVectorText("Images in cache : " + Str(MapSize(PBMap\MemCache\Images())))
@@ -1911,7 +1912,7 @@ Module PBMap
   
   Procedure DrawOSMCopyright(*Drawing.DrawingParameters)
     Protected Text.s = "© OpenStreetMap contributors"
-    VectorFont(FontID(PBMap\Font), 12)
+    VectorFont(FontID(PBMap\StandardFont), 12)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
     DrawVectorText(Text)
@@ -1923,6 +1924,7 @@ Module PBMap
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
     Protected LayerOrder.i = 0
     Protected NW.Coordinates, SE.Coordinates
+    Protected OSMCopyright.i = #False
     PBMap\Dirty = #False
     PBMap\Redraw = #False
     ; *** Precalc some values
@@ -1961,6 +1963,9 @@ Module PBMap
       If PBMap\LayersList()\Enabled
         DrawTiles(*Drawing, PBMap\LayersList()\Name)
       EndIf
+      If PBMap\LayersList()\LayerType = 0 ; OSM
+        OSMCopyright = #True
+      EndIf
     Next   
     If PBMap\Options\ShowTrack
       DrawTracks(*Drawing)
@@ -1983,7 +1988,9 @@ Module PBMap
     If PBMap\Options\ShowZoom
       DrawZoom(GadgetWidth(PBMap\Gadget) - 30, 5) ; ajout YA - affiche le niveau de zoom
     EndIf
-    DrawOSMCopyright(*Drawing)
+    If OSMCopyright
+      DrawOSMCopyright(*Drawing)
+    EndIf
     StopVectorDrawing()
   EndProcedure
   
@@ -2423,9 +2430,9 @@ Module PBMap
             CallFunctionFast(PBMap\CallBackLeftClic, @Location)
           EndIf 
           ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
-          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Hand)
+          SetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Hand)
         Else
-          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
+          SetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
         EndIf
       Case #PB_EventType_MouseMove
         ; Drag
@@ -2614,7 +2621,8 @@ Module PBMap
       \TileSize = 256
       \Dirty = #False
       \EditMarker = #False
-      \Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \StandardFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \UnderlineFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Underline)
       \Window = Window
       \Timer = 1
       \Mode = #MODE_DEFAULT
@@ -2940,7 +2948,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 16
+; CursorPosition = 2456
+; FirstLine = 2435
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
