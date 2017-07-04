@@ -28,6 +28,10 @@ UseJPEGImageEncoder()
 
 DeclareModule PBMap  
   
+  #PBMAPNAME = "PBMap"
+  #PBMAPVERSION = "0.9"
+  #USERAGENT = #PBMAPNAME + "/" + #PBMAPVERSION + " (https://github.com/djes/PBMap)"
+  
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
     #Red = 255
   CompilerEndIf
@@ -81,7 +85,10 @@ DeclareModule PBMap
   Declare.d GetLayerAlpha(Name.s)
   Declare BindMapGadget(Gadget.i)
   Declare SetCallBackLocation(*CallBackLocation)
-  Declare SetCallBackMainPointer(CallBackMainPointer.i)
+  Declare SetCallBackMainPointer(CallBackMainPointer.i)  
+  Declare SetCallBackDrawTile(*CallBackLocation)
+  Declare SetCallBackMarker(*CallBackLocation)
+  Declare SetCallBackLeftClic(*CallBackLocation)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare.d GetLatitude()
   Declare.d GetLongitude()
@@ -113,15 +120,18 @@ DeclareModule PBMap
   Declare FatalError(msg.s)
   Declare Error(msg.s)
   Declare Refresh()
-  Declare.i ClearDiskCache()  
-  Declare SetCallBackMarker(*CallBackLocation)
-  Declare SetCallBackLeftClic(*CallBackLocation)
+  Declare.i ClearDiskCache()
+
 
 EndDeclareModule
 
 Module PBMap 
   
   EnableExplicit
+  
+  ;-*** Callback Prototypes
+  
+  Prototype ProtoDrawTile(x.i, y.i, image.i, alpha.d = 1)
   
   ;-*** Internal Structures
   
@@ -278,10 +288,11 @@ Module PBMap
     GeographicCoordinates.GeographicCoordinates    ; Latitude and Longitude from focus point
     Drawing.DrawingParameters                      ; Drawing parameters based on focus point
     
-    CallBackLocation.i                             ; @Procedure(latitude.d,lontitude.d)
+    CallBackLocation.i                             ; @Procedure(latitude.d, longitude.d)
     CallBackMainPointer.i                          ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    CallBackMarker.i                               ; @Procedure (latitude.d,lontitude.d) pour connaitre la nouvelle position du marqueur (YA)
-    CallBackLeftClic.i                             ; @Procdeure (latitude.d,lontitude.d) pour connaitre la position lors du clic gauche  (YA)
+    CallBackMarker.i                               ; @Procedure (latitude.d, lontitude.d) to know the marker position (YA)
+    CallBackLeftClic.i                             ; @Procedure (latitude.d, lontitude.d) to know the position on left click  (YA)
+    CallBackDrawTile.ProtoDrawTile                 ; @Procedure (x.i, y.i, nImage.i) to customise tile drawing 
     
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
@@ -904,8 +915,8 @@ Module PBMap
       \Proxy              = ReadPreferenceInteger("Proxy", #False)
       If \Proxy
         \ProxyURL         = ReadPreferenceString("ProxyURL", "")  ; = InputRequester("ProxyServer", "Do you use a Proxy Server? Then enter the full url:", "")
-        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ; = InputRequester("ProxyPort"  , "Do you use a specific port? Then enter it", "")
-        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ; = InputRequester("ProxyUser"  , "Do you use a user name? Then enter it", "")
+        \ProxyPort        = ReadPreferenceString("ProxyPort", "") ; = InputRequester("ProxyPort", "Do you use a specific port? Then enter it", "")
+        \ProxyUser        = ReadPreferenceString("ProxyUser", "") ; = InputRequester("ProxyUser", "Do you use a user name? Then enter it", "")
         \ProxyPassword    = ReadPreferenceString("ProxyPass", "") ; = InputRequester("ProxyPass", "Do you use a password ? Then enter it", "") ; TODO
       EndIf
       PreferenceGroup("HERE")  
@@ -1174,7 +1185,7 @@ Module PBMap
     ; We're accessing MemoryCache
     UnlockMutex(PBMap\MemoryCacheAccessMutex)
     *Tile\Size = 0
-    *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous)
+    *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous, #USERAGENT)
     If *Tile\Download
       Repeat
         Progress = HTTPProgress(*Tile\Download)
@@ -1328,14 +1339,14 @@ Module PBMap
   EndProcedure
   
   Procedure DrawTiles(*Drawing.DrawingParameters, LayerName.s)
-    Protected x.i, y.i,kq.q
-    Protected tx = Int(*Drawing\TileCoordinates\x)          ; Don't forget the Int() !
-    Protected ty = Int(*Drawing\TileCoordinates\y)
-    Protected nx = *Drawing\RadiusX / PBMap\TileSize        ; How many tiles around the point
-    Protected ny = *Drawing\RadiusY / PBMap\TileSize
-    Protected px, py, *timg.ImgMemCach, tilex, tiley, key.s
+    Protected x.i, y.i, kq.q
+    Protected tx.i = Int(*Drawing\TileCoordinates\x)          ; Don't forget the Int() !
+    Protected ty.i = Int(*Drawing\TileCoordinates\y)
+    Protected nx.i = *Drawing\RadiusX / PBMap\TileSize        ; How many tiles around the point
+    Protected ny.i = *Drawing\RadiusY / PBMap\TileSize
+    Protected px.i, py.i, *timg.ImgMemCach, tilex.i, tiley.i, key.s
     Protected URL.s, CacheFile.s
-    Protected tilemax = 1<<PBMap\Zoom
+    Protected tilemax.i = 1<<PBMap\Zoom
     Protected HereLoadBalancing.b                           ; Here is providing a load balancing system
     FindMapElement(PBMap\Layers(), LayerName)
     MyDebug("Drawing tiles")
@@ -1405,15 +1416,21 @@ Module PBMap
           EndWith
           *timg = GetTile(key, URL, CacheFile)
           If *timg And *timg\nImage
-            MovePathCursor(px, py)
-            If *timg\Alpha <= 224
-              DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha * PBMap\Layers()\Alpha)
-              *timg\Alpha + 32
+            If PBMap\CallBackDrawTile
+              ;CallFunctionFast(PBMap\CallBackDrawTile, px, py, *timg\nImage)
+              PBMap\CallBackDrawTile(px, py, *timg\nImage, PBMap\Layers()\Alpha)
               PBMap\Redraw = #True
             Else
-              DrawVectorImage(ImageID(*timg\nImage), 255 * PBMap\Layers()\Alpha)
-              *timg\Alpha = 256
-            EndIf 
+              MovePathCursor(px, py)
+              If *timg\Alpha <= 224
+                DrawVectorImage(ImageID(*timg\nImage), *timg\Alpha * PBMap\Layers()\Alpha)
+                *timg\Alpha + 32
+                PBMap\Redraw = #True
+              Else
+                DrawVectorImage(ImageID(*timg\nImage), 255 * PBMap\Layers()\Alpha)
+                *timg\Alpha = 256
+              EndIf
+            EndIf
           Else 
             MovePathCursor(px, py)
             DrawVectorImage(ImageID(PBMap\ImgLoading), 255 * PBMap\Layers()\Alpha)
@@ -2132,6 +2149,7 @@ Module PBMap
     PBMap\Redraw = #True
   EndProcedure
   
+  ;-*** Callbacks
   Procedure SetCallBackLocation(CallBackLocation.i)
     PBMap\CallBackLocation = CallBackLocation
   EndProcedure
@@ -2146,6 +2164,10 @@ Module PBMap
   
   Procedure SetCallBackLeftClic(CallBackLocation.i)
     PBMap\CallBackLeftClic = CallBackLocation
+  EndProcedure
+  
+  Procedure SetCallBackDrawTile(CallBackLocation.i)
+    PBMap\CallBackDrawTile = CallBackLocation
   EndProcedure
   
   Procedure SetMapScaleUnit(ScaleUnit.i = PBMAP::#SCALE_KM)
@@ -2550,6 +2572,8 @@ Module PBMap
           PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
             PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
+            ;n = LoadImage(#PB_Any, *Tile\CacheFile)
+            
           Else
             PBMap\MemCache\Images(key)\Tile = 0
           EndIf
@@ -2724,50 +2748,55 @@ CompilerIf #PB_Compiler_IsMainFile
     Debug "Identifier : " + *Marker\Identifier + "(" + StrD(*Marker\GeographicCoordinates\Latitude) + ", " + StrD(*Marker\GeographicCoordinates\Longitude) + ")"
   EndProcedure
   
+  Procedure DrawTileCallBack(x.i, y.i, image.i, alpha.d)
+    MovePathCursor(x, y)
+    DrawVectorImage(ImageID(image), 255 * alpha)
+  EndProcedure
+  
   Procedure MainPointer(x.i, y.i)
     VectorSourceColor(RGBA(255, 255,255, 255)) : AddPathCircle(x, y,32) : StrokePath(1)
     VectorSourceColor(RGBA(0, 0, 0, 255)) : AddPathCircle(x, y, 29):StrokePath(2)
   EndProcedure
   
   Procedure ResizeAll()
-    ResizeGadget(#Map,10,10,WindowWidth(#Window_0)-198,WindowHeight(#Window_0)-59)
-    ResizeGadget(#Text_1,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Left, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Right,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ; ResizeGadget(#Gdt_RotateLeft, WindowWidth(#Window_0) - 150 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ; ResizeGadget(#Gdt_RotateRight,WindowWidth(#Window_0) -  90 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Up,   WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Down, WindowWidth(#Window_0) - 120 ,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Text_2,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Button_4,WindowWidth(#Window_0)-150,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Button_5,WindowWidth(#Window_0)-100,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Text_3,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#StringLatitude,WindowWidth(#Window_0)-120,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#StringLongitude,WindowWidth(#Window_0)-120,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Text_4,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_AddMarker,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_LoadGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_SaveGpx,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_AddOpenseaMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_AddHereMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_AddGeoServerMap,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_Degrees,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_EditMode,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#Gdt_ClearDiskCache,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#TextGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
-    ResizeGadget(#StringGeoLocationQuery,WindowWidth(#Window_0)-170,#PB_Ignore,#PB_Ignore,#PB_Ignore)
+    ResizeGadget(#Map, 10, 10, WindowWidth(#Window_0)-198, WindowHeight(#Window_0)-59)
+    ResizeGadget(#Text_1, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_Left, WindowWidth(#Window_0) - 150, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_Right, WindowWidth(#Window_0) -  90, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ; ResizeGadget(#Gdt_RotateLeft, WindowWidth(#Window_0) - 150, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ; ResizeGadget(#Gdt_RotateRight, WindowWidth(#Window_0) -  90, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_Up,   WindowWidth(#Window_0) - 120, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_Down, WindowWidth(#Window_0) - 120, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Text_2, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Button_4, WindowWidth(#Window_0)-150, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Button_5, WindowWidth(#Window_0)-100, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Text_3, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#StringLatitude, WindowWidth(#Window_0)-120, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#StringLongitude, WindowWidth(#Window_0)-120, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Text_4, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_AddMarker, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_LoadGpx, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_SaveGpx, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_AddOpenseaMap, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_AddHereMap, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_AddGeoServerMap, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_Degrees, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_EditMode, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#Gdt_ClearDiskCache, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#TextGeoLocationQuery, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
+    ResizeGadget(#StringGeoLocationQuery, WindowWidth(#Window_0)-170, #PB_Ignore, #PB_Ignore, #PB_Ignore)
     PBMap::Refresh()
   EndProcedure
   
   ;- MAIN TEST
-  If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap",  #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
+  If OpenWindow(#Window_0, 260, 225, 700, 571, "PBMap", #PB_Window_SystemMenu | #PB_Window_MinimizeGadget | #PB_Window_TitleBar | #PB_Window_ScreenCentered | #PB_Window_SizeGadget)
     
     LoadFont(0, "Arial", 12)
     LoadFont(1, "Arial", 12, #PB_Font_Bold)
     LoadFont(2, "Arial", 8)
     
     TextGadget(#Text_1, 530, 10, 60, 15, "Movements")
-    ; ButtonGadget(#Gdt_RotateLeft,  550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
+    ; ButtonGadget(#Gdt_RotateLeft, 550, 070, 30, 30, "LRot")  : SetGadgetFont(#Gdt_RotateLeft, FontID(2)) 
     ; ButtonGadget(#Gdt_RotateRight, 610, 070, 30, 30, "RRot")  : SetGadgetFont(#Gdt_RotateRight, FontID(2)) 
     ButtonGadget(#Gdt_Left,  550, 60, 30, 30, Chr($25C4))  : SetGadgetFont(#Gdt_Left, FontID(0)) 
     ButtonGadget(#Gdt_Right, 610, 60, 30, 30, Chr($25BA))  : SetGadgetFont(#Gdt_Right, FontID(0)) 
@@ -2824,6 +2853,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", "", -1, @MyMarker())  ; To add a marker with a customised GFX
     PBMap::SetCallBackMarker(@MarkerMoveCallBack())
+    PBMap::SetCallBackDrawTile(@DrawTileCallBack())
     
     Repeat
       Event = WaitWindowEvent()
@@ -2956,8 +2986,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2727
-; FirstLine = 2720
+; CursorPosition = 291
+; FirstLine = 279
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
