@@ -3,7 +3,7 @@
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes, Idle, yves86
-; Date:              June, 2017
+; Date:              July, 2017
 ; License:           PBMap : Free, unrestricted, credit 
 ;                    appreciated but not required.
 ; OSM :              see http://www.openstreetmap.org/copyright
@@ -46,12 +46,13 @@ DeclareModule PBMap
   #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
   #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
   
-   Structure GeographicCoordinates
+  ;-*** Public structures
+  Structure GeographicCoordinates
     Longitude.d
     Latitude.d
   EndStructure
   
-    Structure Marker
+ Structure Marker
     GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
     Identifier.s
     Legend.s
@@ -61,7 +62,7 @@ DeclareModule PBMap
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
     EditWindow.i
   EndStructure
-  
+  ;***
   
   Declare InitPBMap(window)
   Declare SetDebugLevel(level.i)
@@ -122,9 +123,7 @@ Module PBMap
   
   EnableExplicit
   
-  ;-*** Structures
-  
- 
+  ;-*** Internal Structures
   
   Structure PixelCoordinates
     x.d
@@ -187,9 +186,7 @@ Module PBMap
     List ImagesTimeStack.ImgMemCachKey()           ; Usage of the tile (first = older)
   EndStructure
   
-
-  
-  ;-Options
+  ;-Options Structure
   Structure Option
     HDDCachePath.s                                 ; Path where to load and save tiles downloaded from server
     DefaultOSMServer.s                             ; Base layer OSM server
@@ -270,11 +267,12 @@ Module PBMap
     StrokeWidth.i
   EndStructure
   
-  ;- PBMap 
+  ;- PBMap Structure
   Structure PBMap
     Window.i                                       ; Parent Window
     Gadget.i                                       ; Canvas Gadget Id 
-    Font.i                                         ; Font to uses when write on the map 
+    StandardFont.i                                 ; Font to use when writing on the map 
+    UnderlineFont.i
     Timer.i                                        ; Redraw/update timer
     
     GeographicCoordinates.GeographicCoordinates    ; Latitude and Longitude from focus point
@@ -320,7 +318,7 @@ Module PBMap
     
   EndStructure
   
-  ;-*** Global variables
+  ;-*** Module's global variables  
   
   ;-Show debug infos 
   Global MyDebugLevel = 5
@@ -337,7 +335,7 @@ Module PBMap
   
   ;- *** GetText - Translation purpose
   
-  ; TODO use this for all text
+  ; TODO use this
   IncludeFile "gettext.pbi"
   
   ;-*** Misc tools
@@ -438,7 +436,7 @@ Module PBMap
       AddPathBox(0, 0, 256, 256)
       FillPath()
       MovePathCursor(0, 0)
-      VectorFont(FontID(PBMap\Font), 256 / 20)
+      VectorFont(FontID(PBMap\StandardFont), 256 / 20)
       VectorSourceColor(RGBA(150, 150, 150, 255))
       MovePathCursor(0 + (256 - VectorTextWidth(LoadingText$)) / 2, 0 + (256 - VectorTextHeight(LoadingText$)) / 2)
       DrawVectorText(LoadingText$)
@@ -454,7 +452,7 @@ Module PBMap
       AddPathBox(0, 0, 256, 256)
       FillPath()
       ; MovePathCursor(0, 0)
-      ; VectorFont(FontID(PBMap\Font), 256 / 20)
+      ; VectorFont(FontID(PBMap\StandardFont), 256 / 20)
       ; VectorSourceColor(RGBA(150, 150, 150, 255))
       ; MovePathCursor(0 + (256 - VectorTextWidth(NothingText$)) / 2, 0 + (256 - VectorTextHeight(NothingText$)) / 2)
       ; DrawVectorText(NothingText$)
@@ -829,7 +827,7 @@ Module PBMap
       EndSelect
     EndWith
   EndProcedure
-  
+    
   ; By default, save options in the user's home directory
   Procedure SaveOptions(PreferencesFile.s = "PBMap.prefs")
     If PreferencesFile = "PBMap.prefs"
@@ -950,7 +948,6 @@ Module PBMap
   EndProcedure
   
   ;-*** Layers
-  
   ; Add a layer to a list (to get things ordered) and to a map (to access things easily)
   Procedure.i AddLayer(Name.s, Order.i, Alpha.d)
     Protected *Ptr = 0
@@ -1260,15 +1257,18 @@ Module PBMap
       MyDebug("Key : " + key + " added in memory cache", 4)
     EndIf
     ; If there's no active download thread for this tile
-    If *timg\Tile <= 0        
-      ; Manage tile file lifetime, delete if too old
+    If *timg\Tile <= 0      
+      *timg\nImage = 0
+      *timg\Size = FileSize(CacheFile)        
+      ; Manage tile file lifetime, delete if too old, or if size = 0
       If PBMap\Options\TileLifetime <> -1 
-        If FileSize(CacheFile) > 0 ; Does the file exists ?
-          If Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
+        If *timg\Size >= 0 ; Does the file exists ?
+          If *timg\Size = 0 Or (Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime) ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
             If DeleteFile(CacheFile)
-              MyDebug("  Deleting too old image file  " + CacheFile, 3)
+              MyDebug("  Deleting image file  " + CacheFile, 3)
+              *timg\Size = 0
             Else
-              MyDebug("  Can't delete too old image file  " + CacheFile, 3)
+              MyDebug("  Can't delete image file  " + CacheFile, 3)
               UnlockMutex(PBMap\MemoryCacheAccessMutex)
               ProcedureReturn #False
             EndIf
@@ -1276,8 +1276,6 @@ Module PBMap
         EndIf
       EndIf
       ; Try To load it from HD
-      *timg\nImage = 0
-      *timg\Size = FileSize(CacheFile)
       If *timg\Size > 0   
         *timg\nImage = GetTileFromHDD(CacheFile.s)
       Else
@@ -1427,7 +1425,7 @@ Module PBMap
           ; EndIf
         EndIf
         If PBMap\Options\ShowDebugInfos
-          VectorFont(FontID(PBMap\Font), 16)
+          VectorFont(FontID(PBMap\StandardFont), 16)
           VectorSourceColor(RGBA(0, 0, 0, 80))
           MovePathCursor(px, py)
           DrawVectorText("x:" + Str(tilex)) 
@@ -1465,7 +1463,7 @@ Module PBMap
       Case #SCALE_KM; 
         sunit = " Km"
     EndSelect
-    VectorFont(FontID(PBMap\Font), 10)
+    VectorFont(FontID(PBMap\StandardFont), 10)
     VectorSourceColor(RGBA(0, 0, 0, alpha))
     MovePathCursor(x,y)
     DrawVectorText(StrD(Scale,3)+sunit)
@@ -1491,7 +1489,7 @@ Module PBMap
     ; Debug "NW : " + StrD(Degrees1\Longitude) + " ; NE : " + StrD(Degrees2\Longitude)
     LatLon2PixelRel(@Degrees1, @pos1, PBMap\Zoom)
     LatLon2PixelRel(@Degrees2, @pos2, PBMap\Zoom)
-    VectorFont(FontID(PBMap\Font), 10)
+    VectorFont(FontID(PBMap\StandardFont), 10)
     VectorSourceColor(RGBA(0, 0, 0, alpha))    
     ; draw latitudes
     For y = ny1 To ny
@@ -1519,7 +1517,7 @@ Module PBMap
   EndProcedure   
   
   Procedure DrawZoom(x.i, y.i)
-    VectorFont(FontID(PBMap\Font), 20)
+    VectorFont(FontID(PBMap\StandardFont), 20)
     VectorSourceColor(RGBA(0, 0, 0,150))
     MovePathCursor(x,y)
     DrawVectorText(Str(GetZoom()))
@@ -1539,7 +1537,7 @@ Module PBMap
     VectorSourceColor(RGBA(255, 255, 255, 255))
     AddPathCircle(x,y-20,12)
     FillPath()
-    VectorFont(FontID(PBMap\Font), 13)
+    VectorFont(FontID(PBMap\StandardFont), 13)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-20-VectorTextHeight(Str(dist))/2)
     VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
@@ -1558,7 +1556,7 @@ Module PBMap
     VectorSourceColor(RGBA(255, 0, 0, 255))
     AddPathCircle(x,y-24,14)
     FillPath()
-    VectorFont(FontID(PBMap\Font), 14)
+    VectorFont(FontID(PBMap\StandardFont), 14)
     MovePathCursor(x-VectorTextWidth(Str(dist))/2, y-24-VectorTextHeight(Str(dist))/2)
     VectorSourceColor(RGBA(0, 0, 0, 255))
     DrawVectorText(Str(dist))
@@ -1846,13 +1844,13 @@ Module PBMap
       Else
         Text.s = *Marker\Identifier
       EndIf
-      VectorFont(FontID(PBMap\Font), 13)
+      VectorFont(FontID(PBMap\StandardFont), 13)
       MovePathCursor(x - VectorTextWidth(Text) / 2, y)
       VectorSourceColor(RGBA(0, 0, 0, 255))
       DrawVectorText(Text)
     EndIf
     If PBMap\Options\ShowMarkersLegend And *Marker\Legend <> ""
-      VectorFont(FontID(PBMap\Font), 13)
+      VectorFont(FontID(PBMap\StandardFont), 13)
       ; dessin d'un cadre avec fond transparent
       Protected Height = VectorParagraphHeight(*Marker\Legend, 100, 100)
       Protected Width.l
@@ -1892,7 +1890,7 @@ Module PBMap
   
   Procedure DrawDebugInfos(*Drawing.DrawingParameters)
     ; Display how many images in cache
-    VectorFont(FontID(PBMap\Font), 16)
+    VectorFont(FontID(PBMap\StandardFont), 16)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(50, 50)
     DrawVectorText("Images in cache : " + Str(MapSize(PBMap\MemCache\Images())))
@@ -1915,8 +1913,8 @@ Module PBMap
   EndProcedure
   
   Procedure DrawOSMCopyright(*Drawing.DrawingParameters)
-    Protected Text.s = "Â© OpenStreetMap contributors"
-    VectorFont(FontID(PBMap\Font), 12)
+    Protected Text.s = "© OpenStreetMap contributors"
+    VectorFont(FontID(PBMap\StandardFont), 12)
     VectorSourceColor(RGBA(0, 0, 0, 80))
     MovePathCursor(GadgetWidth(PBMAP\Gadget) - VectorTextWidth(Text), GadgetHeight(PBMAP\Gadget) - 20)
     DrawVectorText(Text)
@@ -1928,6 +1926,7 @@ Module PBMap
     Protected Px.d, Py.d,a, ts = PBMap\TileSize, nx, ny
     Protected LayerOrder.i = 0
     Protected NW.Coordinates, SE.Coordinates
+    Protected OSMCopyright.i = #False
     PBMap\Dirty = #False
     PBMap\Redraw = #False
     ; *** Precalc some values
@@ -1966,6 +1965,9 @@ Module PBMap
       If PBMap\LayersList()\Enabled
         DrawTiles(*Drawing, PBMap\LayersList()\Name)
       EndIf
+      If PBMap\LayersList()\LayerType = 0 ; OSM
+        OSMCopyright = #True
+      EndIf
     Next   
     If PBMap\Options\ShowTrack
       DrawTracks(*Drawing)
@@ -1988,7 +1990,9 @@ Module PBMap
     If PBMap\Options\ShowZoom
       DrawZoom(GadgetWidth(PBMap\Gadget) - 30, 5) ; ajout YA - affiche le niveau de zoom
     EndIf
-    DrawOSMCopyright(*Drawing)
+    If OSMCopyright
+      DrawOSMCopyright(*Drawing)
+    EndIf
     StopVectorDrawing()
   EndProcedure
   
@@ -2420,17 +2424,17 @@ Module PBMap
             EndIf
           Next
         EndIf
-        ; YA pour sÃ©lectionner un point de la trace avec le clic gauche
+        ; YA pour sélectionner un point de la trace avec le clic gauche
         If PBMap\EditMarker = #False 
           Location\Latitude = GetMouseLatitude()
           Location\Longitude = GetMouseLongitude()
           If PBMap\CallBackLeftClic > 0
             CallFunctionFast(PBMap\CallBackLeftClic, @Location)
           EndIf 
-          ; ajout YA // change la forme du pointeur de souris pour les dÃ©placements de la carte
-          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Hand)
+          ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
+          SetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Hand)
         Else
-          SetGadgetAttribute(PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
+          SetGadgetAttribute(PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
         EndIf
       Case #PB_EventType_MouseMove
         ; Drag
@@ -2485,7 +2489,7 @@ Module PBMap
               EndIf
             Next
             ; Check if mouse touch tracks           
-            If PBMap\Options\ShowTrackSelection ; YA ajout pour Ã©viter la sÃ©lection de la trace
+            If PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
             With PBMap\TracksList()
               ; Trace Track
               If ListSize(PBMap\TracksList()) > 0
@@ -2523,11 +2527,10 @@ Module PBMap
         ; PBMap\MoveStartingPoint\x = - 1
         PBMap\Dragging = #False
         PBMap\Redraw = #True
-        ;YA pour connaitre les coordonnÃ©es d'un marqueur aprÃ¨s dÃ©placement
+        ;YA pour connaitre les coordonnées d'un marqueur après déplacement
         ForEach PBMap\Markers()
           If PBMap\Markers()\Selected = #True
             If PBMap\CallBackMarker > 0
-              ;CallFunctionFast(PBMap\CallBackMarker,  @PBMap\Markers()\GeographicCoordinates)
               CallFunctionFast(PBMap\CallBackMarker,  @PBMap\Markers());
             EndIf 
           EndIf
@@ -2620,7 +2623,8 @@ Module PBMap
       \TileSize = 256
       \Dirty = #False
       \EditMarker = #False
-      \Font = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \StandardFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \UnderlineFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Underline)
       \Window = Window
       \Timer = 1
       \Mode = #MODE_DEFAULT
@@ -2717,7 +2721,7 @@ CompilerIf #PB_Compiler_IsMainFile
   EndProcedure
   
   Procedure MarkerMoveCallBack(*Marker.PBMap::Marker)
-    Debug "Identifier:"+*Marker\Identifier+"("+StrD(*Marker\GeographicCoordinates\Latitude)+","+StrD(*Marker\GeographicCoordinates\Longitude)+")"
+    Debug "Identifier : " + *Marker\Identifier + "(" + StrD(*Marker\GeographicCoordinates\Latitude) + ", " + StrD(*Marker\GeographicCoordinates\Longitude) + ")"
   EndProcedure
   
   Procedure MainPointer(x.i, y.i)
@@ -2950,11 +2954,11 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-; IDE Options = PureBasic 5.60 (Windows - x86)
-; CursorPosition = 2821
-; FirstLine = 2780
+
+; IDE Options = PureBasic 5.60 (Windows - x64)
+; CursorPosition = 2726
+; FirstLine = 2720
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
 ; CompileSourceDirectory
-; DisablePurifier = 1,1,1,1
