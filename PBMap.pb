@@ -89,6 +89,7 @@ DeclareModule PBMap
   Declare SetCallBackDrawTile(*CallBackLocation)
   Declare SetCallBackMarker(*CallBackLocation)
   Declare SetCallBackLeftClic(*CallBackLocation)
+  Declare SetCallBackModifyTileFile(*CallBackLocation)
   Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
   Declare.d GetLatitude()
   Declare.d GetLongitude()
@@ -129,9 +130,10 @@ Module PBMap
   
   EnableExplicit
   
-  ;-*** Callback Prototypes
+  ;-*** Prototypes
   
-  Prototype ProtoDrawTile(x.i, y.i, image.i, alpha.d = 1)
+  Prototype.i ProtoDrawTile(x.i, y.i, image.i, alpha.d = 1)
+  Prototype.s ProtoModifyTileFile(Filename.s, OriginalURL.s)
   
   ;-*** Internal Structures
   
@@ -293,6 +295,7 @@ Module PBMap
     CallBackMarker.i                               ; @Procedure (latitude.d, lontitude.d) to know the marker position (YA)
     CallBackLeftClic.i                             ; @Procedure (latitude.d, lontitude.d) to know the position on left click  (YA)
     CallBackDrawTile.ProtoDrawTile                 ; @Procedure (x.i, y.i, nImage.i) to customise tile drawing 
+    CallBackModifyTileFile.ProtoModifyTileFile     ; @Procedure (Filename.s, Original URL) to customise image file => New Filename
     
     PixelCoordinates.PixelCoordinates              ; Actual focus point coords in pixels (global)
     MoveStartingPoint.PixelCoordinates             ; Start mouse position coords when dragging the map
@@ -2150,6 +2153,7 @@ Module PBMap
   EndProcedure
   
   ;-*** Callbacks
+  
   Procedure SetCallBackLocation(CallBackLocation.i)
     PBMap\CallBackLocation = CallBackLocation
   EndProcedure
@@ -2169,6 +2173,12 @@ Module PBMap
   Procedure SetCallBackDrawTile(CallBackLocation.i)
     PBMap\CallBackDrawTile = CallBackLocation
   EndProcedure
+  
+  Procedure SetCallBackModifyTileFile(CallBackLocation.i)
+    PBMap\CallBackModifyTileFile = CallBackLocation
+  EndProcedure
+  
+  ;***
   
   Procedure SetMapScaleUnit(ScaleUnit.i = PBMAP::#SCALE_KM)
     PBMap\Options\ScaleUnit = ScaleUnit
@@ -2324,6 +2334,7 @@ Module PBMap
     Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, PBMap\Zoom) * PBMap\TileSize
     Protected key.s, Touch.i
     Protected Pixel.PixelCoordinates
+    Protected ImgNB.i, TileNewFilename.s
     Static CtrlKey
     Protected Location.GeographicCoordinates
     CanvasMouseX = GetGadgetAttribute(PBMap\Gadget, #PB_Canvas_MouseX) - PBMap\Drawing\RadiusX
@@ -2572,8 +2583,14 @@ Module PBMap
           PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
             PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
-            ;n = LoadImage(#PB_Any, *Tile\CacheFile)
-            
+            ;- Allows to post edit the tile image file with a customised code
+            If PBMap\CallBackModifyTileFile
+              TileNewFilename = PBMap\CallBackModifyTileFile(*Tile\CacheFile, *Tile\URL)
+              If TileNewFilename
+                ;TODO : Not used by now, a new filename is sent back
+                *Tile\CacheFile = TileNewFilename
+              EndIf
+            EndIf
           Else
             PBMap\MemCache\Images(key)\Tile = 0
           EndIf
@@ -2748,11 +2765,29 @@ CompilerIf #PB_Compiler_IsMainFile
     Debug "Identifier : " + *Marker\Identifier + "(" + StrD(*Marker\GeographicCoordinates\Latitude) + ", " + StrD(*Marker\GeographicCoordinates\Longitude) + ")"
   EndProcedure
   
+  ; Example of a custom procedure to alter tile rendering
   Procedure DrawTileCallBack(x.i, y.i, image.i, alpha.d)
     MovePathCursor(x, y)
     DrawVectorImage(ImageID(image), 255 * alpha)
   EndProcedure
   
+  ; Example of a custom procedure to alter tile file just after loading
+  Procedure.s ModifyTileFileCallback(CacheFile.s, OrgURL.s)
+    Protected ImgNB = LoadImage(#PB_Any, CacheFile)
+    If ImgNB
+      StartDrawing(ImageOutput(ImgNB))
+      DrawText(0, 0,"PUREBASIC", RGB(255, 255, 0))
+      StopDrawing()
+      ;*** Could be used to create new files
+      ; Cachefile = ReplaceString(Cachefile, ".png", "_PB.png") 
+      ;***
+      If SaveImage(ImgNB, CacheFile, #PB_ImagePlugin_PNG, 0, 32) ;Warning, the 32 is mandatory as some tiles aren't correctly rendered
+        ; Send back the new name (not functional by now)
+        ProcedureReturn CacheFile
+      EndIf
+    EndIf
+  EndProcedure
+          
   Procedure MainPointer(x.i, y.i)
     VectorSourceColor(RGBA(255, 255,255, 255)) : AddPathCircle(x, y,32) : StrokePath(1)
     VectorSourceColor(RGBA(0, 0, 0, 255)) : AddPathCircle(x, y, 29):StrokePath(2)
@@ -2853,7 +2888,8 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", "", -1, @MyMarker())  ; To add a marker with a customised GFX
     PBMap::SetCallBackMarker(@MarkerMoveCallBack())
-    PBMap::SetCallBackDrawTile(@DrawTileCallBack())
+    ;PBMap::SetCallBackDrawTile(@DrawTileCallBack())
+    ;PBMap::SetCallBackModifyTileFile(@ModifyTileFileCallback())
     
     Repeat
       Event = WaitWindowEvent()
@@ -2986,9 +3022,9 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 291
-; FirstLine = 279
-; Folding = --------------------
+; CursorPosition = 2888
+; FirstLine = 2781
+; Folding = ---------------------
 ; EnableThread
 ; EnableXP
 ; CompileSourceDirectory
