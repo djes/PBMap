@@ -1256,15 +1256,18 @@ Module PBMap
       MyDebug("Key : " + key + " added in memory cache", 4)
     EndIf
     ; If there's no active download thread for this tile
-    If *timg\Tile <= 0        
-      ; Manage tile file lifetime, delete if too old
+    If *timg\Tile <= 0      
+      *timg\nImage = 0
+      *timg\Size = FileSize(CacheFile)        
+      ; Manage tile file lifetime, delete if too old, or if size = 0
       If PBMap\Options\TileLifetime <> -1 
-        If FileSize(CacheFile) > 0 ; Does the file exists ?
-          If Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
+        If *timg\Size >= 0 ; Does the file exists ?
+          If *timg\Size = 0 Or (Date() - GetFileDate(CacheFile, #PB_Date_Modified) > PBMap\Options\TileLifetime) ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
             If DeleteFile(CacheFile)
-              MyDebug("  Deleting too old image file  " + CacheFile, 3)
+              MyDebug("  Deleting image file  " + CacheFile, 3)
+              *timg\Size = 0
             Else
-              MyDebug("  Can't delete too old image file  " + CacheFile, 3)
+              MyDebug("  Can't delete image file  " + CacheFile, 3)
               UnlockMutex(PBMap\MemoryCacheAccessMutex)
               ProcedureReturn #False
             EndIf
@@ -1272,8 +1275,6 @@ Module PBMap
         EndIf
       EndIf
       ; Try To load it from HD
-      *timg\nImage = 0
-      *timg\Size = FileSize(CacheFile)
       If *timg\Size > 0   
         *timg\nImage = GetTileFromHDD(CacheFile.s)
       Else
@@ -2948,8 +2949,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2456
-; FirstLine = 2435
+; CursorPosition = 1404
+; FirstLine = 1249
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
