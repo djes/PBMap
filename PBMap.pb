@@ -3,7 +3,7 @@
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes, Idle, yves86
-; Date:              June, 2017
+; Date:              July, 2017
 ; License:           PBMap : Free, unrestricted, credit 
 ;                    appreciated but not required.
 ; OSM :              see http://www.openstreetmap.org/copyright
@@ -45,6 +45,24 @@ DeclareModule PBMap
   #PB_MAP_REDRAW = #PB_EventType_FirstCustomValue + 1 
   #PB_MAP_RETRY  = #PB_EventType_FirstCustomValue + 2
   #PB_MAP_TILE_CLEANUP = #PB_EventType_FirstCustomValue + 3
+  
+  ;-*** Public structures
+  Structure GeographicCoordinates
+    Longitude.d
+    Latitude.d
+  EndStructure
+  
+ Structure Marker
+    GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
+    Identifier.s
+    Legend.s
+    Color.l                                        ; Marker color
+    Focus.i
+    Selected.i                                     ; Is the marker selected ?
+    CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
+    EditWindow.i
+  EndStructure
+  ;***
   
   Declare InitPBMap(window)
   Declare SetDebugLevel(level.i)
@@ -105,12 +123,7 @@ Module PBMap
   
   EnableExplicit
   
-  ;-*** Structures
-  
-  Structure GeographicCoordinates
-    Longitude.d
-    Latitude.d
-  EndStructure
+  ;-*** Internal Structures
   
   Structure PixelCoordinates
     x.d
@@ -173,18 +186,7 @@ Module PBMap
     List ImagesTimeStack.ImgMemCachKey()           ; Usage of the tile (first = older)
   EndStructure
   
-  Structure Marker
-    GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
-    Identifier.s
-    Legend.s
-    Color.l                                        ; Marker color
-    Focus.i
-    Selected.i                                     ; Is the marker selected ?
-    CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    EditWindow.i
-  EndStructure
-  
-  ;-Options
+  ;-Options Structure
   Structure Option
     HDDCachePath.s                                 ; Path where to load and save tiles downloaded from server
     DefaultOSMServer.s                             ; Base layer OSM server
@@ -265,7 +267,7 @@ Module PBMap
     StrokeWidth.i
   EndStructure
   
-  ;- PBMap 
+  ;- PBMap Structure
   Structure PBMap
     Window.i                                       ; Parent Window
     Gadget.i                                       ; Canvas Gadget Id 
@@ -316,7 +318,7 @@ Module PBMap
     
   EndStructure
   
-  ;-*** Global variables
+  ;-*** Module's global variables  
   
   ;-Show debug infos 
   Global MyDebugLevel = 5
@@ -333,7 +335,7 @@ Module PBMap
   
   ;- *** GetText - Translation purpose
   
-  ; TODO use this for all text
+  ; TODO use this
   IncludeFile "gettext.pbi"
   
   ;-*** Misc tools
@@ -825,7 +827,7 @@ Module PBMap
       EndSelect
     EndWith
   EndProcedure
-  
+    
   ; By default, save options in the user's home directory
   Procedure SaveOptions(PreferencesFile.s = "PBMap.prefs")
     If PreferencesFile = "PBMap.prefs"
@@ -946,7 +948,6 @@ Module PBMap
   EndProcedure
   
   ;-*** Layers
-  
   ; Add a layer to a list (to get things ordered) and to a map (to access things easily)
   Procedure.i AddLayer(Name.s, Order.i, Alpha.d)
     Protected *Ptr = 0
@@ -2530,7 +2531,7 @@ Module PBMap
         ForEach PBMap\Markers()
           If PBMap\Markers()\Selected = #True
             If PBMap\CallBackMarker > 0
-              CallFunctionFast(PBMap\CallBackMarker,  @PBMap\Markers()\GeographicCoordinates)
+              CallFunctionFast(PBMap\CallBackMarker,  @PBMap\Markers());
             EndIf 
           EndIf
         Next
@@ -2719,6 +2720,10 @@ CompilerIf #PB_Compiler_IsMainFile
     EndIf
   EndProcedure
   
+  Procedure MarkerMoveCallBack(*Marker.PBMap::Marker)
+    Debug "Identifier : " + *Marker\Identifier + "(" + StrD(*Marker\GeographicCoordinates\Latitude) + ", " + StrD(*Marker\GeographicCoordinates\Longitude) + ")"
+  EndProcedure
+  
   Procedure MainPointer(x.i, y.i)
     VectorSourceColor(RGBA(255, 255,255, 255)) : AddPathCircle(x, y,32) : StrokePath(1)
     VectorSourceColor(RGBA(0, 0, 0, 255)) : AddPathCircle(x, y, 29):StrokePath(2)
@@ -2818,6 +2823,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
     PBMAP::SetMapScaleUnit(PBMAP::#SCALE_KM)                        ; To change the scale unit
     PBMap::AddMarker(49.0446828398, 2.0349812508, "", "", -1, @MyMarker())  ; To add a marker with a customised GFX
+    PBMap::SetCallBackMarker(@MarkerMoveCallBack())
     
     Repeat
       Event = WaitWindowEvent()
@@ -2948,11 +2954,11 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
+
 ; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 1404
-; FirstLine = 1249
+; CursorPosition = 2727
+; FirstLine = 2720
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
 ; CompileSourceDirectory
-; DisablePurifier = 1,1,1,1
