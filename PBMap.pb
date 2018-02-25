@@ -292,8 +292,8 @@ Module PBMap
     
     CallBackLocation.i                             ; @Procedure(latitude.d, longitude.d)
     CallBackMainPointer.i                          ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
-    CallBackMarker.i                               ; @Procedure (latitude.d, lontitude.d) to know the marker position (YA)
-    CallBackLeftClic.i                             ; @Procedure (latitude.d, lontitude.d) to know the position on left click  (YA)
+    CallBackMarker.i                               ; @Procedure (latitude.d, longitude.d) to know the marker position (YA)
+    CallBackLeftClic.i                             ; @Procedure (latitude.d, longitude.d) to know the position on left click  (YA)
     CallBackDrawTile.ProtoDrawTile                 ; @Procedure (x.i, y.i, nImage.i) to customise tile drawing 
     CallBackModifyTileFile.ProtoModifyTileFile     ; @Procedure (Filename.s, Original URL) to customise image file => New Filename
     
@@ -337,7 +337,7 @@ Module PBMap
   ;-Show debug infos 
   Global MyDebugLevel = 5
   
-  Global PBMap.PBMap, Null.i, NullPtrMem.i, *NullPtr = @NullPtrMem
+  Global PBMap.PBMap
   Global slash.s
   
   CompilerSelect #PB_Compiler_OS
@@ -1175,7 +1175,7 @@ Module PBMap
   Threaded Progress = 0, Quit = #False
   
   Procedure GetImageThread(*Tile.Tile)    
-    LockMutex(PBMap\MemoryCacheAccessMutex)
+    ;LockMutex(PBMap\MemoryCacheAccessMutex)
     MyDebug("Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " starting for image " + *Tile\CacheFile, 5)
     ; If MemoryCache is currently being cleaned, abort
 ;     If PBMap\MemoryCacheAccessNB = -1
@@ -1186,7 +1186,7 @@ Module PBMap
 ;       ProcedureReturn
 ;     EndIf
     ; We're accessing MemoryCache
-    UnlockMutex(PBMap\MemoryCacheAccessMutex)
+    ;UnlockMutex(PBMap\MemoryCacheAccessMutex)
     *Tile\Size = 0
     *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous, #USERAGENT)
     If *Tile\Download
@@ -1218,9 +1218,9 @@ Module PBMap
       Until Quit
     EndIf
     ; End of the memory cache access
-    LockMutex(PBMap\MemoryCacheAccessMutex)
+    ;LockMutex(PBMap\MemoryCacheAccessMutex)
     PostEvent(#PB_Event_Gadget, PBMap\Window, PBmap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
-    UnlockMutex(PBMap\MemoryCacheAccessMutex)
+    ;UnlockMutex(PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
   ;-***
@@ -2572,7 +2572,7 @@ Module PBMap
         PBMap\Redraw = #True
       Case #PB_MAP_RETRY
         PBMap\Redraw = #True
-        ;- Tile web loading thread cleanup 
+        ;- #PB_MAP_TILE_CLEANUP : Tile web loading thread cleanup 
         ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
       Case #PB_MAP_TILE_CLEANUP
         *Tile = EventData() 
@@ -2873,7 +2873,7 @@ CompilerIf #PB_Compiler_IsMainFile
     ; Our main gadget
     PBMap::InitPBMap(#Window_0)
     PBMap::SetOption("ShowDegrees", "1") : Degrees = 0
-    PBMap::SetOption("ShowDebugInfos", "0")
+    PBMap::SetOption("ShowDebugInfos", "1")
     PBMap::SetDebugLevel(5)
     PBMap::SetOption("Verbose", "0")
     PBMap::SetOption("ShowScale", "1")    
@@ -3021,9 +3021,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 
-; IDE Options = PureBasic 5.60 (Windows - x64)
-; CursorPosition = 2888
-; FirstLine = 2781
+; IDE Options = PureBasic 5.61 (Windows - x64)
+; CursorPosition = 1222
+; FirstLine = 1194
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
