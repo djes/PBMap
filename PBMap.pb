@@ -68,8 +68,7 @@ DeclareModule PBMap
   EndStructure
   ;***
   
-  Declare.i InitPBMap(Window, TimerNB = 1)         ; Returns *PBMap structure pointer
-  Declare SelectPBMap(*NewPBMap)                   ; Could be used to have multiple PBMaps in one window
+  Declare SelectPBMap(Gadget.i)                    ; Could be used to have multiple PBMaps in one window
   Declare SetDebugLevel(Level.i)
   Declare SetOption(Option.s, Value.s)
   Declare.s GetOption(Option.s)
@@ -84,14 +83,15 @@ DeclareModule PBMap
   Declare DisableLayer(Name.s)
   Declare SetLayerAlpha(Name.s, Alpha.d)
   Declare.d GetLayerAlpha(Name.s)
-  Declare BindMapGadget(Gadget.i)
+  Declare BindMapGadget(Gadget.i, TimerNB = 1)
   Declare SetCallBackLocation(*CallBackLocation)
   Declare SetCallBackMainPointer(CallBackMainPointer.i)  
   Declare SetCallBackDrawTile(*CallBackLocation)
   Declare SetCallBackMarker(*CallBackLocation)
   Declare SetCallBackLeftClic(*CallBackLocation)
   Declare SetCallBackModifyTileFile(*CallBackLocation)
-  Declare MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Declare.i MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1)       ; Returns Gadget NB if #PB_Any is used for gadget
+  Declare FreeMapGadget(Gadget.i)
   Declare.d GetLatitude()
   Declare.d GetLongitude()
   Declare.d GetMouseLatitude()
@@ -118,7 +118,6 @@ DeclareModule PBMap
   Declare DeleteMarker(*Ptr)
   Declare DeleteSelectedMarkers()
   Declare Drawing()
-  Declare Quit()
   Declare FatalError(msg.s)
   Declare Error(msg.s)
   Declare Refresh()
@@ -156,6 +155,8 @@ Module PBMap
     Download.i
     Time.i
     Size.i
+    Window.i                                       ; Parent Window
+    Gadget.i 
   EndStructure
   
   Structure BoundingBox 
@@ -318,7 +319,7 @@ Module PBMap
     Dragging.i
     Dirty.i                                        ; To signal that drawing need a refresh
     
-    MemoryCacheAccessMutex.i                     ; Memorycache access variable mutual exclusion    
+    MemoryCacheAccessMutex.i                       ; Memorycache access variable mutual exclusion    
     DownloadSlots.i                                ; Actual nb of used download slots
     
     List TracksList.Tracks()                       ; To display a GPX track
@@ -337,6 +338,7 @@ Module PBMap
   ;-Show debug infos 
   Global MyDebugLevel = 5
   
+  Global NewMap PBMaps()
   Global *PBMap.PBMap
   Global slash.s
   
@@ -891,7 +893,8 @@ Module PBMap
     EndWith
   EndProcedure
   
-  Procedure LoadOptions(PreferencesFile.s = "PBMap.prefs")
+  Procedure LoadOptions(MapGadget.i, PreferencesFile.s = "PBMap.prefs")
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
     If PreferencesFile = "PBMap.prefs"
       OpenPreferences(GetHomeDirectory() + "PBMap.prefs")      
     Else
@@ -1219,7 +1222,7 @@ Module PBMap
     EndIf
     ; End of the memory cache access
     ;LockMutex(*PBMap\MemoryCacheAccessMutex)
-    PostEvent(#PB_Event_Gadget, *PBMap\Window, *PBMap\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
+    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
@@ -1315,6 +1318,8 @@ Module PBMap
                 \CacheFile = CacheFile
                 \nImage = 0 
                 \Time = ElapsedMilliseconds()
+                \Window = *PBMap\Window 
+                \Gadget = *PBMap\Gadget 
                 \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
                 If \GetImageThread
                   *timg\Tile = *NewTile ; There's now a loading thread
@@ -2331,12 +2336,15 @@ Module PBMap
   
   Procedure CanvasEvents()
     Protected CanvasMouseX.d, CanvasMouseY.d, MouseX.d, MouseY.d
-    Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth = Pow(2, *PBMap\Zoom) * *PBMap\TileSize
+    Protected MarkerCoords.PixelCoordinates, *Tile.Tile, MapWidth
     Protected key.s, Touch.i
     Protected Pixel.PixelCoordinates
     Protected ImgNB.i, TileNewFilename.s
     Static CtrlKey
     Protected Location.GeographicCoordinates
+    
+    Protected *PBMap.PBmap = PBMaps(Str(EventGadget()))
+    MapWidth = Pow(2, *PBMap\Zoom) * *PBMap\TileSize
     CanvasMouseX = GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseX) - *PBMap\Drawing\RadiusX
     CanvasMouseY = GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseY) - *PBMap\Drawing\RadiusY
     ; rotation wip
@@ -2523,41 +2531,41 @@ Module PBMap
             Next
             ; Check if mouse touch tracks           
             If *PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
-            With *PBMap\TracksList()
-              ; Trace Track
-              If ListSize(*PBMap\TracksList()) > 0
-                ForEach *PBMap\TracksList()
-                  If ListSize(\Track()) > 0
-                    If \Visible
-                      StartVectorDrawing(CanvasVectorOutput(*PBMap\Gadget))
-                      ; Simulates track drawing
-                      ForEach \Track()
-                        LatLon2Pixel(@*PBMap\TracksList()\Track(),  @Pixel, *PBMap\Zoom)
-                        If ListIndex(\Track()) = 0
-                          MovePathCursor(Pixel\x, Pixel\y)
-                        Else
-                          AddPathLine(Pixel\x, Pixel\y)    
+              With *PBMap\TracksList()
+                ; Trace Track
+                If ListSize(*PBMap\TracksList()) > 0
+                  ForEach *PBMap\TracksList()
+                    If ListSize(\Track()) > 0
+                      If \Visible
+                        StartVectorDrawing(CanvasVectorOutput(*PBMap\Gadget))
+                        ; Simulates track drawing
+                        ForEach \Track()
+                          LatLon2Pixel(@*PBMap\TracksList()\Track(),  @Pixel, *PBMap\Zoom)
+                          If ListIndex(\Track()) = 0
+                            MovePathCursor(Pixel\x, Pixel\y)
+                          Else
+                            AddPathLine(Pixel\x, Pixel\y)    
+                          EndIf
+                        Next
+                        If IsInsideStroke(MouseX, MouseY, \StrokeWidth)
+                          \Focus = #True
+                          *PBMap\Redraw = #True
+                        ElseIf \Focus
+                          \Focus = #False
+                          *PBMap\Redraw = #True
                         EndIf
-                      Next
-                      If IsInsideStroke(MouseX, MouseY, \StrokeWidth)
-                        \Focus = #True
-                        *PBMap\Redraw = #True
-                      ElseIf \Focus
-                        \Focus = #False
-                        *PBMap\Redraw = #True
-                      EndIf
-                      StopVectorDrawing()
-                    EndIf  
-                  EndIf
-                Next
-              EndIf
-            EndWith
+                        StopVectorDrawing()
+                      EndIf  
+                    EndIf
+                  Next
+                EndIf
+              EndWith
+            EndIf
           EndIf
-        EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
         SetGadgetAttribute(*PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
-        ; *PBMap\MoveStartingPoint\x = - 1
+                                                                               ; *PBMap\MoveStartingPoint\x = - 1
         *PBMap\Dragging = #False
         *PBMap\Redraw = #True
         ;YA pour connaitre les coordonnées d'un marqueur après déplacement
@@ -2572,8 +2580,8 @@ Module PBMap
         *PBMap\Redraw = #True
       Case #PB_MAP_RETRY
         *PBMap\Redraw = #True
-      ;- #PB_MAP_TILE_CLEANUP : Tile web loading thread cleanup 
-      ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
+        ;- #PB_MAP_TILE_CLEANUP : Tile web loading thread cleanup 
+        ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
       Case #PB_MAP_TILE_CLEANUP
         *Tile = EventData() 
         key = *Tile\key           
@@ -2583,7 +2591,7 @@ Module PBMap
           *PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
             *PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
-            ;- Allows to post edit the tile image file with a customised code
+                                                  ;- Allows to post edit the tile image file with a customised code
             If *PBMap\CallBackModifyTileFile
               TileNewFilename = *PBMap\CallBackModifyTileFile(*Tile\CacheFile, *Tile\URL)
               If TileNewFilename
@@ -2604,14 +2612,46 @@ Module PBMap
   
   ; Redraws at regular intervals
   Procedure TimerEvents()
-    If EventTimer() = *PBMap\Timer And (*PBMap\Redraw Or *PBMap\Dirty)
-      MemoryCacheManagement()
-      Drawing()
-    EndIf    
+    Protected *PBMap.PBMap
+    ForEach PBMaps()
+      *PBMap = PBMaps()
+      If EventTimer() = *PBMap\Timer And (*PBMap\Redraw Or *PBMap\Dirty)
+        MemoryCacheManagement()
+        Drawing()
+      EndIf
+    Next
   EndProcedure 
   
   ; Could be called directly to attach our map to an existing canvas
-  Procedure BindMapGadget(Gadget.i)
+  Procedure BindMapGadget(Gadget.i, TimerNB = 1)
+    Protected *PBMap.PBMap
+    *PBMap.PBMap = AllocateStructure(PBMap)    
+    If *PBMap = 0
+      FatalError("Cannot initialize PBMap memory")
+    EndIf
+    PBMaps(Str(Gadget)) = *PBMap
+    With *PBMap
+      Protected Result.i
+      \ZoomMin = 1
+      \ZoomMax = 18
+      \Dragging = #False
+      \TileSize = 256
+      \Dirty = #False
+      \EditMarker = #False
+      \StandardFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
+      \UnderlineFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Underline)
+      \Window = GetActiveWindow()
+      \Timer = TimerNB
+      \Mode = #MODE_DEFAULT
+      \MemoryCacheAccessMutex = CreateMutex() 
+      If \MemoryCacheAccessMutex = #False
+        MyDebug("Cannot create a mutex", 0)
+        End
+      EndIf
+    EndWith
+    LoadOptions(*PBMap)
+    TechnicalImagesCreation(*PBMap)
+    SetLocation(*PBMap, 0, 0)    
     *PBMap\Gadget = Gadget
     BindGadgetEvent(*PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(*PBMap\Window, *PBMap\Timer, *PBMap\Options\TimerInterval)
@@ -2621,17 +2661,22 @@ Module PBMap
   EndProcedure
   
   ; Creates a canvas and attach our map
-  Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i)
+  Procedure MapGadget(Gadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1)
     If Gadget = #PB_Any
-      *PBMap\Gadget = CanvasGadget(*PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) ; #PB_Canvas_Keyboard has to be set for mousewheel to work on windows
+      Protected GadgetNB.i      
+      GadgetNB = CanvasGadget(#PB_Any, X, Y, Width, Height, #PB_Canvas_Keyboard)  ; #PB_Canvas_Keyboard has to be set for mousewheel to work on windows
+      BindMapGadget(GadgetNB, TimerNB) 
+      ProcedureReturn GadgetNB
     Else
-      *PBMap\Gadget = Gadget
-      CanvasGadget(*PBMap\Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard) 
-    EndIf
-    BindMapGadget(*PBMap\Gadget)
+      If CanvasGadget(Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard)
+        BindMapGadget(Gadget, TimerNB)
+      Else
+        FatalError("Cannot create the map gadget")
+      EndIf
+    EndIf  
   EndProcedure
   
-  Procedure Quit()
+  Procedure Quit(*PBMap.PBMap)
     *PBMap\Drawing\End = #True
     ; Wait for loading threads to finish nicely. Passed 2 seconds, kills them.
     Protected TimeCounter = ElapsedMilliseconds()
@@ -2653,41 +2698,24 @@ Module PBMap
       Next
       Delay(10)
     Until MapSize(*PBMap\MemCache\Images()) = 0
+    RemoveWindowTimer(*PBMap\Window, *PBMap\Timer)
+    UnbindGadgetEvent(*PBMap\Gadget, @CanvasEvents())
     FreeStructure(*PBMap)
   EndProcedure
   
-  Procedure.i InitPBMap(Window, TimerNB = 1) ; For multiple PBMaps in one window, TimerNB should be defined and unique for each. *PBMap is returned
-    *PBMap.PBMap = AllocateStructure(PBMap)
-    If *PBMap = 0
-      FatalError("Cannot initialize PBMap memory")
-    EndIf
-    With *PBMap
-      Protected Result.i
-      \ZoomMin = 1
-      \ZoomMax = 18
-      \Dragging = #False
-      \TileSize = 256
-      \Dirty = #False
-      \EditMarker = #False
-      \StandardFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
-      \UnderlineFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Underline)
-      \Window = Window
-      \Timer = TimerNB
-      \Mode = #MODE_DEFAULT
-      \MemoryCacheAccessMutex = CreateMutex() 
-      If \MemoryCacheAccessMutex = #False
-        MyDebug("Cannot create a mutex", 0)
-        End
+  Procedure FreeMapGadget(Gadget.i)
+    Protected *PBMap.PBMap
+    ForEach PBMaps()
+      *PBMap = PBMaps()
+      If *PBMap\Gadget = Gadget
+        Quit(*PBMap)
+        DeleteMapElement(PBMaps())
       EndIf
-    EndWith
-    LoadOptions()
-    TechnicalImagesCreation()
-    SetLocation(0, 0)    
-    ProcedureReturn *PBMap
+    Next
   EndProcedure
   
-  Procedure SelectPBMap(*NewPBMap)                   ; Could be used to have multiple PBMaps in one window
-    *PBMap = *NewPBMap
+  Procedure SelectPBMap(Gadget.i)                   ; Could be used to have multiple PBMaps in one window
+    *PBMap = PBMaps(Str(Gadget))
   EndProcedure
 
 EndModule
@@ -2882,7 +2910,8 @@ CompilerIf #PB_Compiler_IsMainFile
     Define *PBMap
     
     ; Our main gadget
-    *PBMap = PBMap::InitPBMap(#Window_0)
+    ;*PBMap = PBMap::InitPBMap(#Window_0)
+    PBMap::MapGadget(#Map, 10, 10, 512, 512)    
     PBMap::SetOption("ShowDegrees", "1") : Degrees = 0
     PBMap::SetOption("ShowDebugInfos", "1")
     PBMap::SetDebugLevel(5)
@@ -2892,7 +2921,7 @@ CompilerIf #PB_Compiler_IsMainFile
     PBMap::SetOption("ShowMarkersLegend", "1")
     PBMap::SetOption("ShowTrackKms", "1")
     PBMap::SetOption("ColourFocus", "$FFFF00AA") 
-    PBMap::MapGadget(#Map, 10, 10, 512, 512)
+
     PBMap::SetCallBackMainPointer(@MainPointer())                   ; To change the main pointer (center of the view)
     PBMap::SetCallBackLocation(@UpdateLocation())                   ; To obtain realtime coordinates
     PBMap::SetLocation(-36.81148, 175.08634,12)                     ; Change the PBMap coordinates
@@ -3026,15 +3055,15 @@ CompilerIf #PB_Compiler_IsMainFile
       EndSelect
     Until Quit = #True
     
-    PBMap::Quit()
+    PBMap::FreeMapGadget(#Map)
   EndIf
   
 CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 440
-; FirstLine = 455
+; CursorPosition = 897
+; FirstLine = 895
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
