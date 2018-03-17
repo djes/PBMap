@@ -6,7 +6,7 @@ To develop tiled map applications in PureBasic.
 Based on OpenStreetMap services
 OSM copyright : http://www.openstreetmap.org/copyright
 
-This code is free !
+This code is free, but any use should mention the origin of this code.
 
 Officials forums topics here :
 http://www.purebasic.fr/english/viewtopic.php?f=27&t=66320 (english)
@@ -18,3 +18,4 @@ djes
 Idle
 Progi1984
 yves86
+André

@@ -83,14 +83,14 @@ DeclareModule PBMap
   Declare DisableLayer(MapGadget.i, Name.s)
   Declare SetLayerAlpha(MapGadget.i, Name.s, Alpha.d)
   Declare.d GetLayerAlpha(MapGadget.i, Name.s)
-  Declare BindMapGadget(MapGadget.i, TimerNB = 1)
+  Declare BindMapGadget(MapGadget.i, TimerNB = 1, Window = -1)
   Declare SetCallBackLocation(MapGadget.i, *CallBackLocation)
   Declare SetCallBackMainPointer(MapGadget.i, CallBackMainPointer.i)  
   Declare SetCallBackDrawTile(MapGadget.i, *CallBackLocation)
   Declare SetCallBackMarker(MapGadget.i, *CallBackLocation)
   Declare SetCallBackLeftClic(MapGadget.i, *CallBackLocation)
   Declare SetCallBackModifyTileFile(MapGadget.i, *CallBackLocation)
-  Declare.i MapGadget(MapGadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1)       ; Returns Gadget NB if #PB_Any is used for gadget
+  Declare.i MapGadget(MapGadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1, Window = -1)       ; Returns Gadget NB if #PB_Any is used for gadget
   Declare FreeMapGadget(MapGadget.i)
   Declare.d GetLatitude(MapGadget.i)
   Declare.d GetLongitude(MapGadget.i)
@@ -2701,11 +2701,14 @@ Module PBMap
   EndProcedure 
   
   ; Could be called directly to attach our map to an existing canvas
-  Procedure BindMapGadget(MapGadget.i, TimerNB = 1)
+  Procedure BindMapGadget(MapGadget.i, TimerNB = 1, Window = -1)
     Protected *PBMap.PBMap
     *PBMap.PBMap = AllocateStructure(PBMap)    
     If *PBMap = 0
       FatalError(MapGadget, "Cannot initialize PBMap memory")
+    EndIf
+    If Window = -1
+      Window = GetActiveWindow()
     EndIf
     PBMaps(Str(MapGadget)) = *PBMap
     With *PBMap
@@ -2718,7 +2721,7 @@ Module PBMap
       \EditMarker = #False
       \StandardFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Bold)
       \UnderlineFont = LoadFont(#PB_Any, "Arial", 20, #PB_Font_Underline)
-      \Window = GetActiveWindow()
+      \Window = Window
       \Timer = TimerNB
       \Mode = #MODE_DEFAULT
       \MemoryCacheAccessMutex = CreateMutex() 
@@ -2739,15 +2742,18 @@ Module PBMap
   EndProcedure
   
   ; Creates a canvas and attach our map
-  Procedure MapGadget(MapGadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1)
+  Procedure MapGadget(MapGadget.i, X.i, Y.i, Width.i, Height.i, TimerNB = 1, Window.i = -1)
+    If Window = -1
+      Window = GetActiveWindow()
+    EndIf
     If MapGadget = #PB_Any
       Protected GadgetNB.i      
       GadgetNB = CanvasGadget(#PB_Any, X, Y, Width, Height, #PB_Canvas_Keyboard)  ; #PB_Canvas_Keyboard has to be set for mousewheel to work on windows
-      BindMapGadget(GadgetNB, TimerNB) 
+      BindMapGadget(GadgetNB, TimerNB, Window) 
       ProcedureReturn GadgetNB
     Else
       If CanvasGadget(MapGadget, X, Y, Width, Height, #PB_Canvas_Keyboard)
-        BindMapGadget(MapGadget, TimerNB)
+        BindMapGadget(MapGadget, TimerNB, Window)
       Else
         FatalError(MapGadget, "Cannot create the map gadget")
       EndIf
@@ -3136,8 +3142,8 @@ CompilerEndIf
 
 
 ; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 340
-; FirstLine = 76
+; CursorPosition = 2751
+; FirstLine = 2744
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP

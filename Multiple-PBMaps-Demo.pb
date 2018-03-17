@@ -204,11 +204,11 @@ If OpenWindow(#Window_0, 260, 225, 720, 595, "PBMap", #PB_Window_SystemMenu | #P
     SetActiveGadget(#StringGeoLocationQuery)
     
     ; Our main gadget
-    PBMap::MapGadget(#Map, 10, 10, 512, 512)
+    PBMap::MapGadget(#Map, 10, 10, 512, 512, 1, #Window_0)
     PBMap::SetOption(#Map, "ShowDegrees", "1") : Degrees = 0
     PBMap::SetOption(#Map, "ShowDebugInfos", "1")
     PBMap::SetDebugLevel(5)
-    PBMap::SetOption(#Map, "Verbose", "0")
+    PBMap::SetOption(#Map, "Verbose", "1")
     PBMap::SetOption(#Map, "ShowScale", "1")   
     PBMap::SetOption(#Map, "Warning", "1")
     PBMap::SetOption(#Map, "ShowMarkersLegend", "1")
@@ -239,11 +239,11 @@ If OpenWindow(#Window_0, 260, 225, 720, 595, "PBMap", #PB_Window_SystemMenu | #P
     StringGadget(#Map2_StringLongitude, 580, 210, 90, 20, "")
    
     ; Our second map:
-    PBMap::MapGadget(#Map2_Canvas, 10, 10, 512, 512)
+    PBMap::MapGadget(#Map2_Canvas, 10, 10, 512, 512, 1, #Window_0)
     PBMap::SetOption(#Map2_Canvas, "ShowDegrees", "1") : Degrees = 0
     PBMap::SetOption(#Map2_Canvas, "ShowDebugInfos", "1")
     PBMap::SetDebugLevel(5)
-    PBMap::SetOption(#Map2_Canvas, "Verbose", "0")
+    PBMap::SetOption(#Map2_Canvas, "Verbose", "1")
     PBMap::SetOption(#Map2_Canvas, "ShowScale", "1")   
     PBMap::SetOption(#Map2_Canvas, "Warning", "1")
     PBMap::SetOption(#Map2_Canvas, "ShowMarkersLegend", "1")
@@ -361,8 +361,8 @@ If OpenWindow(#Window_0, 260, 225, 720, 595, "PBMap", #PB_Window_SystemMenu | #P
   PBMap::FreeMapGadget(#Map2_Canvas)
 EndIf
 ; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 204
-; FirstLine = 176
+; CursorPosition = 241
+; FirstLine = 198
 ; Folding = --
 ; EnableThread
 ; EnableXP
