@@ -515,7 +515,7 @@ Module PBMap
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
     Protected n.d = *PBMap\TileSize * Pow(2.0, Zoom)
     ; Ensures the longitude to be in the range [-180; 180[
-    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Longitude  = Mod((1 + *Coords\x / n) * 360, 360) - 180 ; Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
     *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
     If *Location\Latitude <= -89 
       *Location\Latitude = -89 
@@ -3141,9 +3141,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 
-; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 2751
-; FirstLine = 2744
+; IDE Options = PureBasic 5.61 (Windows - x86)
+; CursorPosition = 517
+; FirstLine = 513
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
