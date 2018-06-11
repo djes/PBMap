@@ -1,4 +1,4 @@
-; ******************************************************************** 
+﻿; ******************************************************************** 
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
@@ -2543,14 +2543,13 @@ Module PBMap
             EndIf
           Next
         EndIf
-        ; YA pour sélectionner un point de la trace avec le clic gauche
         If *PBMap\EditMarker = #False 
           Location\Latitude = GetMouseLatitude(MapGadget)
           Location\Longitude = GetMouseLongitude(MapGadget)
           If *PBMap\CallBackLeftClic > 0
             CallFunctionFast(*PBMap\CallBackLeftClic, @Location)
           EndIf 
-          ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
+          ; ajout YA // Mouse pointer when moving map
           SetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Hand)
         Else
           SetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
@@ -2608,7 +2607,7 @@ Module PBMap
               EndIf
             Next
             ; Check if mouse touch tracks           
-            If *PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
+            If *PBMap\Options\ShowTrackSelection ; YA to avoid selecting track
               With *PBMap\TracksList()
                 ; Trace Track
                 If ListSize(*PBMap\TracksList()) > 0
@@ -2642,11 +2641,11 @@ Module PBMap
           EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
-        SetGadgetAttribute(*PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
+        SetGadgetAttribute(*PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ;  YA normal mouse pointer
                                                                                ; *PBMap\MoveStartingPoint\x = - 1
         *PBMap\Dragging = #False
         *PBMap\Redraw = #True
-        ;YA pour connaitre les coordonnées d'un marqueur après déplacement
+        ;YA to knows marker coordinates after moving
         ForEach *PBMap\Markers()
           If *PBMap\Markers()\Selected = #True
             If *PBMap\CallBackMarker > 0
@@ -3141,9 +3140,9 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 
-; IDE Options = PureBasic 5.61 (Windows - x86)
-; CursorPosition = 517
-; FirstLine = 513
+; IDE Options = PureBasic 5.61 (Windows - x64)
+; CursorPosition = 2648
+; FirstLine = 2606
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
