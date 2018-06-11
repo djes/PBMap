@@ -2543,6 +2543,7 @@ Module PBMap
             EndIf
           Next
         EndIf
+        ; YA To select a track with LMB
         If *PBMap\EditMarker = #False 
           Location\Latitude = GetMouseLatitude(MapGadget)
           Location\Longitude = GetMouseLongitude(MapGadget)
