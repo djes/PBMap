@@ -1273,7 +1273,7 @@ Module PBMap
     EndIf
     ; End of the memory cache access
     ;LockMutex(*PBMap\MemoryCacheAccessMutex)
-    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
+    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory and eventually delete aborted image file outside the thread
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
@@ -2720,6 +2720,11 @@ Module PBMap
             EndIf
           Else
             *PBMap\MemCache\Images(key)\Tile = 0
+            If DeleteFile(*Tile\CacheFile)
+              MyDebug(*PBMap, "  Deleting not fully loaded image file  " + *Tile\CacheFile, 3)
+            Else
+              MyDebug(*PBMap, "  Can't delete not fully loaded image file  " + *Tile\CacheFile, 3)
+            EndIf
           EndIf
         EndIf
         FreeMemory(*Tile)                                       ; Frees the data needed for the thread (*tile=*PBMap\MemCache\Images(key)\Tile)
@@ -3183,8 +3188,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 1369
-; FirstLine = 1354
+; CursorPosition = 1261
+; FirstLine = 1242
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
