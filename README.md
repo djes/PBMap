@@ -3,8 +3,11 @@ Open source tiled map software.
 
 Module to develop tiled map applications in PureBasic, like  like OpenStreetMap(c), Google Maps(c), Here(c), ...
 
+
 Functional example based on OpenStreetMap services(c)
+
 OSM copyright : http://www.openstreetmap.org/copyright
+
 
 This code is free, but any user should mention the origin of this code.
 
