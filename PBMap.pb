@@ -2712,6 +2712,7 @@ Module PBMap
           ;*PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
             ;TODO : check if file size = server file size
+            ;and eventually use pngcheck to avoid problematic files http://www.libpng.org/pub/png/apps/pngcheck.html
             *PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
             ; Allows to post edit the tile image file with a customised code
             If *PBMap\CallBackModifyTileFile
@@ -3191,8 +3192,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 1245
-; FirstLine = 1230
+; CursorPosition = 2714
+; FirstLine = 2702
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
