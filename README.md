@@ -1,14 +1,14 @@
-# PBMap
+# PBMap 0.91
 Open source tiled map software.
 
-To develop tiled map applications in PureBasic.
+Module to develop tiled map applications in PureBasic, like  like OpenStreetMap(c), Google Maps(c), Here(c), ...
 
-Based on OpenStreetMap services
+Functional example based on OpenStreetMap services(c)
 OSM copyright : http://www.openstreetmap.org/copyright
 
-This code is free, but any use should mention the origin of this code.
+This code is free, but any user should mention the origin of this code.
 
-Officials forums topics here :
+Official forums topics :
 http://www.purebasic.fr/english/viewtopic.php?f=27&t=66320 (english)
 http://www.purebasic.fr/french/viewtopic.php?f=3&t=16160 (french)
 
@@ -16,6 +16,11 @@ Contributors :
 Thyphoon
 djes
 Idle
+
+Thanks to :
 Progi1984
 yves86
-André
+AndrÃ©
+falsam
+
+Special thanks to Fred and Fantaisie Software's team
