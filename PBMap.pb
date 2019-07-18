@@ -1243,6 +1243,7 @@ Module PBMap
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
     *Tile\Size = 0
     *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous, #USERAGENT)
+    ;TODO : obtain original file size to compare and eventually delete truncated file
     If *Tile\Download
       Repeat
         Progress = HTTPProgress(*Tile\Download)
@@ -1273,7 +1274,8 @@ Module PBMap
     EndIf
     ; End of the memory cache access
     ;LockMutex(*PBMap\MemoryCacheAccessMutex)
-    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory and eventually delete aborted image file outside the thread
+    ; To free memory and eventually delete aborted image file outside the thread
+    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) 
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
@@ -2709,6 +2711,7 @@ Module PBMap
           ; If the map element has not been deleted during the thread lifetime (should not occur)
           ;*PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
+            ;TODO : check if file size = server file size
             *PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
             ; Allows to post edit the tile image file with a customised code
             If *PBMap\CallBackModifyTileFile
@@ -3188,8 +3191,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 1261
-; FirstLine = 1242
+; CursorPosition = 1245
+; FirstLine = 1230
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
