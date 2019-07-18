@@ -534,20 +534,6 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure Pixel2LatLon(MapGadget.i, *Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
-    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected n.d = *PBMap\TileSize * Pow(2.0, Zoom)
-    ; Ensures the longitude to be in the range [-180; 180[
-    *Location\Longitude  = Mod((1 + *Coords\x / n) * 360, 360) - 180 ; Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
-    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
-    If *Location\Latitude <= -89 
-      *Location\Latitude = -89 
-    EndIf
-    If *Location\Latitude >= 89
-      *Location\Latitude = 89 
-    EndIf
-  EndProcedure
-  
   ; Ensures the longitude to be in the range [-180; 180[
   Procedure.d ClipLongitude(Longitude.d)
     ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
@@ -588,19 +574,37 @@ Module PBMap
     *Pixel\y = *PBMap\Drawing\RadiusY + (py - *PBMap\PixelCoordinates\y) 
   EndProcedure
   
+  Procedure Pixel2LatLon(MapGadget.i, *Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    Protected n.d = *PBMap\TileSize * Pow(2.0, Zoom)
+    ; Ensures the longitude to be in the range [-180; 180[
+    *Location\Longitude  = Mod((1 + *Coords\x / n) * 360, 360) - 180 ; Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
+  EndProcedure
+  
   Procedure.d Pixel2Lon(MapGadget.i, x)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected NewX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + x) / *PBMap\TileSize
-    Protected n.d = Pow(2.0, *PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180; 180[
-    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    Protected n.d = *PBMap\TileSize * Pow(2.0, *PBMap\Zoom)
+    ProcedureReturn Mod((1 + x / n) * 360.0, 360.0) - 180
   EndProcedure
   
   Procedure.d Pixel2Lat(MapGadget.i, y)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected NewY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + y) / *PBMap\TileSize
-    Protected n.d = Pow(2.0, *PBMap\Zoom)
-    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
+    Protected n.d = *PBMap\TileSize * Pow(2.0, *PBMap\Zoom)
+    Protected latitude.d = Degree(ATan(SinH(#PI * (1.0 - 2.0 * y / n))))
+    If latitude <= -89 
+      latitude = -89 
+    EndIf
+    If latitude >= 89
+      latitude = 89 
+    EndIf  
+    ProcedureReturn latitude  
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -2104,20 +2108,30 @@ Module PBMap
   
   ;-*** Misc functions
   
-  Procedure.d GetMouseLongitude(MapGadget.i)
+  Procedure.d GetCanvasPixelLon(MapGadget.i, x)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected MouseX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseX)) / *PBMap\TileSize
+    Protected MouseX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + x) / *PBMap\TileSize
     Protected n.d = Pow(2.0, *PBMap\Zoom)
     ; double mod is to ensure the longitude to be in the range [-180; 180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
-  Procedure.d GetMouseLatitude(MapGadget.i)
+  Procedure.d GetCanvasPixelLat(MapGadget.i, y)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected MouseY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseY)) / *PBMap\TileSize
+    Protected MouseY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + y) / *PBMap\TileSize
     Protected n.d = Pow(2.0, *PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * MouseY / n))))
   EndProcedure
+
+  Procedure.d GetMouseLongitude(MapGadget.i)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    ProcedureReturn GetCanvasPixelLon(MapGadget.i, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseX))
+  EndProcedure
+  
+  Procedure.d GetMouseLatitude(MapGadget.i)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    ProcedureReturn GetCanvasPixelLat(MapGadget.i, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseY))
+  EndProcedure 
   
   Procedure SetLocation(MapGadget.i, latitude.d, longitude.d, Zoom = -1, Mode.i = #PB_Absolute)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
@@ -2535,7 +2549,12 @@ Module PBMap
         Else
           ; Absolute zoom (centered on the center of the map)
           SetZoom(MapGadget, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
-        EndIf        
+        EndIf
+;       Case #PB_EventType_RightClick
+;         Debug GetMouseLongitude(MapGadget)
+;         Debug GetMouseLatitude(MapGadget)
+;         Debug GetCanvasPixelLon(MapGadget, CanvasMouseX + *PBMap\Drawing\RadiusX)
+;         Debug GetCanvasPixelLat(MapGadget, CanvasMouseY + *PBMap\Drawing\RadiusY)
       Case #PB_EventType_LeftButtonDown
         ; LatLon2Pixel(@*PBMap\GeographicCoordinates, @*PBMap\PixelCoordinates, *PBMap\Zoom)
         *PBMap\Dragging = #True
@@ -3165,14 +3184,9 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 255
-; FirstLine = 227
+; CursorPosition = 3154
+; FirstLine = 3136
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
-; EnableOnError
-; DisableDebugger
-; CompileSourceDirectory
-; DisablePurifier = 1,1,1,1
