@@ -1,18 +1,41 @@
-﻿; ******************************************************************** 
+﻿; ********************************************************************
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes, Idle, yves86
-; Date:              June, 2018
+; Date:              July, 2019
 ; License:           PBMap : Free, unrestricted, credit 
 ;                    appreciated but not required.
 ; OSM :              see http://www.openstreetmap.org/copyright
 ; Note:              Please share improvement !
-; Thanks:            Progi1984
+; Thanks:            Progi1984, falsam
+; HowToRun:          Just compile this code, example is included
+; ********************************************************************
+;
+; Track bugs with the following options with debugger enabled (see in the example)
+;    PBMap::SetOption(#Map, "ShowDebugInfos", "1")
+;    PBMap::SetDebugLevel(5)
+;    PBMap::SetOption(#Map, "Verbose", "1")
+;
+; or with the OnError() PB capabilities :
+;    
+; CompilerIf #PB_Compiler_LineNumbering = #False
+;     MessageRequester("Warning !", "You must enable 'OnError lines support' in compiler options", #PB_MessageRequester_Ok )
+;   End
+; CompilerEndIf 
+; 
+; Declare ErrorHandler()
+; 
+; OnErrorCall(@ErrorHandler())
+; 
+; Procedure ErrorHandler()
+;   MessageRequester("Ooops", "The following error happened : " + ErrorMessage(ErrorCode()) + #CRLF$ +"line : " +  Str(ErrorLine()))
+; EndProcedure
+;
 ; ******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
-  MessageRequester("Warning !", "You must enable ThreadSafe support in compiler options", #PB_MessageRequester_Ok )
+  MessageRequester("Warning !", "You must enable 'Create ThreadSafe Executable' in compiler options", #PB_MessageRequester_Ok )
   End
 CompilerEndIf 
 
@@ -29,7 +52,7 @@ UseJPEGImageEncoder()
 DeclareModule PBMap  
   
   #PBMAPNAME = "PBMap"
-  #PBMAPVERSION = "0.9"
+  #PBMAPVERSION = "0.91"
   #USERAGENT = #PBMAPNAME + "/" + #PBMAPVERSION + " (https://github.com/djes/PBMap)"
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
@@ -57,10 +80,10 @@ DeclareModule PBMap
   EndStructure
   
  Structure Marker
-    GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
+    GeographicCoordinates.GeographicCoordinates    ; Marker's latitude and longitude
     Identifier.s
     Legend.s
-    Color.l                                        ; Marker color
+    Color.l                                        ; Marker's color
     Focus.i
     Selected.i                                     ; Is the marker selected ?
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
@@ -1220,16 +1243,16 @@ Module PBMap
       Repeat
         Progress = HTTPProgress(*Tile\Download)
         Select Progress
-          Case #PB_Http_Success
+          Case #PB_HTTP_Success
             *Tile\Size = FinishHTTP(*Tile\Download) ; \Size signals that the download is OK
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " for image " + *Tile\CacheFile + " finished. Size : " + Str(*Tile\Size), 5)
             Quit = #True
-          Case #PB_Http_Failed
+          Case #PB_HTTP_Failed
             FinishHTTP(*Tile\Download)
             *Tile\Size = 0 ; \Size = 0 signals that the download has failed
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " failed.", 5)
             Quit = #True
-          Case #PB_Http_Aborted
+          Case #PB_HTTP_Aborted
             FinishHTTP(*Tile\Download)
             *Tile\Size = 0 ; \Size = 0 signals that the download has failed
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " aborted.", 5)
@@ -1299,9 +1322,9 @@ Module PBMap
       MyDebug(*PBMap, "Key : " + key + " added in memory cache", 4)
     EndIf
     ; If there's no active download thread for this tile
-    If *timg\Tile <= 0      
+    If *timg\Tile <= 0
       *timg\nImage = 0
-      *timg\Size = FileSize(CacheFile)        
+      *timg\Size = FileSize(CacheFile)
       ; Manage tile file lifetime, delete if too old, or if size = 0
       If *PBMap\Options\TileLifetime <> -1 
         If *timg\Size >= 0 ; Does the file exists ?
@@ -1311,14 +1334,14 @@ Module PBMap
               *timg\Size = 0
             Else
               MyDebug(*PBMap, "  Can't delete image file  " + CacheFile, 3)
-              UnlockMutex(*PBMap\MemoryCacheAccessMutex)
-              ProcedureReturn #False
             EndIf
+            UnlockMutex(*PBMap\MemoryCacheAccessMutex)
+            ProcedureReturn #False
           EndIf
         EndIf
       EndIf
       ; Try To load it from HD
-      If *timg\Size > 0   
+      If *timg\Size > 0
         *timg\nImage = GetTileFromHDD(*PBMap, CacheFile.s)
       Else
         MyDebug(*PBMap, " Failed loading from HDD " + CacheFile + " -> Filesize = " + FileSize(CacheFile), 3)
@@ -1333,9 +1356,10 @@ Module PBMap
         If *PBMap\ThreadsNB < *PBMap\Options\MaxThreads
           If *PBMap\DownloadSlots < *PBMap\Options\MaxDownloadSlots        
             ; Launch a new web loading thread
-            *PBMap\DownloadSlots + 1
             Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
             If *NewTile
+              *timg\Tile = *NewTile ; There's now a loading thread
+              *timg\Alpha = 0
               With *NewTile 
                 ; New tile parameters
                 \key = key
@@ -1346,12 +1370,13 @@ Module PBMap
                 \Window = *PBMap\Window 
                 \Gadget = *PBMap\Gadget 
                 \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-                If \GetImageThread
-                  *timg\Tile = *NewTile ; There's now a loading thread
-                  *timg\Alpha = 0
+                If \GetImageThread                
                   MyDebug(*PBMap, " Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile + " (key = " + key, 3)
                   *PBMap\ThreadsNB + 1
+                  *PBMap\DownloadSlots + 1
                 Else
+                  ; Thread creation failed this time
+                  *timg\Tile = 0
                   MyDebug(*PBMap, " Can't create get image thread to get " + CacheFile, 3)
                   FreeMemory(*NewTile)
                 EndIf
@@ -3141,11 +3166,13 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 
-; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 2648
-; FirstLine = 2606
+; IDE Options = PureBasic 5.70 LTS (Windows - x64)
+; CursorPosition = 255
+; FirstLine = 227
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
+; EnableOnError
+; DisableDebugger
 ; CompileSourceDirectory
 ; DisablePurifier = 1,1,1,1
