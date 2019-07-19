@@ -1,18 +1,41 @@
-; ******************************************************************** 
+﻿; ********************************************************************
 ; Program:           PBMap
 ; Description:       Permits the use of tiled maps like 
 ;                    OpenStreetMap in a handy PureBASIC module
 ; Author:            Thyphoon, djes, Idle, yves86
-; Date:              June, 2018
+; Date:              July, 2019
 ; License:           PBMap : Free, unrestricted, credit 
 ;                    appreciated but not required.
 ; OSM :              see http://www.openstreetmap.org/copyright
 ; Note:              Please share improvement !
-; Thanks:            Progi1984
+; Thanks:            Progi1984, falsam
+; HowToRun:          Just compile this code, example is included
+; ********************************************************************
+;
+; Track bugs with the following options with debugger enabled (see in the example)
+;    PBMap::SetOption(#Map, "ShowDebugInfos", "1")
+;    PBMap::SetDebugLevel(5)
+;    PBMap::SetOption(#Map, "Verbose", "1")
+;
+; or with the OnError() PB capabilities :
+;    
+; CompilerIf #PB_Compiler_LineNumbering = #False
+;     MessageRequester("Warning !", "You must enable 'OnError lines support' in compiler options", #PB_MessageRequester_Ok )
+;   End
+; CompilerEndIf 
+; 
+; Declare ErrorHandler()
+; 
+; OnErrorCall(@ErrorHandler())
+; 
+; Procedure ErrorHandler()
+;   MessageRequester("Ooops", "The following error happened : " + ErrorMessage(ErrorCode()) + #CRLF$ +"line : " +  Str(ErrorLine()))
+; EndProcedure
+;
 ; ******************************************************************** 
 
 CompilerIf #PB_Compiler_Thread = #False
-  MessageRequester("Warning !", "You must enable ThreadSafe support in compiler options", #PB_MessageRequester_Ok )
+  MessageRequester("Warning !", "You must enable 'Create ThreadSafe Executable' in compiler options", #PB_MessageRequester_Ok )
   End
 CompilerEndIf 
 
@@ -29,7 +52,7 @@ UseJPEGImageEncoder()
 DeclareModule PBMap  
   
   #PBMAPNAME = "PBMap"
-  #PBMAPVERSION = "0.9"
+  #PBMAPVERSION = "0.91"
   #USERAGENT = #PBMAPNAME + "/" + #PBMAPVERSION + " (https://github.com/djes/PBMap)"
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Linux
@@ -57,10 +80,10 @@ DeclareModule PBMap
   EndStructure
   
  Structure Marker
-    GeographicCoordinates.GeographicCoordinates    ; Marker latitude and longitude
+    GeographicCoordinates.GeographicCoordinates    ; Marker's latitude and longitude
     Identifier.s
     Legend.s
-    Color.l                                        ; Marker color
+    Color.l                                        ; Marker's color
     Focus.i
     Selected.i                                     ; Is the marker selected ?
     CallBackPointer.i                              ; @Procedure(X.i, Y.i) to DrawPointer (you must use VectorDrawing lib)
@@ -511,20 +534,6 @@ Module PBMap
     EndIf
   EndProcedure
   
-  Procedure Pixel2LatLon(MapGadget.i, *Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
-    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected n.d = *PBMap\TileSize * Pow(2.0, Zoom)
-    ; Ensures the longitude to be in the range [-180; 180[
-    *Location\Longitude  = Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
-    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
-    If *Location\Latitude <= -89 
-      *Location\Latitude = -89 
-    EndIf
-    If *Location\Latitude >= 89
-      *Location\Latitude = 89 
-    EndIf
-  EndProcedure
-  
   ; Ensures the longitude to be in the range [-180; 180[
   Procedure.d ClipLongitude(Longitude.d)
     ProcedureReturn Mod(Mod(Longitude + 180, 360.0) + 360.0, 360.0) - 180
@@ -565,19 +574,37 @@ Module PBMap
     *Pixel\y = *PBMap\Drawing\RadiusY + (py - *PBMap\PixelCoordinates\y) 
   EndProcedure
   
+  Procedure Pixel2LatLon(MapGadget.i, *Coords.PixelCoordinates, *Location.GeographicCoordinates, Zoom)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    Protected n.d = *PBMap\TileSize * Pow(2.0, Zoom)
+    ; Ensures the longitude to be in the range [-180; 180[
+    *Location\Longitude  = Mod((1 + *Coords\x / n) * 360, 360) - 180 ; Mod(Mod(*Coords\x / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    *Location\Latitude = Degree(ATan(SinH(#PI * (1.0 - 2.0 * *Coords\y / n))))
+    If *Location\Latitude <= -89 
+      *Location\Latitude = -89 
+    EndIf
+    If *Location\Latitude >= 89
+      *Location\Latitude = 89 
+    EndIf
+  EndProcedure
+  
   Procedure.d Pixel2Lon(MapGadget.i, x)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected NewX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + x) / *PBMap\TileSize
-    Protected n.d = Pow(2.0, *PBMap\Zoom)
-    ; double mod is to ensure the longitude to be in the range [-180; 180[
-    ProcedureReturn Mod(Mod(NewX / n * 360.0, 360.0) + 360.0, 360.0) - 180
+    Protected n.d = *PBMap\TileSize * Pow(2.0, *PBMap\Zoom)
+    ProcedureReturn Mod((1 + x / n) * 360.0, 360.0) - 180
   EndProcedure
   
   Procedure.d Pixel2Lat(MapGadget.i, y)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected NewY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + y) / *PBMap\TileSize
-    Protected n.d = Pow(2.0, *PBMap\Zoom)
-    ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * NewY / n))))
+    Protected n.d = *PBMap\TileSize * Pow(2.0, *PBMap\Zoom)
+    Protected latitude.d = Degree(ATan(SinH(#PI * (1.0 - 2.0 * y / n))))
+    If latitude <= -89 
+      latitude = -89 
+    EndIf
+    If latitude >= 89
+      latitude = 89 
+    EndIf  
+    ProcedureReturn latitude  
   EndProcedure
   
   ; HaversineAlgorithm 
@@ -1114,7 +1141,7 @@ Module PBMap
   ; If cache size exceeds limit, try to delete the oldest tiles used (first in the time stack)
   Procedure MemoryCacheManagement(MapGadget.i)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    LockMutex(*PBMap\MemoryCacheAccessMutex) ; Prevents thread to start or finish
+    LockMutex(*PBMap\MemoryCacheAccessMutex) ; Prevents threads to start or finish
     Protected CacheSize = MapSize(*PBMap\MemCache\Images()) * Pow(*PBMap\TileSize, 2) * 4 ; Size of a tile = TileSize * TileSize * 4 bytes (RGBA) 
     Protected CacheLimit = *PBMap\Options\MaxMemCache * 1024
     MyDebug(*PBMap, "Cache size : " + Str(CacheSize/1024) + " / CacheLimit : " + Str(CacheLimit/1024), 5)
@@ -1154,10 +1181,30 @@ Module PBMap
     UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
+  ;- LoadImage workaround
+  ; by idle
+  ; Check that the PNG file is valid
+  Procedure _LoadImage(ImageNumber, File.s) 
+    Protected fn, pat, pos, res
+    If UCase(GetExtensionPart(File)) = "PNG"
+      pat = $444E4549
+      fn= ReadFile(#PB_Any, File) 
+      If fn 
+        pos = Lof(fn)
+        FileSeek(fn, pos - 8)
+        res = ReadLong(fn)
+        CloseFile(fn)
+        If res = pat 
+          ProcedureReturn LoadImage(ImageNumber, File)  
+        EndIf   
+      EndIf
+    EndIf
+  EndProcedure
+
   Procedure.i GetTileFromHDD(*PBMap.PBMap, CacheFile.s) ;Directly pass the PBMap structure (faster)
     Protected nImage.i, LifeTime.i, MaxLifeTime.i
       ; Everything is OK, loads the file
-      nImage = LoadImage(#PB_Any, CacheFile)
+      nImage = _LoadImage(#PB_Any, CacheFile)
       If nImage
         MyDebug(*PBMap, " Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
@@ -1201,7 +1248,7 @@ Module PBMap
   
   Threaded Progress = 0, Quit = #False
   
-  Procedure GetImageThread(*Tile.Tile)    
+  Procedure GetImageThread(*Tile.Tile)
     ;LockMutex(*PBMap\MemoryCacheAccessMutex)
     ;MyDebug(*PBMap, "Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " starting for image " + *Tile\CacheFile, 5)
     ; If MemoryCache is currently being cleaned, abort
@@ -1216,20 +1263,21 @@ Module PBMap
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
     *Tile\Size = 0
     *Tile\Download = ReceiveHTTPFile(*Tile\URL, *Tile\CacheFile, #PB_HTTP_Asynchronous, #USERAGENT)
+    ;TODO : obtain original file size to compare and eventually delete truncated file
     If *Tile\Download
       Repeat
         Progress = HTTPProgress(*Tile\Download)
         Select Progress
-          Case #PB_Http_Success
+          Case #PB_HTTP_Success
             *Tile\Size = FinishHTTP(*Tile\Download) ; \Size signals that the download is OK
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + " for image " + *Tile\CacheFile + " finished. Size : " + Str(*Tile\Size), 5)
             Quit = #True
-          Case #PB_Http_Failed
+          Case #PB_HTTP_Failed
             FinishHTTP(*Tile\Download)
             *Tile\Size = 0 ; \Size = 0 signals that the download has failed
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " failed.", 5)
             Quit = #True
-          Case #PB_Http_Aborted
+          Case #PB_HTTP_Aborted
             FinishHTTP(*Tile\Download)
             *Tile\Size = 0 ; \Size = 0 signals that the download has failed
             ;MyDebug(*PBMap, " Thread nb " + Str(*Tile\GetImageThread) + " " + *Tile\key + "  for image " + *Tile\CacheFile + " aborted.", 5)
@@ -1246,7 +1294,8 @@ Module PBMap
     EndIf
     ; End of the memory cache access
     ;LockMutex(*PBMap\MemoryCacheAccessMutex)
-    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) ; To free memory outside the thread
+    ; To free memory and eventually delete aborted image file outside the thread
+    PostEvent(#PB_Event_Gadget, *Tile\Window, *Tile\Gadget, #PB_MAP_TILE_CLEANUP, *Tile) 
     ;UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
@@ -1260,7 +1309,7 @@ Module PBMap
     Protected *timg.ImgMemCach = FindMapElement(*PBMap\MemCache\Images(), key)
     If *timg
       MyDebug(*PBMap, "Key : " + key + " found in memory cache", 4)
-      ; Is the associated image already been loaded in memory ?
+      ; Is the associated image already loaded in memory ?
       If *timg\nImage
         ; Yes, returns the image's nb
         MyDebug(*PBMap, " as image " + *timg\nImage, 4)
@@ -1298,73 +1347,71 @@ Module PBMap
       *PBMap\MemCache\ImagesTimeStack()\MapKey = MapKey(*PBMap\MemCache\Images())    
       MyDebug(*PBMap, "Key : " + key + " added in memory cache", 4)
     EndIf
-    ; If there's no active download thread for this tile
-    If *timg\Tile <= 0      
+    ; If there's no active downloading thread for this image
+    If *timg\Tile <= 0
       *timg\nImage = 0
-      *timg\Size = FileSize(CacheFile)        
-      ; Manage tile file lifetime, delete if too old, or if size = 0
-      If *PBMap\Options\TileLifetime <> -1 
-        If *timg\Size >= 0 ; Does the file exists ?
+      *timg\Size = FileSize(CacheFile) 
+      ; Does a valid file exists on HD ? Try to load it.
+      If *timg\Size >= 0
+        ; Manage tile file lifetime, delete if too old, or if size = 0  
+        If *PBMap\Options\TileLifetime <> -1         
           If *timg\Size = 0 Or (Date() - GetFileDate(CacheFile, #PB_Date_Modified) > *PBMap\Options\TileLifetime) ; If Lifetime > MaxLifeTime ; There's a bug with #PB_Date_Created
             If DeleteFile(CacheFile)
               MyDebug(*PBMap, "  Deleting image file  " + CacheFile, 3)
               *timg\Size = 0
             Else
               MyDebug(*PBMap, "  Can't delete image file  " + CacheFile, 3)
-              UnlockMutex(*PBMap\MemoryCacheAccessMutex)
-              ProcedureReturn #False
             EndIf
+            UnlockMutex(*PBMap\MemoryCacheAccessMutex)
+            ProcedureReturn #False
           EndIf
         EndIf
+        ; Try to load tile's image from HD
+        *timg\nImage = GetTileFromHDD(*PBMap, CacheFile.s)      
+        If *timg\nImage
+          ; Success : image found and loaded from HDD
+          *timg\Alpha = 0
+          UnlockMutex(*PBMap\MemoryCacheAccessMutex)
+          ProcedureReturn *timg
+        EndIf
       EndIf
-      ; Try To load it from HD
-      If *timg\Size > 0   
-        *timg\nImage = GetTileFromHDD(*PBMap, CacheFile.s)
-      Else
-        MyDebug(*PBMap, " Failed loading from HDD " + CacheFile + " -> Filesize = " + FileSize(CacheFile), 3)
-      EndIf
-      If *timg\nImage
-        ; Image found and loaded from HDD
-        *timg\Alpha = 0
-        UnlockMutex(*PBMap\MemoryCacheAccessMutex)
-        ProcedureReturn *timg
-      Else
-        ; If GetTileFromHDD failed, will load it (again?) from the web
-        If *PBMap\ThreadsNB < *PBMap\Options\MaxThreads
-          If *PBMap\DownloadSlots < *PBMap\Options\MaxDownloadSlots        
-            ; Launch a new web loading thread
-            *PBMap\DownloadSlots + 1
-            Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
-            If *NewTile
-              With *NewTile 
-                ; New tile parameters
-                \key = key
-                \URL = URL
-                \CacheFile = CacheFile
-                \nImage = 0 
-                \Time = ElapsedMilliseconds()
-                \Window = *PBMap\Window 
-                \Gadget = *PBMap\Gadget 
-                \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
-                If \GetImageThread
-                  *timg\Tile = *NewTile ; There's now a loading thread
-                  *timg\Alpha = 0
-                  MyDebug(*PBMap, " Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile + " (key = " + key, 3)
-                  *PBMap\ThreadsNB + 1
-                Else
-                  MyDebug(*PBMap, " Can't create get image thread to get " + CacheFile, 3)
-                  FreeMemory(*NewTile)
-                EndIf
-              EndWith
-            Else        
-              MyDebug(*PBMap, " Error, can't allocate memory for a new tile loading thread", 3)
-            EndIf            
-          Else
-            MyDebug(*PBMap, " Thread needed " + key + "  for image " + CacheFile + " canceled because no free download slot.", 5)
-          EndIf
+      ; If GetTileFromHDD failed, will try to download the image from the web in a thread
+      MyDebug(*PBMap, " Failed loading from HDD " + CacheFile + " -> Filesize = " + FileSize(CacheFile), 3)
+      If *PBMap\ThreadsNB < *PBMap\Options\MaxThreads
+        If *PBMap\DownloadSlots < *PBMap\Options\MaxDownloadSlots        
+          Protected *NewTile.Tile = AllocateMemory(SizeOf(Tile))
+          If *NewTile
+            *timg\Tile = *NewTile ; There's now a loading thread
+            *timg\Alpha = 0
+            With *NewTile 
+              ; New tile parameters
+              \key = key
+              \URL = URL
+              \CacheFile = CacheFile
+              \nImage = 0 
+              \Time = ElapsedMilliseconds()
+              \Window = *PBMap\Window 
+              \Gadget = *PBMap\Gadget 
+              \GetImageThread = CreateThread(@GetImageThread(), *NewTile)
+              If \GetImageThread                
+                MyDebug(*PBMap, " Creating get image thread nb " + Str(\GetImageThread) + " to get " + CacheFile + " (key = " + key, 3)
+                *PBMap\ThreadsNB + 1
+                *PBMap\DownloadSlots + 1
+              Else
+                ; Thread creation failed this time
+                *timg\Tile = 0
+                MyDebug(*PBMap, " Can't create get image thread to get " + CacheFile, 3)
+                FreeMemory(*NewTile)
+              EndIf
+            EndWith
+          Else        
+            MyDebug(*PBMap, " Error, can't allocate memory for a new tile loading thread", 3)
+          EndIf            
         Else
-          MyDebug(*PBMap, " Error, maximum threads nb reached", 3)
+          MyDebug(*PBMap, " Thread needed " + key + "  for image " + CacheFile + " canceled because no free download slot.", 5)
         EndIf
+      Else
+        MyDebug(*PBMap, " Error, maximum threads nb reached", 3)
       EndIf
     EndIf
     UnlockMutex(*PBMap\MemoryCacheAccessMutex)
@@ -2079,20 +2126,30 @@ Module PBMap
   
   ;-*** Misc functions
   
-  Procedure.d GetMouseLongitude(MapGadget.i)
+  Procedure.d GetCanvasPixelLon(MapGadget.i, x)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected MouseX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseX)) / *PBMap\TileSize
+    Protected MouseX.d = (*PBMap\PixelCoordinates\x - *PBMap\Drawing\RadiusX + x) / *PBMap\TileSize
     Protected n.d = Pow(2.0, *PBMap\Zoom)
     ; double mod is to ensure the longitude to be in the range [-180; 180[
     ProcedureReturn Mod(Mod(MouseX / n * 360.0, 360.0) + 360.0, 360.0) - 180
   EndProcedure
   
-  Procedure.d GetMouseLatitude(MapGadget.i)
+  Procedure.d GetCanvasPixelLat(MapGadget.i, y)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
-    Protected MouseY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseY)) / *PBMap\TileSize
+    Protected MouseY.d = (*PBMap\PixelCoordinates\y - *PBMap\Drawing\RadiusY + y) / *PBMap\TileSize
     Protected n.d = Pow(2.0, *PBMap\Zoom)
     ProcedureReturn Degree(ATan(SinH(#PI * (1.0 - 2.0 * MouseY / n))))
   EndProcedure
+
+  Procedure.d GetMouseLongitude(MapGadget.i)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    ProcedureReturn GetCanvasPixelLon(MapGadget.i, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseX))
+  EndProcedure
+  
+  Procedure.d GetMouseLatitude(MapGadget.i)
+    Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
+    ProcedureReturn GetCanvasPixelLat(MapGadget.i, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_MouseY))
+  EndProcedure 
   
   Procedure SetLocation(MapGadget.i, latitude.d, longitude.d, Zoom = -1, Mode.i = #PB_Absolute)
     Protected *PBMap.PBMap = PBMaps(Str(MapGadget))
@@ -2510,7 +2567,12 @@ Module PBMap
         Else
           ; Absolute zoom (centered on the center of the map)
           SetZoom(MapGadget, GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_WheelDelta), #PB_Relative)
-        EndIf        
+        EndIf
+;       Case #PB_EventType_RightClick
+;         Debug GetMouseLongitude(MapGadget)
+;         Debug GetMouseLatitude(MapGadget)
+;         Debug GetCanvasPixelLon(MapGadget, CanvasMouseX + *PBMap\Drawing\RadiusX)
+;         Debug GetCanvasPixelLat(MapGadget, CanvasMouseY + *PBMap\Drawing\RadiusY)
       Case #PB_EventType_LeftButtonDown
         ; LatLon2Pixel(@*PBMap\GeographicCoordinates, @*PBMap\PixelCoordinates, *PBMap\Zoom)
         *PBMap\Dragging = #True
@@ -2543,14 +2605,14 @@ Module PBMap
             EndIf
           Next
         EndIf
-        ; YA pour sélectionner un point de la trace avec le clic gauche
+        ; YA To select a track with LMB
         If *PBMap\EditMarker = #False 
           Location\Latitude = GetMouseLatitude(MapGadget)
           Location\Longitude = GetMouseLongitude(MapGadget)
           If *PBMap\CallBackLeftClic > 0
             CallFunctionFast(*PBMap\CallBackLeftClic, @Location)
           EndIf 
-          ; ajout YA // change la forme du pointeur de souris pour les déplacements de la carte
+          ; ajout YA // Mouse pointer when moving map
           SetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Hand)
         Else
           SetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_Cursor, #PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
@@ -2608,7 +2670,7 @@ Module PBMap
               EndIf
             Next
             ; Check if mouse touch tracks           
-            If *PBMap\Options\ShowTrackSelection ; YA ajout pour éviter la sélection de la trace
+            If *PBMap\Options\ShowTrackSelection ; YA to avoid selecting track
               With *PBMap\TracksList()
                 ; Trace Track
                 If ListSize(*PBMap\TracksList()) > 0
@@ -2642,11 +2704,11 @@ Module PBMap
           EndIf
         EndIf
       Case #PB_EventType_LeftButtonUp
-        SetGadgetAttribute(*PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ; ajout YA pour remettre le pointeur souris en normal
-                                                                               ; *PBMap\MoveStartingPoint\x = - 1
+        SetGadgetAttribute(*PBMap\Gadget,#PB_Canvas_Cursor,#PB_Cursor_Default) ;  YA normal mouse pointer
+        ; *PBMap\MoveStartingPoint\x = - 1
         *PBMap\Dragging = #False
         *PBMap\Redraw = #True
-        ;YA pour connaitre les coordonnées d'un marqueur après déplacement
+        ;YA to knows marker coordinates after moving
         ForEach *PBMap\Markers()
           If *PBMap\Markers()\Selected = #True
             If *PBMap\CallBackMarker > 0
@@ -2658,18 +2720,21 @@ Module PBMap
         *PBMap\Redraw = #True
       Case #PB_MAP_RETRY
         *PBMap\Redraw = #True
-        ;- #PB_MAP_TILE_CLEANUP : Tile web loading thread cleanup 
-        ; After a Web tile loading thread, clean the tile structure memory, see GetImageThread()
+        ;- *** Tile web loading thread cleanup 
+        ; After a Web tile loading thread, cleans the tile structure memory, see GetImageThread()
       Case #PB_MAP_TILE_CLEANUP
+        LockMutex(*PBMap\MemoryCacheAccessMutex) ; Prevents threads to start or finish
         *Tile = EventData() 
         key = *Tile\key           
         *Tile\Download = 0
         If FindMapElement(*PBMap\MemCache\Images(), key) <> 0
           ; If the map element has not been deleted during the thread lifetime (should not occur)
-          *PBMap\MemCache\Images(key)\Tile = *Tile\Size
+          ;*PBMap\MemCache\Images(key)\Tile = *Tile\Size
           If *Tile\Size
+            ;TODO : check if file size = server file size
+            ;and eventually use pngcheck to avoid problematic files http://www.libpng.org/pub/png/apps/pngcheck.html
             *PBMap\MemCache\Images(key)\Tile = -1 ; Web loading thread has finished successfully
-                                                  ;- Allows to post edit the tile image file with a customised code
+            ; Allows to post edit the tile image file with a customised code
             If *PBMap\CallBackModifyTileFile
               TileNewFilename = *PBMap\CallBackModifyTileFile(*Tile\CacheFile, *Tile\URL)
               If TileNewFilename
@@ -2679,16 +2744,22 @@ Module PBMap
             EndIf
           Else
             *PBMap\MemCache\Images(key)\Tile = 0
+            If DeleteFile(*Tile\CacheFile)
+              MyDebug(*PBMap, "  Deleting not fully loaded image file  " + *Tile\CacheFile, 3)
+            Else
+              MyDebug(*PBMap, "  Can't delete not fully loaded image file  " + *Tile\CacheFile, 3)
+            EndIf
           EndIf
         EndIf
         FreeMemory(*Tile)                                       ; Frees the data needed for the thread (*tile=*PBMap\MemCache\Images(key)\Tile)
         *PBMap\ThreadsNB - 1
         *PBMap\DownloadSlots - 1
         *PBMap\Redraw = #True
+        UnlockMutex(*PBMap\MemoryCacheAccessMutex)
     EndSelect
   EndProcedure
   
-  ; Redraws at regular intervals
+  ;-*** Main timer : Cache management and drawing
   Procedure TimerEvents()
     Protected *PBMap.PBMap
     ForEach PBMaps()
@@ -3140,12 +3211,9 @@ CompilerIf #PB_Compiler_IsMainFile
   
 CompilerEndIf
 
-
-; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 2751
-; FirstLine = 2744
+; IDE Options = PureBasic 5.70 LTS (Windows - x64)
+; CursorPosition = 1185
+; FirstLine = 1171
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
-; CompileSourceDirectory
-; DisablePurifier = 1,1,1,1
