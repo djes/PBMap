@@ -1183,7 +1183,7 @@ Module PBMap
   
   ;- LoadImage workaround
   ; by idle
-  ; Check that the file is valid
+  ; Check that the PNG file is valid
   Procedure _LoadImage(ImageNumber, File.s) 
     Protected fn, pat, pos, res
     If UCase(GetExtensionPart(File)) = "PNG"
@@ -3212,8 +3212,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 2962
-; FirstLine = 2945
+; CursorPosition = 1185
+; FirstLine = 1171
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
