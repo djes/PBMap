@@ -1181,10 +1181,30 @@ Module PBMap
     UnlockMutex(*PBMap\MemoryCacheAccessMutex)
   EndProcedure
   
+  ;- LoadImage workaround
+  ; by idle
+  ; Check that the file is valid
+  Procedure _LoadImage(ImageNumber, File.s) 
+    Protected fn, pat, pos, res
+    If UCase(GetExtensionPart(File)) = "PNG"
+      pat = $444E4549
+      fn= ReadFile(#PB_Any, File) 
+      If fn 
+        pos = Lof(fn)
+        FileSeek(fn, pos - 8)
+        res = ReadLong(fn)
+        CloseFile(fn)
+        If res = pat 
+          ProcedureReturn LoadImage(ImageNumber, File)  
+        EndIf   
+      EndIf
+    EndIf
+  EndProcedure
+
   Procedure.i GetTileFromHDD(*PBMap.PBMap, CacheFile.s) ;Directly pass the PBMap structure (faster)
     Protected nImage.i, LifeTime.i, MaxLifeTime.i
       ; Everything is OK, loads the file
-      nImage = LoadImage(#PB_Any, CacheFile)
+      nImage = _LoadImage(#PB_Any, CacheFile)
       If nImage
         MyDebug(*PBMap, " Success loading " + CacheFile + " as nImage " + Str(nImage), 3)
         ProcedureReturn nImage  
@@ -3192,8 +3212,8 @@ CompilerIf #PB_Compiler_IsMainFile
 CompilerEndIf
 
 ; IDE Options = PureBasic 5.70 LTS (Windows - x64)
-; CursorPosition = 2714
-; FirstLine = 2702
+; CursorPosition = 2962
+; FirstLine = 2945
 ; Folding = ---------------------
 ; EnableThread
 ; EnableXP
