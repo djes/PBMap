@@ -14,6 +14,13 @@
 ; ****************************************************************
 XIncludeFile "PBMap.pb"
 
+CompilerIf #PB_Compiler_Thread = #False
+  MessageRequester("Warning !", "You must enable 'Create ThreadSafe Executable' in compiler options", #PB_MessageRequester_Ok )
+  End
+CompilerEndIf 
+
+EnableExplicit
+
 InitNetwork()
 
 Enumeration
@@ -360,9 +367,8 @@ If OpenWindow(#Window_0, 260, 225, 720, 595, "PBMap", #PB_Window_SystemMenu | #P
   PBMap::FreeMapGadget(#Map)
   PBMap::FreeMapGadget(#Map2_Canvas)
 EndIf
-; IDE Options = PureBasic 5.61 (Windows - x64)
-; CursorPosition = 241
-; FirstLine = 198
+; IDE Options = PureBasic 5.73 LTS (Windows - x64)
+; CursorPosition = 21
 ; Folding = --
 ; EnableThread
 ; EnableXP
