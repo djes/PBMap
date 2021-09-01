@@ -2037,7 +2037,7 @@ Module PBMap
     Protected Text.s = "© OpenStreetMap contributors"
     VectorFont(FontID(*PBMap\StandardFont), 12)
     VectorSourceColor(RGBA(0, 0, 0, 80))
-    MovePathCursor(GadgetWidth(*PBMap\Gadget) - VectorTextWidth(Text), GadgetHeight(*PBMap\Gadget) - 20)
+    MovePathCursor(DesktopScaledX(GadgetWidth(*PBMap\Gadget)) - VectorTextWidth(Text), GadgetHeight(*PBMap\Gadget) - 20)
     DrawVectorText(Text)
   EndProcedure
   
@@ -2052,8 +2052,8 @@ Module PBMap
     *PBMap\Dirty = #False
     *PBMap\Redraw = #False
     ; *** Precalc some values
-    *Drawing\RadiusX = GadgetWidth(*PBMap\Gadget) / 2
-    *Drawing\RadiusY = GadgetHeight(*PBMap\Gadget) / 2
+    *Drawing\RadiusX = DesktopScaledX(GadgetWidth(*PBMap\Gadget)) / 2
+    *Drawing\RadiusY = DesktopScaledY(GadgetHeight(*PBMap\Gadget)) / 2
     *Drawing\GeographicCoordinates\Latitude = *PBMap\GeographicCoordinates\Latitude
     *Drawing\GeographicCoordinates\Longitude = *PBMap\GeographicCoordinates\Longitude
     LatLon2TileXY(*Drawing\GeographicCoordinates, *Drawing\TileCoordinates, *PBMap\Zoom)
@@ -2107,10 +2107,10 @@ Module PBMap
       DrawDebugInfos(MapGadget, *Drawing)
     EndIf
     If *PBMap\Options\ShowScale
-      DrawScale(MapGadget, *Drawing, 10, GadgetHeight(*PBMap\Gadget) - 20, 192)
+      DrawScale(MapGadget, *Drawing, 10, DesktopScaledY(GadgetHeight(*PBMap\Gadget)) - 20, 192)
     EndIf
     If *PBMap\Options\ShowZoom
-      DrawZoom(MapGadget, GadgetWidth(*PBMap\Gadget) - 30, 5) ; ajout YA - affiche le niveau de zoom
+      DrawZoom(MapGadget, DesktopScaledX(GadgetWidth(*PBMap\Gadget)) - 30, 5) ; ajout YA - affiche le niveau de zoom
     EndIf
     If OSMCopyright
       DrawOSMCopyright(MapGadget, *Drawing)
@@ -2490,8 +2490,8 @@ Module PBMap
     ; StopVectorDrawing()
     Select EventType()
       Case #PB_EventType_Focus
-        *PBMap\Drawing\RadiusX = GadgetWidth(*PBMap\Gadget) / 2
-        *PBMap\Drawing\RadiusY = GadgetHeight(*PBMap\Gadget) / 2
+        *PBMap\Drawing\RadiusX = DesktopScaledX(GadgetWidth(*PBMap\Gadget)) / 2
+        *PBMap\Drawing\RadiusY = DesktopScaledY(GadgetHeight(*PBMap\Gadget)) / 2
       Case #PB_EventType_KeyUp  
         Select GetGadgetAttribute(*PBMap\Gadget, #PB_Canvas_Key)
           Case #PB_Shortcut_Delete
@@ -2808,8 +2808,8 @@ Module PBMap
     BindGadgetEvent(*PBMap\Gadget, @CanvasEvents())
     AddWindowTimer(*PBMap\Window, *PBMap\Timer, *PBMap\Options\TimerInterval)
     BindEvent(#PB_Event_Timer, @TimerEvents())
-    *PBMap\Drawing\RadiusX = GadgetWidth(*PBMap\Gadget) / 2
-    *PBMap\Drawing\RadiusY = GadgetHeight(*PBMap\Gadget) / 2
+    *PBMap\Drawing\RadiusX = DesktopScaledX(GadgetWidth(*PBMap\Gadget)) / 2
+    *PBMap\Drawing\RadiusY = DesktopScaledY(GadgetHeight(*PBMap\Gadget)) / 2
   EndProcedure
   
   ; Creates a canvas and attach our map
@@ -2873,8 +2873,10 @@ EndModule
 
  
 
-; IDE Options = PureBasic 5.73 LTS (Windows - x64)
-; CursorPosition = 35
+
+; IDE Options = PureBasic 6.00 Alpha 3 (Windows - x64)
+; CursorPosition = 2657
+; FirstLine = 766
 ; Folding = --------------------
 ; EnableThread
 ; EnableXP
